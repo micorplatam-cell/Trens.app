@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "TRENS",
-    "slug": "trens-dev",
+    "slug": "trens",
     "version": "1.0.1",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
