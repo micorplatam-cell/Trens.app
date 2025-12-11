@@ -3,17 +3,18 @@ import { Slot } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { View } from 'react-native';
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { Session } from '@supabase/supabase-js';
+import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import '../global.css';
 
 // 1. AuthProvider
 interface AuthContextType {
   session: Session | null;
+  user: User | null;
   loading: boolean;
 }
 
-const AuthContext = createContext<AuthContextType>({ session: null, loading: true });
+const AuthContext = createContext<AuthContextType>({ session: null, user: null, loading: true });
 
 export const useAuth = () => useContext(AuthContext);
 
@@ -36,7 +37,11 @@ const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     return () => subscription.unsubscribe();
   }, []);
 
-  return <AuthContext.Provider value={{ session, loading }}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={{ session, user: session?.user ?? null, loading }}>
+      {children}
+    </AuthContext.Provider>
+  );
 };
 
 // 2. SportProvider (Placeholder)
