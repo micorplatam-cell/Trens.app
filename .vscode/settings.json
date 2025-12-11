@@ -1,0 +1,27 @@
+{
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.tabSize": 2,
+  "files.autoSave": "afterDelay",
+  "files.autoSaveDelay": 1000,
+  
+  // 🔥 TRUCO PRO: Hacer que Tailwind funcione en React Native
+  "tailwindCSS.includeLanguages": {
+    "typescript": "javascript",
+    "typescriptreact": "javascript"
+  },
+  "tailwindCSS.classAttributes": ["className", "tw", "style"],
+  "tailwindCSS.experimental.classRegex": [
+    ["t\\.style\\(([^)]*)\\)", "'([^']*)'"],
+    ["className=['\"]([^'\"]*)['\"]"]
+  ],
+
+  // 🤖 COPILOT PRO MODES
+  "github.copilot.editor.enableAutoCompletions": true,
+  "github.copilot.advanced.messages": [
+    {
+      "role": "system",
+      "content": "Eres un experto Senior en React Native, Expo y Supabase. Responde siempre en Español. Prioriza el rendimiento y el diseño 'Savage Mode' (Dark UI)."
+    }
+  ]
+}
