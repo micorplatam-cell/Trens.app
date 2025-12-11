@@ -1,8 +1,8 @@
 {
   "expo": {
     "name": "TRENS",
-    "slug": "trens",
-    "version": "1.0.0",
+    "slug": "trens-dev",
+    "version": "1.0.1",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "assetBundlePatterns": ["**/*"],
@@ -18,7 +18,7 @@
     },
     "web": {},
     "plugins": ["expo-router"],
-    "scheme": "trens",
+    "scheme": "trensdev",
     "sdkVersion": "54.0.0",
     "experiments": {
       "typedRoutes": true
