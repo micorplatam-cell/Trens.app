@@ -23,7 +23,6 @@
     "expo-linking": "~8.0.10",
     "expo-router": "~6.0.17",
     "expo-status-bar": "~3.0.9",
-    "expo-updates": "~29.0.15",
     "lucide-react-native": "latest",
     "nativewind": "^4.0.1",
     "react": "19.1.0",

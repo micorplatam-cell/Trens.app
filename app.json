@@ -32,13 +32,6 @@
       },
       "supabaseUrl": "https://bzlgrukmkrftqpvpbpkj.supabase.co",
       "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ6bGdydWtta3JmdHFwdnBicGtqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ1NTY4MDgsImV4cCI6MjA4MDEzMjgwOH0.vDB1_r6CLCH4lQn8l67Motd29UWdnqgM0O6IH0cQu9c"
-    },
-    "runtimeVersion": {
-      "policy": "sdkVersion"
-    },
-    "updates": {
-      "enabled": false,
-      "fallbackToCacheTimeout": 0
     }
   }
 }
