@@ -1,0 +1,31 @@
+# Supabase Configuration for TRENS App
+# This connects to your CLOUD Supabase project
+
+project_id = "bzlgrukmkrftqpvpbpkj"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[auth]
+enabled = true
+site_url = "https://bzlgrukmkrftqpvpbpkj.supabase.co"
+additional_redirect_urls = ["trens://"]
+jwt_expiry = 3600
+enable_signup = true
+
+[auth.external.google]
+enabled = false
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[studio]
+enabled = true
+port = 54323
+api_url = "https://bzlgrukmkrftqpvpbpkj.supabase.co"
