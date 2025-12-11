@@ -1,0 +1,13 @@
+{
+  "recommendations": [
+    "bradlc.vscode-tailwindcss",
+    "dbaeumer.vscode-eslint",
+    "esbenp.prettier-vscode",
+    "expo.vscode-expo-tools",
+    "supabase.vscode-supabase",
+    "formulahendry.auto-rename-tag",
+    "usernamehw.errorlens",
+    "wix.vscode-import-cost",
+    "ms-vscode.vscode-typescript-next"
+  ]
+}

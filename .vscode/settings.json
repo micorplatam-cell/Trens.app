@@ -4,8 +4,14 @@
   "editor.tabSize": 2,
   "files.autoSave": "afterDelay",
   "files.autoSaveDelay": 1000,
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+  "editor.quickSuggestions": {
+    "strings": true
+  },
 
-  // 🔥 TRUCO PRO: Hacer que Tailwind funcione en React Native
+  // 🔥 Tailwind CSS para React Native
   "tailwindCSS.includeLanguages": {
     "typescript": "javascript",
     "typescriptreact": "javascript"
@@ -13,10 +19,11 @@
   "tailwindCSS.classAttributes": ["className", "tw", "style"],
   "tailwindCSS.experimental.classRegex": [
     ["t\\.style\\(([^)]*)\\)", "'([^']*)'"],
-    ["className=['\"]([^'\"]*)['\"]"]
+    ["className=['\"]([^'\"]*)['\"]"],
+    ["className={['\"]([^'\"]*)['\"]"]
   ],
 
-  // 🤖 COPILOT PRO MODES
+  // 🤖 GitHub Copilot
   "github.copilot.editor.enableAutoCompletions": true,
   "github.copilot.advanced.messages": [
     {
@@ -25,7 +32,34 @@
     }
   ],
 
-  // 🔥 SUPABASE: Usar proyecto en la nube, no local
+  // 🔥 TypeScript
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+  "typescript.suggest.autoImports": true,
+  "javascript.suggest.autoImports": true,
+
+  // 🔥 Supabase
   "supabase.projectId": "bzlgrukmkrftqpvpbpkj",
-  "supabase.projectRef": "bzlgrukmkrftqpvpbpkj"
-}
+  "supabase.projectRef": "bzlgrukmkrftqpvpbpkj",
+
+  // 🔥 Files
+  "files.associations": {
+    "*.css": "tailwindcss"
+  },
+  "files.exclude": {
+    "**/.expo": true,
+    "**/node_modules": true,
+    "**/.git": true
+  },
+
+  // 🔥 ErrorLens (errores inline)
+  "errorLens.enabled": true,
+  "errorLens.fontSize": "12px",
+
+  // 🔥 Prettier
+  "[typescriptreact]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[typescript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  }

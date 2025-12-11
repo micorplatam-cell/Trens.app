@@ -6,7 +6,13 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "lint": "eslint . --ext .ts,.tsx",
+    "lint:fix": "eslint . --ext .ts,.tsx --fix",
+    "type-check": "tsc --noEmit",
+    "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
+    "clean": "rm -rf node_modules .expo dist",
+    "reset": "npm run clean && npm install"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
@@ -33,9 +39,13 @@
   "devDependencies": {
     "@babel/core": "^7.20.0",
     "@types/react": "~19.1.10",
+    "@typescript-eslint/eslint-plugin": "^8.49.0",
+    "@typescript-eslint/parser": "^8.49.0",
     "babel-preset-expo": "^54.0.8",
     "eas-cli": "^16.28.0",
+    "eslint-config-expo": "^10.0.0",
     "postcss": "^8.4.0",
+    "prettier": "^3.7.4",
     "tailwindcss": "^3.4.0",
     "typescript": "^5.1.3"
   },
