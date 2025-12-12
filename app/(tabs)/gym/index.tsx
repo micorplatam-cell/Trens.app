@@ -1,4 +1,11 @@
-import { View, Text, TouchableOpacity, ActivityIndicator, FlatList, Dimensions } from 'react-native';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  ActivityIndicator,
+  FlatList,
+  Dimensions,
+} from 'react-native';
 import { Image } from 'expo-image';
 import { FlashList } from '@shopify/flash-list';
 import React, { useState, useEffect } from 'react';
@@ -38,10 +45,18 @@ export default function GymScreen() {
   }, []);
 
   const loadExercises = async () => {
-    if (!user) return;
+    if (!user) {
+      console.log('❌ No user found');
+      return;
+    }
 
+    console.log('✅ User authenticated:', user.id);
     setLoading(true);
     try {
+      // Verificar sesión
+      const { data: sessionData } = await supabase.auth.getSession();
+      console.log('📱 Session active:', !!sessionData.session);
+
       const { data, error } = await supabase
         .from('user_assets')
         .select('*')
@@ -49,7 +64,12 @@ export default function GymScreen() {
         .eq('asset_type', 'gym_exercise')
         .order('order', { ascending: true });
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Supabase error:', error);
+        throw error;
+      }
+
+      console.log('✅ Data loaded:', data?.length || 0, 'exercises');
 
       if (data && data.length > 0) {
         const mappedExercises: Exercise[] = data.map((item) => ({
@@ -62,10 +82,11 @@ export default function GymScreen() {
         setExercises(mappedExercises);
         setViewMode('FOCUS');
       } else {
+        console.log('📋 No exercises found, showing STRUCTURE mode');
         setViewMode('STRUCTURE');
       }
     } catch (error) {
-      console.error('Error loading exercises:', error);
+      console.error('💥 Error loading exercises:', error);
       setViewMode('STRUCTURE');
     } finally {
       setLoading(false);
@@ -235,7 +256,10 @@ export default function GymScreen() {
         showsHorizontalScrollIndicator={false}
         estimatedItemSize={SCREEN_WIDTH}
         renderItem={({ item, index }) => (
-          <View className="justify-center items-center" style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT }}>
+          <View
+            className="justify-center items-center"
+            style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT }}
+          >
             {/* IMAGE */}
             <Image
               source={{ uri: item.image_url }}
@@ -248,9 +272,7 @@ export default function GymScreen() {
             <View className="absolute bottom-20 left-0 right-0 bg-black/90 p-6">
               <View className="flex-row items-center mb-3">
                 <View className="bg-savage-red rounded-full w-12 h-12 justify-center items-center mr-4">
-                  <Text className="text-savage-text font-bold text-xl font-mono">
-                    {index + 1}
-                  </Text>
+                  <Text className="text-savage-text font-bold text-xl font-mono">{index + 1}</Text>
                 </View>
                 <View className="flex-1">
                   <Text className="text-savage-text text-2xl font-bold mb-1">{item.name}</Text>
