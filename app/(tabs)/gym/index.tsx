@@ -13,7 +13,17 @@ import { FlashList } from '@shopify/flash-list';
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { useAuth } from '../../_layout';
-import { Sliders, Plus, Trash2, X, Clock, Music, Sparkles, Timer, Edit3 } from 'lucide-react-native';
+import {
+  Sliders,
+  Plus,
+  Trash2,
+  X,
+  Clock,
+  Music,
+  Sparkles,
+  Timer,
+  Edit3,
+} from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 
 // ============================================================================
@@ -64,6 +74,17 @@ export default function GymScreen() {
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
   const [adding, setAdding] = useState(false);
+
+  // Timer State
+  const [timerExpanded, setTimerExpanded] = useState(false);
+  const [timerActive, setTimerActive] = useState(false);
+  const [timeRemaining, setTimeRemaining] = useState(0);
+
+  // Modals State
+  const [spotifyModalVisible, setSpotifyModalVisible] = useState(false);
+  const [axisModalVisible, setAxisModalVisible] = useState(false);
+  const [notesModalVisible, setNotesModalVisible] = useState(false);
+  const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
 
   // ============================================================================
   // FETCH EXERCISES FROM SUPABASE
@@ -125,7 +146,7 @@ export default function GymScreen() {
 
   const loadTemplates = async () => {
     try {
-      const { data, error} = await supabase
+      const { data, error } = await supabase
         .from('asset_templates')
         .select('*')
         .eq('asset_type', 'gym_exercise')
@@ -194,6 +215,33 @@ export default function GymScreen() {
       minute: '2-digit',
       hour12: true,
     });
+  };
+
+  // ============================================================================
+  // TIMER FUNCTIONS
+  // ============================================================================
+  const startTimer = (minutes: number) => {
+    setTimeRemaining(minutes * 60);
+    setTimerActive(true);
+    setTimerExpanded(false);
+
+    const interval = setInterval(() => {
+      setTimeRemaining((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          setTimerActive(false);
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  const formatTime = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   // ============================================================================
@@ -452,6 +500,107 @@ export default function GymScreen() {
   }
 
   // ============================================================================
+  // RENDER MODALS
+  // ============================================================================
+  const renderNotesModal = () => (
+    <Modal
+      visible={notesModalVisible}
+      animationType="slide"
+      transparent={true}
+      onRequestClose={() => setNotesModalVisible(false)}
+    >
+      <View className="flex-1 bg-black/95 justify-center px-6">
+        <View className="bg-zinc-900 rounded-2xl p-6 border border-zinc-800">
+          <Text className="text-savage-text text-2xl font-bold mb-4">NOTAS</Text>
+          <Text className="text-zinc-500 text-sm mb-4">
+            Ejercicio: {exercises[currentExerciseIndex]?.name}
+          </Text>
+          
+          <View className="bg-black border border-zinc-800 rounded-lg p-4 mb-4 min-h-32">
+            <Text className="text-zinc-600 text-sm">Toca para agregar notas...</Text>
+          </View>
+
+          <TouchableOpacity
+            onPress={() => setNotesModalVisible(false)}
+            className="bg-savage-red p-4 rounded-lg items-center"
+          >
+            <Text className="text-savage-text font-bold">GUARDAR</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+
+  const renderSpotifyModal = () => (
+    <Modal
+      visible={spotifyModalVisible}
+      animationType="fade"
+      transparent={true}
+      onRequestClose={() => setSpotifyModalVisible(false)}
+    >
+      <View className="flex-1 bg-black/90 justify-center px-6">
+        <View className="bg-zinc-900 rounded-2xl p-6 border border-green-500">
+          <View className="flex-row justify-between items-center mb-6">
+            <Text className="text-savage-text text-2xl font-bold">SPOTIFY</Text>
+            <TouchableOpacity onPress={() => setSpotifyModalVisible(false)}>
+              <X color="#FFFFFF" size={24} />
+            </TouchableOpacity>
+          </View>
+
+          <View className="items-center py-8">
+            <Music color="#1DB954" size={64} />
+            <Text className="text-zinc-500 text-center mt-4">
+              Conecta tu cuenta de Spotify{'\n'}para controlar la música
+            </Text>
+          </View>
+
+          <TouchableOpacity className="bg-green-500 p-4 rounded-lg items-center">
+            <Text className="text-black font-bold">CONECTAR SPOTIFY</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+
+  const renderAxisModal = () => (
+    <Modal
+      visible={axisModalVisible}
+      animationType="slide"
+      transparent={true}
+      onRequestClose={() => setAxisModalVisible(false)}
+    >
+      <View className="flex-1 bg-black/95">
+        <View className="flex-1 px-6 pt-16">
+          <View className="flex-row justify-between items-center mb-6">
+            <Text className="text-savage-red text-2xl font-bold">AXIS IA</Text>
+            <TouchableOpacity onPress={() => setAxisModalVisible(false)}>
+              <X color="#DC2626" size={24} />
+            </TouchableOpacity>
+          </View>
+
+          <View className="flex-1 bg-zinc-900 rounded-2xl p-4 border border-savage-red">
+            <Text className="text-zinc-500 text-sm mb-4">
+              Contexto: {exercises[currentExerciseIndex]?.name}
+            </Text>
+            <Text className="text-zinc-600">
+              Hola, soy AXIS. ¿En qué puedo ayudarte con este ejercicio?
+            </Text>
+          </View>
+
+          <View className="flex-row mt-4 gap-2">
+            <View className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg p-4">
+              <Text className="text-zinc-600">Escribe tu pregunta...</Text>
+            </View>
+            <TouchableOpacity className="bg-savage-red p-4 rounded-lg">
+              <Text className="text-savage-text font-bold">→</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+
+  // ============================================================================
   // RENDER FOCUS MODE (VERTICAL SCROLL - TIKTOK STYLE)
   // ============================================================================
   return (
@@ -475,17 +624,66 @@ export default function GymScreen() {
       {/* HUD TÁCTICO (Flotante Derecha) */}
       <View className="absolute right-4 top-32 z-40 gap-4">
         {/* TIMER */}
-        <TouchableOpacity className="bg-black/80 p-4 rounded-full border border-zinc-800">
-          <Timer color="#FFFFFF" size={24} />
-        </TouchableOpacity>
+        <View>
+          {timerActive ? (
+            // Cuenta regresiva activa
+            <View className="bg-black/90 p-4 rounded-full border-2 border-savage-red items-center justify-center">
+              <Text className="text-savage-red font-mono font-bold text-sm">
+                {formatTime(timeRemaining)}
+              </Text>
+            </View>
+          ) : timerExpanded ? (
+            // Burbujas desplegadas
+            <View className="flex-row gap-2 bg-black/90 px-3 py-2 rounded-full border border-zinc-800">
+              <TouchableOpacity
+                onPress={() => startTimer(1)}
+                className="bg-zinc-800 px-3 py-2 rounded-full"
+              >
+                <Text className="text-savage-text text-xs font-bold">1m</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => startTimer(2)}
+                className="bg-zinc-800 px-3 py-2 rounded-full"
+              >
+                <Text className="text-savage-text text-xs font-bold">2m</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => startTimer(3)}
+                className="bg-zinc-800 px-3 py-2 rounded-full"
+              >
+                <Text className="text-savage-text text-xs font-bold">3m</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setTimerExpanded(false)}
+                className="bg-savage-red px-3 py-2 rounded-full"
+              >
+                <Text className="text-savage-text text-xs font-bold">+</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            // Icono normal
+            <TouchableOpacity
+              onPress={() => setTimerExpanded(true)}
+              className="bg-black/80 p-4 rounded-full border border-zinc-800"
+            >
+              <Timer color="#FFFFFF" size={24} />
+            </TouchableOpacity>
+          )}
+        </View>
 
         {/* SPOTIFY */}
-        <TouchableOpacity className="bg-black/80 p-4 rounded-full border border-zinc-800">
+        <TouchableOpacity
+          onPress={() => setSpotifyModalVisible(true)}
+          className="bg-black/80 p-4 rounded-full border border-zinc-800"
+        >
           <Music color="#1DB954" size={24} />
         </TouchableOpacity>
 
         {/* AXIS */}
-        <TouchableOpacity className="bg-black/80 p-4 rounded-full border border-savage-red">
+        <TouchableOpacity
+          onPress={() => setAxisModalVisible(true)}
+          className="bg-black/80 p-4 rounded-full border border-savage-red"
+        >
           <Sparkles color="#DC2626" size={24} />
         </TouchableOpacity>
       </View>
@@ -520,7 +718,13 @@ export default function GymScreen() {
             </View>
 
             {/* BOTÓN NOTAS */}
-            <TouchableOpacity className="absolute top-32 right-6 bg-black/70 p-3 rounded-full">
+            <TouchableOpacity
+              onPress={() => {
+                setCurrentExerciseIndex(index);
+                setNotesModalVisible(true);
+              }}
+              className="absolute top-32 right-6 bg-black/70 p-3 rounded-full border border-zinc-700"
+            >
               <Edit3 color="#FFFFFF" size={20} />
             </TouchableOpacity>
 
@@ -543,12 +747,8 @@ export default function GymScreen() {
 
                   {/* INFO */}
                   <View className="flex-1">
-                    <Text className="text-savage-text font-bold text-base">
-                      {serie.reps} REPS
-                    </Text>
-                    {serie.note && (
-                      <Text className="text-zinc-500 text-xs">{serie.note}</Text>
-                    )}
+                    <Text className="text-savage-text font-bold text-base">{serie.reps} REPS</Text>
+                    {serie.note && <Text className="text-zinc-500 text-xs">{serie.note}</Text>}
                   </View>
                 </View>
               ))}
@@ -565,6 +765,11 @@ export default function GymScreen() {
           </View>
         )}
       />
+
+      {/* MODALS */}
+      {renderNotesModal()}
+      {renderSpotifyModal()}
+      {renderAxisModal()}
     </View>
   );
 }
