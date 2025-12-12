@@ -748,39 +748,42 @@ export default function GymScreen() {
         transparent={true}
         onRequestClose={() => setHistorialModalVisible(false)}
       >
-        <Pressable
-          className="flex-1 bg-black/50"
-          onPress={() => setHistorialModalVisible(false)}
-        >
+        <View className="flex-1 bg-black/50">
+          <Pressable className="flex-1" onPress={() => setHistorialModalVisible(false)} />
           <View
-            className="absolute bottom-0 left-0 right-0 bg-black rounded-t-3xl border-t border-zinc-800"
+            className="bg-black rounded-t-3xl border-t border-zinc-800"
             style={{ height: SCREEN_HEIGHT * 0.9 }}
           >
-            {/* Drag Handle */}
-            <View className="items-center py-4">
-              <View className="w-12 h-1 bg-zinc-700 rounded-full" />
-            </View>
+            {/* Drag Handle + Header (Área para cerrar con swipe) */}
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={() => setHistorialModalVisible(false)}
+              className="items-center py-4 border-b border-zinc-800"
+            >
+              <View className="w-12 h-1 bg-zinc-700 rounded-full mb-4" />
 
-            {/* Header */}
-            <View className="px-6 pb-4 border-b border-zinc-800 flex-row justify-between items-center">
-              <View className="flex-1">
-                <Text className="text-savage-text text-2xl font-bold">
-                  {modalExercise.name}
-                </Text>
-                <Text className="text-zinc-500 text-sm mt-1 tracking-wider">
-                  HISTORIAL DE VIDEOS
-                </Text>
+              {/* Header */}
+              <View className="px-6 pb-4 flex-row justify-between items-center w-full">
+                <View className="flex-1">
+                  <Text className="text-savage-text text-2xl font-bold">{modalExercise.name}</Text>
+                  <Text className="text-zinc-500 text-sm mt-1 tracking-wider">
+                    HISTORIAL DE VIDEOS
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    setHistorialModalVisible(false);
+                  }}
+                  className="bg-zinc-900 p-3 rounded-lg"
+                >
+                  <X color="#DC2626" size={24} />
+                </TouchableOpacity>
               </View>
-              <TouchableOpacity
-                onPress={() => setHistorialModalVisible(false)}
-                className="bg-zinc-900 p-3 rounded-lg"
-              >
-                <X color="#DC2626" size={24} />
-              </TouchableOpacity>
-            </View>
+            </TouchableOpacity>
 
             {/* Lista de Videos */}
-            <ScrollView className="flex-1 px-6 py-6">
+            <ScrollView className="flex-1 px-6 py-6" showsVerticalScrollIndicator={true}>
               {modalExercise.videos.length === 0 ? (
                 <View className="flex-1 justify-center items-center py-20">
                   <Camera color="#3F3F46" size={64} />
@@ -814,9 +817,7 @@ export default function GymScreen() {
                       <Text className="text-white font-bold text-3xl font-mono mb-2">
                         {video.weight}kg
                       </Text>
-                      <Text className="text-zinc-400 text-lg mb-3">
-                        {video.reps} reps
-                      </Text>
+                      <Text className="text-zinc-400 text-lg mb-3">{video.reps} reps</Text>
                       <Text className="text-zinc-600 text-sm">{video.date}</Text>
                       <View className="flex-row items-center mt-2">
                         <View
@@ -834,7 +835,7 @@ export default function GymScreen() {
               )}
             </ScrollView>
           </View>
-        </Pressable>
+        </View>
       </Modal>
     );
   };
@@ -849,39 +850,42 @@ export default function GymScreen() {
         transparent={true}
         onRequestClose={() => setStructureModalVisible(false)}
       >
-        <Pressable
-          className="flex-1 bg-black/50"
-          onPress={() => setStructureModalVisible(false)}
-        >
+        <View className="flex-1 bg-black/50">
+          <Pressable className="flex-1" onPress={() => setStructureModalVisible(false)} />
           <View
-            className="absolute bottom-0 left-0 right-0 bg-black rounded-t-3xl border-t border-zinc-800"
+            className="bg-black rounded-t-3xl border-t border-zinc-800"
             style={{ height: SCREEN_HEIGHT * 0.9 }}
           >
-            {/* Drag Handle */}
-            <View className="items-center py-4">
-              <View className="w-12 h-1 bg-zinc-700 rounded-full" />
-            </View>
+            {/* Drag Handle + Header (Área para cerrar con swipe) */}
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={() => setStructureModalVisible(false)}
+              className="items-center py-4 border-b border-zinc-800"
+            >
+              <View className="w-12 h-1 bg-zinc-700 rounded-full mb-4" />
 
-            {/* Header */}
-            <View className="px-6 pb-4 border-b border-zinc-800 flex-row justify-between items-center">
-              <View className="flex-1">
-                <Text className="text-savage-text text-2xl font-bold">
-                  {modalExercise.name}
-                </Text>
-                <Text className="text-zinc-500 text-sm mt-1 tracking-wider">
-                  ESTRUCTURA DE SERIES
-                </Text>
+              {/* Header */}
+              <View className="px-6 pb-4 flex-row justify-between items-center w-full">
+                <View className="flex-1">
+                  <Text className="text-savage-text text-2xl font-bold">{modalExercise.name}</Text>
+                  <Text className="text-zinc-500 text-sm mt-1 tracking-wider">
+                    ESTRUCTURA DE SERIES
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    setStructureModalVisible(false);
+                  }}
+                  className="bg-zinc-900 p-3 rounded-lg"
+                >
+                  <X color="#DC2626" size={24} />
+                </TouchableOpacity>
               </View>
-              <TouchableOpacity
-                onPress={() => setStructureModalVisible(false)}
-                className="bg-zinc-900 p-3 rounded-lg"
-              >
-                <X color="#DC2626" size={24} />
-              </TouchableOpacity>
-            </View>
+            </TouchableOpacity>
 
             {/* Lista de Series */}
-            <ScrollView className="flex-1 px-6 py-6">
+            <ScrollView className="flex-1 px-6 py-6" showsVerticalScrollIndicator={true}>
               {modalExercise.series.map((serie, idx) => (
                 <View
                   key={serie.id}
@@ -889,9 +893,7 @@ export default function GymScreen() {
                 >
                   {/* Número de Serie */}
                   <View className="bg-savage-red rounded-full w-10 h-10 justify-center items-center mr-4">
-                    <Text className="text-white font-bold text-lg font-mono">
-                      {idx + 1}
-                    </Text>
+                    <Text className="text-white font-bold text-lg font-mono">{idx + 1}</Text>
                   </View>
 
                   {/* Color Tag */}
@@ -909,16 +911,14 @@ export default function GymScreen() {
                       {serie.type}
                     </Text>
                     {serie.note && (
-                      <Text className="text-zinc-600 text-sm mt-2 italic">
-                        "{serie.note}"
-                      </Text>
+                      <Text className="text-zinc-600 text-sm mt-2 italic">"{serie.note}"</Text>
                     )}
                   </View>
                 </View>
               ))}
             </ScrollView>
           </View>
-        </Pressable>
+        </View>
       </Modal>
     );
   };
@@ -1063,9 +1063,7 @@ export default function GymScreen() {
               >
                 <View className="flex-row items-center justify-between">
                   <View className="flex-1">
-                    <Text className="text-zinc-500 text-xs tracking-widest mb-2">
-                      HISTORIAL
-                    </Text>
+                    <Text className="text-zinc-500 text-xs tracking-widest mb-2">HISTORIAL</Text>
                     {item.videos.length > 0 ? (
                       <>
                         <Text className="text-white font-bold text-lg mb-1">
@@ -1078,9 +1076,7 @@ export default function GymScreen() {
                     )}
                   </View>
                   <View className="bg-zinc-800 px-3 py-1 rounded-full">
-                    <Text className="text-zinc-400 font-bold font-mono">
-                      {item.videos.length}
-                    </Text>
+                    <Text className="text-zinc-400 font-bold font-mono">{item.videos.length}</Text>
                   </View>
                 </View>
               </TouchableOpacity>
@@ -1095,9 +1091,7 @@ export default function GymScreen() {
               >
                 <View className="flex-row items-center justify-between">
                   <View className="flex-1">
-                    <Text className="text-zinc-500 text-xs tracking-widest mb-2">
-                      ESTRUCTURA
-                    </Text>
+                    <Text className="text-zinc-500 text-xs tracking-widest mb-2">ESTRUCTURA</Text>
                     <Text className="text-white font-bold text-lg">
                       {item.series.length} SERIES DE{' '}
                       {item.series.filter((s) => s.type === 'WARMUP').length > 0 &&
@@ -1111,9 +1105,7 @@ export default function GymScreen() {
                     </Text>
                   </View>
                   <View className="bg-zinc-800 px-3 py-1 rounded-full">
-                    <Text className="text-zinc-400 font-bold font-mono">
-                      {item.series.length}
-                    </Text>
+                    <Text className="text-zinc-400 font-bold font-mono">{item.series.length}</Text>
                   </View>
                 </View>
               </TouchableOpacity>
