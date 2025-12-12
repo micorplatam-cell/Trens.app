@@ -515,7 +515,7 @@ export default function GymScreen() {
           <Text className="text-zinc-500 text-sm mb-4">
             Ejercicio: {exercises[currentExerciseIndex]?.name}
           </Text>
-          
+
           <View className="bg-black border border-zinc-800 rounded-lg p-4 mb-4 min-h-32">
             <Text className="text-zinc-600 text-sm">Toca para agregar notas...</Text>
           </View>
@@ -723,7 +723,7 @@ export default function GymScreen() {
                 setCurrentExerciseIndex(index);
                 setNotesModalVisible(true);
               }}
-              className="absolute top-32 right-6 bg-black/70 p-3 rounded-full border border-zinc-700"
+              className="absolute top-32 right-20 z-50 bg-black/70 p-3 rounded-full border border-zinc-700"
             >
               <Edit3 color="#FFFFFF" size={20} />
             </TouchableOpacity>
