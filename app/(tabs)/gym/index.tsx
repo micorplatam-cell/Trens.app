@@ -8,9 +8,10 @@ import {
   Modal,
   ScrollView,
   Pressable,
+  PanResponder,
 } from 'react-native';
 import { Image } from 'expo-image';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { useAuth } from '../../_layout';
 import {
@@ -25,7 +26,7 @@ import {
   Camera,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -113,6 +114,62 @@ export default function GymScreen() {
   const [historialModalVisible, setHistorialModalVisible] = useState(false);
   const [structureModalVisible, setStructureModalVisible] = useState(false);
   const [modalExercise, setModalExercise] = useState<Exercise | null>(null);
+
+  // Modal drag state
+  const translateYHistorial = useSharedValue(0);
+  const translateYStructure = useSharedValue(0);
+
+  const animatedStyleHistorial = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateYHistorial.value }],
+  }));
+
+  const animatedStyleStructure = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateYStructure.value }],
+  }));
+
+  const panResponderHistorial = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 5,
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0) {
+          translateYHistorial.value = gestureState.dy;
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 150) {
+          setHistorialModalVisible(false);
+          setTimeout(() => {
+            translateYHistorial.value = 0;
+          }, 300);
+        } else {
+          translateYHistorial.value = withSpring(0);
+        }
+      },
+    })
+  ).current;
+
+  const panResponderStructure = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 5,
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0) {
+          translateYStructure.value = gestureState.dy;
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 150) {
+          setStructureModalVisible(false);
+          setTimeout(() => {
+            translateYStructure.value = 0;
+          }, 300);
+        } else {
+          translateYStructure.value = withSpring(0);
+        }
+      },
+    })
+  ).current;
 
   // Vibración al abrir modales
   useEffect(() => {
@@ -734,31 +791,6 @@ export default function GymScreen() {
   const renderHistorialModal = () => {
     if (!modalExercise) return null;
 
-    const translateY = useSharedValue(0);
-
-    const closeModal = () => {
-      setHistorialModalVisible(false);
-      translateY.value = 0;
-    };
-
-    const panGesture = Gesture.Pan()
-      .onUpdate((event) => {
-        if (event.translationY > 0) {
-          translateY.value = event.translationY;
-        }
-      })
-      .onEnd((event) => {
-        if (event.translationY > 150) {
-          runOnJS(closeModal)();
-        } else {
-          translateY.value = withSpring(0, { damping: 20, stiffness: 90 });
-        }
-      });
-
-    const animatedStyle = useAnimatedStyle(() => ({
-      transform: [{ translateY: translateY.value }],
-    }));
-
     return (
       <Modal
         visible={historialModalVisible}
@@ -766,37 +798,28 @@ export default function GymScreen() {
         transparent={true}
         onRequestClose={() => setHistorialModalVisible(false)}
       >
-        <View className="flex-1 bg-black/50">
-          <Pressable className="flex-1" onPress={() => setHistorialModalVisible(false)} />
+        <View className="flex-1 bg-black">
           <Animated.View
-            className="bg-black rounded-t-3xl border-t border-zinc-800"
-            style={[{ height: SCREEN_HEIGHT * 0.9 }, animatedStyle]}
+            className="flex-1 bg-black rounded-t-3xl border-t border-zinc-800"
+            style={[{ maxWidth: SCREEN_WIDTH }, animatedStyleHistorial]}
           >
             {/* Drag Handle + Header (Área para arrastrar) */}
-            <GestureDetector gesture={panGesture}>
-              <View className="items-center py-4 border-b border-zinc-800">
-                <View className="w-12 h-1 bg-zinc-700 rounded-full mb-4" />
+            <Animated.View
+              className="items-center pt-6 pb-4 border-b border-zinc-800"
+              {...panResponderHistorial.panHandlers}
+            >
+              <View className="w-16 h-1.5 bg-zinc-600 rounded-full mb-6" />
 
-                {/* Header */}
-                <View className="px-6 pb-4 flex-row justify-between items-center w-full">
-                  <View className="flex-1">
-                    <Text className="text-savage-text text-2xl font-bold">{modalExercise.name}</Text>
-                    <Text className="text-zinc-500 text-sm mt-1 tracking-wider">
-                      HISTORIAL DE VIDEOS
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    onPress={(e) => {
-                      e.stopPropagation();
-                      setHistorialModalVisible(false);
-                    }}
-                    className="bg-zinc-900 p-3 rounded-lg"
-                  >
-                    <X color="#DC2626" size={24} />
-                  </TouchableOpacity>
-                </View>
+              {/* Header */}
+              <View className="px-6 pb-2 w-full">
+                <Text className="text-savage-text text-2xl font-bold text-center">
+                  {modalExercise.name}
+                </Text>
+                <Text className="text-zinc-500 text-sm mt-2 tracking-wider text-center">
+                  HISTORIAL DE VIDEOS
+                </Text>
               </View>
-            </GestureDetector>
+            </Animated.View>
 
             {/* Lista de Videos */}
             <ScrollView className="flex-1 px-6 py-6" showsVerticalScrollIndicator={true}>
@@ -859,31 +882,6 @@ export default function GymScreen() {
   const renderStructureModal = () => {
     if (!modalExercise) return null;
 
-    const translateY = useSharedValue(0);
-
-    const closeModal = () => {
-      setStructureModalVisible(false);
-      translateY.value = 0;
-    };
-
-    const panGesture = Gesture.Pan()
-      .onUpdate((event) => {
-        if (event.translationY > 0) {
-          translateY.value = event.translationY;
-        }
-      })
-      .onEnd((event) => {
-        if (event.translationY > 150) {
-          runOnJS(closeModal)();
-        } else {
-          translateY.value = withSpring(0, { damping: 20, stiffness: 90 });
-        }
-      });
-
-    const animatedStyle = useAnimatedStyle(() => ({
-      transform: [{ translateY: translateY.value }],
-    }));
-
     return (
       <Modal
         visible={structureModalVisible}
@@ -891,37 +889,28 @@ export default function GymScreen() {
         transparent={true}
         onRequestClose={() => setStructureModalVisible(false)}
       >
-        <View className="flex-1 bg-black/50">
-          <Pressable className="flex-1" onPress={() => setStructureModalVisible(false)} />
+        <View className="flex-1 bg-black">
           <Animated.View
-            className="bg-black rounded-t-3xl border-t border-zinc-800"
-            style={[{ height: SCREEN_HEIGHT * 0.9 }, animatedStyle]}
+            className="flex-1 bg-black rounded-t-3xl border-t border-zinc-800"
+            style={[{ maxWidth: SCREEN_WIDTH }, animatedStyleStructure]}
           >
             {/* Drag Handle + Header (Área para arrastrar) */}
-            <GestureDetector gesture={panGesture}>
-              <View className="items-center py-4 border-b border-zinc-800">
-                <View className="w-12 h-1 bg-zinc-700 rounded-full mb-4" />
+            <Animated.View
+              className="items-center pt-6 pb-4 border-b border-zinc-800"
+              {...panResponderStructure.panHandlers}
+            >
+              <View className="w-16 h-1.5 bg-zinc-600 rounded-full mb-6" />
 
-                {/* Header */}
-                <View className="px-6 pb-4 flex-row justify-between items-center w-full">
-                  <View className="flex-1">
-                    <Text className="text-savage-text text-2xl font-bold">{modalExercise.name}</Text>
-                    <Text className="text-zinc-500 text-sm mt-1 tracking-wider">
-                      ESTRUCTURA DE SERIES
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    onPress={(e) => {
-                      e.stopPropagation();
-                      setStructureModalVisible(false);
-                    }}
-                    className="bg-zinc-900 p-3 rounded-lg"
-                  >
-                    <X color="#DC2626" size={24} />
-                  </TouchableOpacity>
-                </View>
+              {/* Header */}
+              <View className="px-6 pb-2 w-full">
+                <Text className="text-savage-text text-2xl font-bold text-center">
+                  {modalExercise.name}
+                </Text>
+                <Text className="text-zinc-500 text-sm mt-2 tracking-wider text-center">
+                  ESTRUCTURA DE SERIES
+                </Text>
               </View>
-            </GestureDetector>
+            </Animated.View>
 
             {/* Lista de Series */}
             <ScrollView className="flex-1 px-6 py-6" showsVerticalScrollIndicator={true}>
@@ -966,7 +955,7 @@ export default function GymScreen() {
   // RENDER FOCUS MODE (VERTICAL SCROLL - TIKTOK STYLE)
   // ============================================================================
   return (
-    <View className="flex-1 bg-savage-black">
+    <GestureHandlerRootView className="flex-1 bg-savage-black">
       {/* HEADER FIJO */}
       <View className="absolute top-0 left-0 right-0 z-50 bg-black/90 px-6 pt-14 pb-4 flex-row justify-between items-center">
         <View className="flex-1 items-center">
@@ -1061,7 +1050,7 @@ export default function GymScreen() {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         }}
         renderItem={({ item, index }) => (
-          <View style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT }}>
+          <View style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT }} className="bg-black">
             {/* IMAGEN HERO */}
             <Image
               source={{ uri: item.image_url }}
@@ -1169,6 +1158,6 @@ export default function GymScreen() {
       {renderVideoViewer()}
       {renderHistorialModal()}
       {renderStructureModal()}
-    </View>
+    </GestureHandlerRootView>
   );
 }

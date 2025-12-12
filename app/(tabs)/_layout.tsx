@@ -35,7 +35,7 @@ export default function TabsLayout() {
         options={{
           tabBarIcon: () => (
             <View className="bg-savage-red p-3 rounded-full -mt-8 border-4 border-savage-black">
-                <Camera color="#FFFFFF" size={32} />
+              <Camera color="#FFFFFF" size={32} />
             </View>
           ),
         }}
