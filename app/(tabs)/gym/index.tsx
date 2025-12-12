@@ -5,13 +5,14 @@ import {
   ActivityIndicator,
   FlatList,
   Dimensions,
+  Modal,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { FlashList } from '@shopify/flash-list';
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { useAuth } from '../../_layout';
-import { Sliders, Plus, Trash2 } from 'lucide-react-native';
+import { Sliders, Plus, Trash2, X } from 'lucide-react-native';
 
 // ============================================================================
 // TYPES
@@ -26,6 +27,19 @@ interface Exercise {
   order: number;
 }
 
+interface AssetTemplate {
+  id: string;
+  name: string;
+  description: string;
+  image_url: string;
+  category: string;
+  difficulty: string;
+  default_metadata: {
+    sets: string;
+    rest: string;
+  };
+}
+
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 // ============================================================================
@@ -35,13 +49,17 @@ export default function GymScreen() {
   const { user } = useAuth();
   const [viewMode, setViewMode] = useState<ViewMode>('LOADING');
   const [exercises, setExercises] = useState<Exercise[]>([]);
+  const [templates, setTemplates] = useState<AssetTemplate[]>([]);
   const [loading, setLoading] = useState(true);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [adding, setAdding] = useState(false);
 
   // ============================================================================
   // FETCH EXERCISES FROM SUPABASE
   // ============================================================================
   useEffect(() => {
     loadExercises();
+    loadTemplates();
   }, []);
 
   const loadExercises = async () => {
@@ -93,43 +111,96 @@ export default function GymScreen() {
     }
   };
 
+  const loadTemplates = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('asset_templates')
+        .select('*')
+        .eq('asset_type', 'gym_exercise')
+        .order('category', { ascending: true });
+
+      if (error) throw error;
+
+      if (data) {
+        setTemplates(data as AssetTemplate[]);
+      }
+    } catch (error) {
+      console.error('💥 Error loading templates:', error);
+    }
+  };
+
   // ============================================================================
-  // ADD EXERCISE (MOCK)
+  // ADD EXERCISE FROM TEMPLATE
   // ============================================================================
-  const addExercise = () => {
-    const newExercise: Exercise = {
-      id: Date.now().toString(),
-      name: `EJERCICIO ${exercises.length + 1}`,
-      sets: '4x10',
-      image_url: 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800',
-      order: exercises.length,
-    };
-    setExercises([...exercises, newExercise]);
+  const addExerciseFromTemplate = async (template: AssetTemplate) => {
+    if (!user) return;
+
+    setAdding(true);
+    try {
+      const newOrder = exercises.length;
+
+      const { data, error } = await supabase
+        .from('user_assets')
+        .insert({
+          user_id: user.id,
+          asset_type: 'gym_exercise',
+          name: template.name,
+          asset_url: template.image_url,
+          metadata: {
+            sets: template.default_metadata.sets,
+            rest: template.default_metadata.rest,
+            category: template.category,
+            difficulty: template.difficulty,
+          },
+          order: newOrder,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      if (data) {
+        const newExercise: Exercise = {
+          id: data.id,
+          name: data.name,
+          sets: data.metadata.sets,
+          image_url: data.asset_url,
+          order: data.order,
+        };
+
+        setExercises([...exercises, newExercise]);
+        setModalVisible(false);
+      }
+    } catch (error) {
+      console.error('💥 Error adding exercise:', error);
+      alert('Error al agregar ejercicio');
+    } finally {
+      setAdding(false);
+    }
   };
 
   // ============================================================================
   // DELETE EXERCISE
   // ============================================================================
-  const deleteExercise = (id: string) => {
-    setExercises(exercises.filter((ex) => ex.id !== id));
+  const deleteExercise = async (id: string) => {
+    try {
+      const { error } = await supabase.from('user_assets').delete().eq('id', id);
+
+      if (error) throw error;
+
+      setExercises(exercises.filter((ex) => ex.id !== id));
+    } catch (error) {
+      console.error('💥 Error deleting exercise:', error);
+      alert('Error al eliminar ejercicio');
+    }
   };
 
   // ============================================================================
   // SAVE AND TRAIN
   // ============================================================================
-  const saveAndTrain = async () => {
+  const saveAndTrain = () => {
     if (exercises.length === 0) return;
-
-    setLoading(true);
-    try {
-      // TODO: Implement actual save to Supabase
-      // await supabase.from('user_assets').upsert(...)
-      setViewMode('FOCUS');
-    } catch (error) {
-      console.error('Error saving:', error);
-    } finally {
-      setLoading(false);
-    }
+    setViewMode('FOCUS');
   };
 
   // ============================================================================
@@ -145,6 +216,77 @@ export default function GymScreen() {
       </View>
     );
   }
+
+  // ============================================================================
+  // RENDER CATALOG MODAL
+  // ============================================================================
+  const renderCatalogModal = () => (
+    <Modal
+      visible={modalVisible}
+      animationType="slide"
+      transparent={true}
+      onRequestClose={() => setModalVisible(false)}
+    >
+      <View className="flex-1 bg-black/95">
+        {/* HEADER */}
+        <View className="px-6 pt-16 pb-4 border-b border-zinc-800 flex-row justify-between items-center">
+          <View>
+            <Text className="text-savage-text text-3xl font-bold italic">CATÁLOGO</Text>
+            <Text className="text-zinc-500 text-sm tracking-wider">SELECCIONA UN EJERCICIO</Text>
+          </View>
+          <TouchableOpacity
+            onPress={() => setModalVisible(false)}
+            className="bg-zinc-900 p-3 rounded-lg"
+          >
+            <X color="#DC2626" size={24} />
+          </TouchableOpacity>
+        </View>
+
+        {/* CATALOG LIST */}
+        <FlatList
+          data={templates}
+          keyExtractor={(item) => item.id}
+          className="flex-1 px-6 pt-4"
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              onPress={() => addExerciseFromTemplate(item)}
+              disabled={adding}
+              className="flex-row bg-savage-dark border border-zinc-800 rounded-lg p-4 mb-3 items-center"
+            >
+              {/* IMAGE */}
+              <Image
+                source={{ uri: item.image_url }}
+                style={{ width: 80, height: 80 }}
+                className="rounded-lg mr-4"
+                contentFit="cover"
+              />
+
+              {/* INFO */}
+              <View className="flex-1">
+                <Text className="text-savage-text font-bold text-lg mb-1">{item.name}</Text>
+                <Text className="text-zinc-500 text-sm mb-2">{item.description}</Text>
+                <View className="flex-row gap-2">
+                  <View className="bg-zinc-900 px-2 py-1 rounded">
+                    <Text className="text-zinc-400 text-xs font-mono">{item.category}</Text>
+                  </View>
+                  <View className="bg-savage-red/20 px-2 py-1 rounded">
+                    <Text className="text-savage-red text-xs font-bold">{item.difficulty}</Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* ARROW */}
+              {adding ? (
+                <ActivityIndicator color="#DC2626" size="small" />
+              ) : (
+                <Text className="text-savage-red text-2xl font-bold">→</Text>
+              )}
+            </TouchableOpacity>
+          )}
+        />
+      </View>
+    </Modal>
+  );
 
   // ============================================================================
   // RENDER STRUCTURE MODE
@@ -171,7 +313,7 @@ export default function GymScreen() {
                 NO HAY EJERCICIOS CONFIGURADOS
               </Text>
               <TouchableOpacity
-                onPress={addExercise}
+                onPress={() => setModalVisible(true)}
                 className="bg-savage-red px-8 py-6 rounded-lg"
               >
                 <View className="flex-row items-center">
@@ -185,10 +327,20 @@ export default function GymScreen() {
           }
           renderItem={({ item, index }) => (
             <View className="bg-savage-dark border border-zinc-800 rounded-lg p-4 mb-3 flex-row items-center">
+              {/* ORDER NUMBER */}
               <View className="bg-savage-red rounded px-3 py-1 mr-4">
                 <Text className="text-savage-text font-bold font-mono">{index + 1}</Text>
               </View>
 
+              {/* IMAGE */}
+              <Image
+                source={{ uri: item.image_url }}
+                style={{ width: 60, height: 60 }}
+                className="rounded-lg mr-4"
+                contentFit="cover"
+              />
+
+              {/* INFO */}
               <View className="flex-1">
                 <Text className="text-savage-text font-bold text-lg mb-1">{item.name}</Text>
                 <Text className="text-zinc-500 font-mono text-sm">{item.sets}</Text>
@@ -218,12 +370,15 @@ export default function GymScreen() {
           )}
 
           <TouchableOpacity
-            onPress={addExercise}
+            onPress={() => setModalVisible(true)}
             className="border border-savage-red p-4 rounded-lg items-center"
           >
             <Text className="text-savage-red font-bold tracking-wider">+ AGREGAR EJERCICIO</Text>
           </TouchableOpacity>
         </View>
+
+        {/* CATALOG MODAL */}
+        {renderCatalogModal()}
       </View>
     );
   }
