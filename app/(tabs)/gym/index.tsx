@@ -27,6 +27,13 @@ import {
   Camera,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  runOnJS,
+} from 'react-native-reanimated';
 
 // ============================================================================
 // TYPES
@@ -741,6 +748,31 @@ export default function GymScreen() {
   const renderHistorialModal = () => {
     if (!modalExercise) return null;
 
+    const translateY = useSharedValue(0);
+
+    const closeModal = () => {
+      setHistorialModalVisible(false);
+      translateY.value = 0;
+    };
+
+    const panGesture = Gesture.Pan()
+      .onUpdate((event) => {
+        if (event.translationY > 0) {
+          translateY.value = event.translationY;
+        }
+      })
+      .onEnd((event) => {
+        if (event.translationY > 150) {
+          runOnJS(closeModal)();
+        } else {
+          translateY.value = withSpring(0, { damping: 20, stiffness: 90 });
+        }
+      });
+
+    const animatedStyle = useAnimatedStyle(() => ({
+      transform: [{ translateY: translateY.value }],
+    }));
+
     return (
       <Modal
         visible={historialModalVisible}
@@ -750,17 +782,14 @@ export default function GymScreen() {
       >
         <View className="flex-1 bg-black/50">
           <Pressable className="flex-1" onPress={() => setHistorialModalVisible(false)} />
-          <View
+          <Animated.View
             className="bg-black rounded-t-3xl border-t border-zinc-800"
-            style={{ height: SCREEN_HEIGHT * 0.9 }}
+            style={[{ height: SCREEN_HEIGHT * 0.9 }, animatedStyle]}
           >
-            {/* Drag Handle + Header (Área para cerrar con swipe) */}
-            <TouchableOpacity
-              activeOpacity={1}
-              onPress={() => setHistorialModalVisible(false)}
-              className="items-center py-4 border-b border-zinc-800"
-            >
-              <View className="w-12 h-1 bg-zinc-700 rounded-full mb-4" />
+            {/* Drag Handle + Header (Área para arrastrar) */}
+            <GestureDetector gesture={panGesture}>
+              <View className="items-center py-4 border-b border-zinc-800">
+                <View className="w-12 h-1 bg-zinc-700 rounded-full mb-4" />
 
               {/* Header */}
               <View className="px-6 pb-4 flex-row justify-between items-center w-full">
@@ -780,7 +809,7 @@ export default function GymScreen() {
                   <X color="#DC2626" size={24} />
                 </TouchableOpacity>
               </View>
-            </TouchableOpacity>
+            </GestureDetector>
 
             {/* Lista de Videos */}
             <ScrollView className="flex-1 px-6 py-6" showsVerticalScrollIndicator={true}>
@@ -834,7 +863,7 @@ export default function GymScreen() {
                 ))
               )}
             </ScrollView>
-          </View>
+          </Animated.View>
         </View>
       </Modal>
     );
@@ -842,6 +871,31 @@ export default function GymScreen() {
 
   const renderStructureModal = () => {
     if (!modalExercise) return null;
+
+    const translateY = useSharedValue(0);
+
+    const closeModal = () => {
+      setStructureModalVisible(false);
+      translateY.value = 0;
+    };
+
+    const panGesture = Gesture.Pan()
+      .onUpdate((event) => {
+        if (event.translationY > 0) {
+          translateY.value = event.translationY;
+        }
+      })
+      .onEnd((event) => {
+        if (event.translationY > 150) {
+          runOnJS(closeModal)();
+        } else {
+          translateY.value = withSpring(0, { damping: 20, stiffness: 90 });
+        }
+      });
+
+    const animatedStyle = useAnimatedStyle(() => ({
+      transform: [{ translateY: translateY.value }],
+    }));
 
     return (
       <Modal
@@ -852,17 +906,14 @@ export default function GymScreen() {
       >
         <View className="flex-1 bg-black/50">
           <Pressable className="flex-1" onPress={() => setStructureModalVisible(false)} />
-          <View
+          <Animated.View
             className="bg-black rounded-t-3xl border-t border-zinc-800"
-            style={{ height: SCREEN_HEIGHT * 0.9 }}
+            style={[{ height: SCREEN_HEIGHT * 0.9 }, animatedStyle]}
           >
-            {/* Drag Handle + Header (Área para cerrar con swipe) */}
-            <TouchableOpacity
-              activeOpacity={1}
-              onPress={() => setStructureModalVisible(false)}
-              className="items-center py-4 border-b border-zinc-800"
-            >
-              <View className="w-12 h-1 bg-zinc-700 rounded-full mb-4" />
+            {/* Drag Handle + Header (Área para arrastrar) */}
+            <GestureDetector gesture={panGesture}>
+              <View className="items-center py-4 border-b border-zinc-800">
+                <View className="w-12 h-1 bg-zinc-700 rounded-full mb-4" />
 
               {/* Header */}
               <View className="px-6 pb-4 flex-row justify-between items-center w-full">
@@ -882,7 +933,7 @@ export default function GymScreen() {
                   <X color="#DC2626" size={24} />
                 </TouchableOpacity>
               </View>
-            </TouchableOpacity>
+            </GestureDetector>
 
             {/* Lista de Series */}
             <ScrollView className="flex-1 px-6 py-6" showsVerticalScrollIndicator={true}>
@@ -917,7 +968,7 @@ export default function GymScreen() {
                 </View>
               ))}
             </ScrollView>
-          </View>
+          </Animated.View>
         </View>
       </Modal>
     );
