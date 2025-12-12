@@ -25,8 +25,6 @@ import {
   Timer,
   Edit3,
   Camera,
-  Edit3,
-  Camera,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 
@@ -1098,14 +1096,14 @@ export default function GymScreen() {
                 <View className="flex-row items-center justify-between">
                   <View className="flex-1">
                     <Text className="text-zinc-500 text-xs tracking-widest mb-2">
-                      ESTRUCTURAWARMUP').length > 0 &&
+                      ESTRUCTURA
+                    </Text>
+                    <Text className="text-white font-bold text-lg">
+                      {item.series.length} SERIES DE{' '}
+                      {item.series.filter((s) => s.type === 'WARMUP').length > 0 &&
                         `🟡×${item.series.filter((s) => s.type === 'WARMUP').length} `}
                       {item.series.filter((s) => s.type === 'FEEDER').length > 0 &&
                         `🔵×${item.series.filter((s) => s.type === 'FEEDER').length} `}
-                      {item.series.filter((s) => s.type === 'EFFECTIVE').length > 0 &&
-                        `🔴×${item.series.filter((s) => s.type === 'EFFECTIVE').length} `}
-                      {item.series.filter((s) => s.type === 'INTENSITY').length > 0 &&
-                        `🟣×${item.series.filter((s) => s.type === 'INTENSITY.length} `}
                       {item.series.filter((s) => s.type === 'EFFECTIVE').length > 0 &&
                         `🔴×${item.series.filter((s) => s.type === 'EFFECTIVE').length} `}
                       {item.series.filter((s) => s.type === 'INTENSITY').length > 0 &&
