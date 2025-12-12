@@ -39,6 +39,17 @@ interface Series {
   note?: string;
 }
 
+interface VideoRecord {
+  id: string;
+  exercise_id: string;
+  video_url: string;
+  thumbnail_url: string;
+  weight: number;
+  reps: number;
+  date: string;
+  is_public: boolean;
+}
+
 interface Exercise {
   id: string;
   name: string;
@@ -46,6 +57,7 @@ interface Exercise {
   image_url: string;
   order: number;
   series: Series[];
+  videos: VideoRecord[];
 }
 
 interface AssetTemplate {
@@ -86,6 +98,10 @@ export default function GymScreen() {
   const [notesModalVisible, setNotesModalVisible] = useState(false);
   const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
 
+  // Video State
+  const [videoViewerVisible, setVideoViewerVisible] = useState(false);
+  const [selectedVideo, setSelectedVideo] = useState<VideoRecord | null>(null);
+
   // ============================================================================
   // FETCH EXERCISES FROM SUPABASE
   // ============================================================================
@@ -122,13 +138,14 @@ export default function GymScreen() {
       console.log('✅ Data loaded:', data?.length || 0, 'exercises');
 
       if (data && data.length > 0) {
-        const mappedExercises: Exercise[] = data.map((item) => ({
+        const mappedExercises: Exercise[] = data.map((item, index) => ({
           id: item.id,
           name: item.name || 'UNNAMED',
           sets: item.metadata?.sets || '0x0',
           image_url: item.asset_url || '',
           order: item.order || 0,
           series: generateDefaultSeries(item.metadata?.sets || '4x10'),
+          videos: generateMockVideos(item.id, index), // Mock data por ahora
         }));
         setExercises(mappedExercises);
         setViewMode('FOCUS');
@@ -245,6 +262,38 @@ export default function GymScreen() {
   };
 
   // ============================================================================
+  // HELPER: Generate Mock Videos
+  // ============================================================================
+  const generateMockVideos = (exerciseId: string, index: number): VideoRecord[] => {
+    if (index === 0) {
+      // Solo el primer ejercicio tiene historial mock
+      return [
+        {
+          id: '1',
+          exercise_id: exerciseId,
+          video_url: 'https://example.com/video1.mp4',
+          thumbnail_url: 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=400',
+          weight: 140,
+          reps: 10,
+          date: '12 Oct',
+          is_public: true,
+        },
+        {
+          id: '2',
+          exercise_id: exerciseId,
+          video_url: 'https://example.com/video2.mp4',
+          thumbnail_url: 'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=400',
+          weight: 135,
+          reps: 12,
+          date: '5 Oct',
+          is_public: false,
+        },
+      ];
+    }
+    return [];
+  };
+
+  // ============================================================================
   // ADD EXERCISE FROM TEMPLATE
   // ============================================================================
   const addExerciseFromTemplate = async (template: AssetTemplate) => {
@@ -282,6 +331,7 @@ export default function GymScreen() {
           image_url: data.asset_url,
           order: data.order,
           series: generateDefaultSeries(data.metadata.sets),
+          videos: [], // Sin historial al principio
         };
 
         setExercises([...exercises, newExercise]);
@@ -600,6 +650,78 @@ export default function GymScreen() {
     </Modal>
   );
 
+  const renderVideoViewer = () => (
+    <Modal
+      visible={videoViewerVisible}
+      animationType="fade"
+      transparent={false}
+      onRequestClose={() => setVideoViewerVisible(false)}
+    >
+      <View className="flex-1 bg-savage-black">
+        {/* HEADER */}
+        <View className="absolute top-0 left-0 right-0 z-50 bg-black/90 px-6 pt-14 pb-4 flex-row justify-between items-center">
+          <TouchableOpacity onPress={() => setVideoViewerVisible(false)}>
+            <X color="#FFFFFF" size={24} />
+          </TouchableOpacity>
+          <Text className="text-savage-text font-bold">HISTORIAL</Text>
+          <View style={{ width: 24 }} />
+        </View>
+
+        {/* VIDEO PREVIEW */}
+        {selectedVideo && (
+          <View className="flex-1 justify-center items-center">
+            <Image
+              source={{ uri: selectedVideo.thumbnail_url }}
+              style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT * 0.6 }}
+              contentFit="cover"
+            />
+
+            {/* DATA OVERLAY */}
+            <View className="absolute bottom-40 left-0 right-0 bg-black/90 p-6">
+              <View className="flex-row justify-around mb-4">
+                <View className="items-center">
+                  <Text className="text-zinc-500 text-xs mb-1">PESO</Text>
+                  <Text className="text-savage-red text-3xl font-bold font-mono">
+                    {selectedVideo.weight}kg
+                  </Text>
+                </View>
+                <View className="items-center">
+                  <Text className="text-zinc-500 text-xs mb-1">REPS</Text>
+                  <Text className="text-savage-red text-3xl font-bold font-mono">
+                    {selectedVideo.reps}
+                  </Text>
+                </View>
+              </View>
+
+              <Text className="text-zinc-500 text-center text-sm">{selectedVideo.date}</Text>
+            </View>
+
+            {/* ACTIONS */}
+            <View className="absolute bottom-10 left-6 right-6 flex-row justify-around">
+              <TouchableOpacity className="bg-zinc-900 p-4 rounded-full border border-zinc-800">
+                <Trash2 color="#DC2626" size={24} />
+              </TouchableOpacity>
+
+              <TouchableOpacity className="bg-zinc-900 p-4 rounded-full border border-zinc-800">
+                <Text className="text-savage-text font-bold">📤</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                className={`${
+                  selectedVideo.is_public ? 'bg-savage-red' : 'bg-zinc-900'
+                } p-4 rounded-full border ${
+                  selectedVideo.is_public ? 'border-savage-red' : 'border-zinc-800'
+                }`}
+              >
+                <Text className="text-savage-text font-bold text-xs">TRENS</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+      </View>
+    </Modal>
+  );
+
   // ============================================================================
   // RENDER FOCUS MODE (VERTICAL SCROLL - TIKTOK STYLE)
   // ============================================================================
@@ -728,6 +850,40 @@ export default function GymScreen() {
               <Edit3 color="#FFFFFF" size={20} />
             </TouchableOpacity>
 
+            {/* SECCIÓN HISTORIAL (Carrusel de Videos) */}
+            {item.videos.length > 0 && (
+              <View className="absolute top-1/2 left-0 right-0 px-6">
+                <Text className="text-zinc-500 text-xs tracking-widest mb-2 uppercase">
+                  Historial
+                </Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} className="gap-3">
+                  {item.videos.map((video) => (
+                    <TouchableOpacity
+                      key={video.id}
+                      onPress={() => {
+                        setSelectedVideo(video);
+                        setVideoViewerVisible(true);
+                      }}
+                      className="mr-3"
+                    >
+                      <Image
+                        source={{ uri: video.thumbnail_url }}
+                        style={{ width: 100, height: 140 }}
+                        className="rounded-lg"
+                        contentFit="cover"
+                      />
+                      <View className="absolute inset-0 bg-black/60 rounded-lg items-center justify-center">
+                        <Text className="text-white font-bold text-lg font-mono">
+                          {video.weight}kg
+                        </Text>
+                        <Text className="text-white text-xs">{video.date}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+
             {/* SECCIÓN SERIES */}
             <ScrollView
               className="absolute bottom-20 left-0 right-0 px-6 py-6 bg-black"
@@ -770,6 +926,7 @@ export default function GymScreen() {
       {renderNotesModal()}
       {renderSpotifyModal()}
       {renderAxisModal()}
+      {renderVideoViewer()}
     </View>
   );
 }
