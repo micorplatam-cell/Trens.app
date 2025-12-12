@@ -7,6 +7,7 @@ import {
   Dimensions,
   Modal,
   ScrollView,
+  Pressable,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { FlashList } from '@shopify/flash-list';
@@ -23,6 +24,9 @@ import {
   Sparkles,
   Timer,
   Edit3,
+  Camera,
+  Edit3,
+  Camera,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 
@@ -101,6 +105,20 @@ export default function GymScreen() {
   // Video State
   const [videoViewerVisible, setVideoViewerVisible] = useState(false);
   const [selectedVideo, setSelectedVideo] = useState<VideoRecord | null>(null);
+
+  // Modal State
+  const [historialModalVisible, setHistorialModalVisible] = useState(false);
+  const [structureModalVisible, setStructureModalVisible] = useState(false);
+  const [modalExercise, setModalExercise] = useState<Exercise | null>(null);
+
+  // Vibración al abrir modales
+  useEffect(() => {
+    if (historialModalVisible || structureModalVisible) {
+      setTimeout(() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      }, 300);
+    }
+  }, [historialModalVisible, structureModalVisible]);
 
   // ============================================================================
   // FETCH EXERCISES FROM SUPABASE
@@ -722,6 +740,191 @@ export default function GymScreen() {
     </Modal>
   );
 
+  const renderHistorialModal = () => {
+    if (!modalExercise) return null;
+
+    return (
+      <Modal
+        visible={historialModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setHistorialModalVisible(false)}
+      >
+        <Pressable
+          className="flex-1 bg-black/50"
+          onPress={() => setHistorialModalVisible(false)}
+        >
+          <View
+            className="absolute bottom-0 left-0 right-0 bg-black rounded-t-3xl border-t border-zinc-800"
+            style={{ height: SCREEN_HEIGHT * 0.9 }}
+          >
+            {/* Drag Handle */}
+            <View className="items-center py-4">
+              <View className="w-12 h-1 bg-zinc-700 rounded-full" />
+            </View>
+
+            {/* Header */}
+            <View className="px-6 pb-4 border-b border-zinc-800 flex-row justify-between items-center">
+              <View className="flex-1">
+                <Text className="text-savage-text text-2xl font-bold">
+                  {modalExercise.name}
+                </Text>
+                <Text className="text-zinc-500 text-sm mt-1 tracking-wider">
+                  HISTORIAL DE VIDEOS
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setHistorialModalVisible(false)}
+                className="bg-zinc-900 p-3 rounded-lg"
+              >
+                <X color="#DC2626" size={24} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Lista de Videos */}
+            <ScrollView className="flex-1 px-6 py-6">
+              {modalExercise.videos.length === 0 ? (
+                <View className="flex-1 justify-center items-center py-20">
+                  <Camera color="#3F3F46" size={64} />
+                  <Text className="text-zinc-600 text-center mt-4 text-lg">
+                    Sin videos registrados
+                  </Text>
+                  <Text className="text-zinc-700 text-center mt-2 text-sm">
+                    Graba tu primer set desde el botón PRO
+                  </Text>
+                </View>
+              ) : (
+                modalExercise.videos.map((video) => (
+                  <TouchableOpacity
+                    key={video.id}
+                    onPress={() => {
+                      setSelectedVideo(video);
+                      setVideoViewerVisible(true);
+                      setHistorialModalVisible(false);
+                    }}
+                    className="flex-row bg-zinc-900 rounded-xl mb-4 border border-zinc-800 overflow-hidden"
+                  >
+                    {/* Thumbnail */}
+                    <View className="bg-zinc-800" style={{ width: 120, height: 160 }}>
+                      <View className="flex-1 justify-center items-center">
+                        <Text className="text-zinc-600 text-4xl">▶</Text>
+                      </View>
+                    </View>
+
+                    {/* Datos */}
+                    <View className="flex-1 p-4 justify-center">
+                      <Text className="text-white font-bold text-3xl font-mono mb-2">
+                        {video.weight}kg
+                      </Text>
+                      <Text className="text-zinc-400 text-lg mb-3">
+                        {video.reps} reps
+                      </Text>
+                      <Text className="text-zinc-600 text-sm">{video.date}</Text>
+                      <View className="flex-row items-center mt-2">
+                        <View
+                          className={`w-2 h-2 rounded-full mr-2 ${
+                            video.is_public ? 'bg-green-500' : 'bg-zinc-700'
+                          }`}
+                        />
+                        <Text className="text-zinc-600 text-xs">
+                          {video.is_public ? 'PÚBLICO' : 'PRIVADO'}
+                        </Text>
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                ))
+              )}
+            </ScrollView>
+          </View>
+        </Pressable>
+      </Modal>
+    );
+  };
+
+  const renderStructureModal = () => {
+    if (!modalExercise) return null;
+
+    return (
+      <Modal
+        visible={structureModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setStructureModalVisible(false)}
+      >
+        <Pressable
+          className="flex-1 bg-black/50"
+          onPress={() => setStructureModalVisible(false)}
+        >
+          <View
+            className="absolute bottom-0 left-0 right-0 bg-black rounded-t-3xl border-t border-zinc-800"
+            style={{ height: SCREEN_HEIGHT * 0.9 }}
+          >
+            {/* Drag Handle */}
+            <View className="items-center py-4">
+              <View className="w-12 h-1 bg-zinc-700 rounded-full" />
+            </View>
+
+            {/* Header */}
+            <View className="px-6 pb-4 border-b border-zinc-800 flex-row justify-between items-center">
+              <View className="flex-1">
+                <Text className="text-savage-text text-2xl font-bold">
+                  {modalExercise.name}
+                </Text>
+                <Text className="text-zinc-500 text-sm mt-1 tracking-wider">
+                  ESTRUCTURA DE SERIES
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setStructureModalVisible(false)}
+                className="bg-zinc-900 p-3 rounded-lg"
+              >
+                <X color="#DC2626" size={24} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Lista de Series */}
+            <ScrollView className="flex-1 px-6 py-6">
+              {modalExercise.series.map((serie, idx) => (
+                <View
+                  key={serie.id}
+                  className="flex-row items-center mb-4 bg-zinc-900/50 p-5 rounded-xl border border-zinc-800"
+                >
+                  {/* Número de Serie */}
+                  <View className="bg-savage-red rounded-full w-10 h-10 justify-center items-center mr-4">
+                    <Text className="text-white font-bold text-lg font-mono">
+                      {idx + 1}
+                    </Text>
+                  </View>
+
+                  {/* Color Tag */}
+                  <View
+                    className="w-4 h-4 rounded-full mr-4"
+                    style={{ backgroundColor: getSeriesColor(serie.type) }}
+                  />
+
+                  {/* Info */}
+                  <View className="flex-1">
+                    <Text className="text-savage-text font-bold text-xl mb-1">
+                      {serie.reps} REPS
+                    </Text>
+                    <Text className="text-zinc-500 text-xs uppercase tracking-wider">
+                      {serie.type}
+                    </Text>
+                    {serie.note && (
+                      <Text className="text-zinc-600 text-sm mt-2 italic">
+                        "{serie.note}"
+                      </Text>
+                    )}
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+        </Pressable>
+      </Modal>
+    );
+  };
+
   // ============================================================================
   // RENDER FOCUS MODE (VERTICAL SCROLL - TIKTOK STYLE)
   // ============================================================================
@@ -850,65 +1053,73 @@ export default function GymScreen() {
               <Edit3 color="#FFFFFF" size={20} />
             </TouchableOpacity>
 
-            {/* SECCIÓN HISTORIAL (Carrusel de Videos) */}
-            {item.videos.length > 0 && (
-              <View className="absolute top-1/2 left-0 right-0 px-6">
-                <Text className="text-zinc-500 text-xs tracking-widest mb-2 uppercase">
-                  Historial
-                </Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} className="gap-3">
-                  {item.videos.map((video) => (
-                    <TouchableOpacity
-                      key={video.id}
-                      onPress={() => {
-                        setSelectedVideo(video);
-                        setVideoViewerVisible(true);
-                      }}
-                      className="mr-3"
-                    >
-                      <Image
-                        source={{ uri: video.thumbnail_url }}
-                        style={{ width: 100, height: 140 }}
-                        className="rounded-lg"
-                        contentFit="cover"
-                      />
-                      <View className="absolute inset-0 bg-black/60 rounded-lg items-center justify-center">
-                        <Text className="text-white font-bold text-lg font-mono">
-                          {video.weight}kg
-                        </Text>
-                        <Text className="text-white text-xs">{video.date}</Text>
-                      </View>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </View>
-            )}
-
-            {/* SECCIÓN SERIES */}
-            <ScrollView
-              className="absolute bottom-20 left-0 right-0 px-6 py-6 bg-black"
-              style={{ maxHeight: SCREEN_HEIGHT * 0.4 }}
-            >
-              <Text className="text-zinc-500 text-xs tracking-widest mb-4 uppercase">
-                Estructura de Series
-              </Text>
-
-              {item.series.map((serie) => (
-                <View key={serie.id} className="flex-row items-center mb-3">
-                  {/* TAG COLOR */}
-                  <View
-                    className="w-3 h-3 rounded-full mr-3"
-                    style={{ backgroundColor: getSeriesColor(serie.type) }}
-                  />
-
-                  {/* INFO */}
+            {/* CARDS EN LA PARTE INFERIOR */}
+            <View className="absolute bottom-20 left-0 right-0 px-6 pb-6 bg-gradient-to-t from-black via-black/95 to-transparent pt-12">
+              {/* CARD HISTORIAL */}
+              <TouchableOpacity
+                onPress={() => {
+                  setModalExercise(item);
+                  setHistorialModalVisible(true);
+                }}
+                className="bg-zinc-900/80 backdrop-blur-xl p-5 rounded-xl border border-zinc-800 mb-3"
+              >
+                <View className="flex-row items-center justify-between">
                   <View className="flex-1">
-                    <Text className="text-savage-text font-bold text-base">{serie.reps} REPS</Text>
-                    {serie.note && <Text className="text-zinc-500 text-xs">{serie.note}</Text>}
+                    <Text className="text-zinc-500 text-xs tracking-widest mb-2">
+                      HISTORIAL
+                    </Text>
+                    {item.videos.length > 0 ? (
+                      <>
+                        <Text className="text-white font-bold text-lg mb-1">
+                          Último: {item.videos[0].weight}kg × {item.videos[0].reps} reps
+                        </Text>
+                        <Text className="text-zinc-600 text-sm">{item.videos[0].date}</Text>
+                      </>
+                    ) : (
+                      <Text className="text-zinc-600">Sin registros</Text>
+                    )}
+                  </View>
+                  <View className="bg-zinc-800 px-3 py-1 rounded-full">
+                    <Text className="text-zinc-400 font-bold font-mono">
+                      {item.videos.length}
+                    </Text>
                   </View>
                 </View>
-              ))}
-            </ScrollView>
+              </TouchableOpacity>
+
+              {/* CARD ESTRUCTURA */}
+              <TouchableOpacity
+                onPress={() => {
+                  setModalExercise(item);
+                  setStructureModalVisible(true);
+                }}
+                className="bg-zinc-900/80 backdrop-blur-xl p-5 rounded-xl border border-zinc-800"
+              >
+                <View className="flex-row items-center justify-between">
+                  <View className="flex-1">
+                    <Text className="text-zinc-500 text-xs tracking-widest mb-2">
+                      ESTRUCTURAWARMUP').length > 0 &&
+                        `🟡×${item.series.filter((s) => s.type === 'WARMUP').length} `}
+                      {item.series.filter((s) => s.type === 'FEEDER').length > 0 &&
+                        `🔵×${item.series.filter((s) => s.type === 'FEEDER').length} `}
+                      {item.series.filter((s) => s.type === 'EFFECTIVE').length > 0 &&
+                        `🔴×${item.series.filter((s) => s.type === 'EFFECTIVE').length} `}
+                      {item.series.filter((s) => s.type === 'INTENSITY').length > 0 &&
+                        `🟣×${item.series.filter((s) => s.type === 'INTENSITY.length} `}
+                      {item.series.filter((s) => s.type === 'EFFECTIVE').length > 0 &&
+                        `🔴×${item.series.filter((s) => s.type === 'EFFECTIVE').length} `}
+                      {item.series.filter((s) => s.type === 'INTENSITY').length > 0 &&
+                        `🟣×${item.series.filter((s) => s.type === 'INTENSITY').length}`}
+                    </Text>
+                  </View>
+                  <View className="bg-zinc-800 px-3 py-1 rounded-full">
+                    <Text className="text-zinc-400 font-bold font-mono">
+                      {item.series.length}
+                    </Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            </View>
 
             {/* FOOTER "PRÓXIMO" */}
             {index < exercises.length - 1 && (
@@ -927,6 +1138,8 @@ export default function GymScreen() {
       {renderSpotifyModal()}
       {renderAxisModal()}
       {renderVideoViewer()}
+      {renderHistorialModal()}
+      {renderStructureModal()}
     </View>
   );
 }
