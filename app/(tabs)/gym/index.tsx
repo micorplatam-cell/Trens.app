@@ -798,10 +798,10 @@ export default function GymScreen() {
         transparent={true}
         onRequestClose={() => setHistorialModalVisible(false)}
       >
-        <View className="flex-1 bg-black">
+        <View className="flex-1 bg-transparent">
           <Animated.View
-            className="flex-1 bg-black rounded-t-3xl border-t border-zinc-800"
-            style={[{ maxWidth: SCREEN_WIDTH }, animatedStyleHistorial]}
+            className="flex-1 bg-black"
+            style={[{ width: SCREEN_WIDTH }, animatedStyleHistorial]}
           >
             {/* Drag Handle + Header (Área para arrastrar) */}
             <Animated.View
@@ -889,10 +889,10 @@ export default function GymScreen() {
         transparent={true}
         onRequestClose={() => setStructureModalVisible(false)}
       >
-        <View className="flex-1 bg-black">
+        <View className="flex-1 bg-transparent">
           <Animated.View
-            className="flex-1 bg-black rounded-t-3xl border-t border-zinc-800"
-            style={[{ maxWidth: SCREEN_WIDTH }, animatedStyleStructure]}
+            className="flex-1 bg-black"
+            style={[{ width: SCREEN_WIDTH }, animatedStyleStructure]}
           >
             {/* Drag Handle + Header (Área para arrastrar) */}
             <Animated.View
