@@ -1,5 +1,5 @@
-const expo = require('eslint-config-expo');
 const tsParser = require('@typescript-eslint/parser');
+const tsPlugin = require('@typescript-eslint/eslint-plugin');
 
 module.exports = [
   {
@@ -13,9 +13,11 @@ module.exports = [
       '*.config.ts',
     ],
   },
-  ...expo,
   {
     files: ['**/*.{js,jsx,ts,tsx}'],
+    plugins: {
+      '@typescript-eslint': tsPlugin,
+    },
     languageOptions: {
       parser: tsParser,
       parserOptions: {
@@ -24,6 +26,15 @@ module.exports = [
         ecmaFeatures: {
           jsx: true,
         },
+      },
+      globals: {
+        __DEV__: 'readonly',
+        fetch: 'readonly',
+        console: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+        setInterval: 'readonly',
+        clearInterval: 'readonly',
       },
     },
     rules: {

@@ -10,7 +10,6 @@ import {
   Pressable,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { FlashList } from '@shopify/flash-list';
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { useAuth } from '../../_layout';
@@ -19,7 +18,6 @@ import {
   Plus,
   Trash2,
   X,
-  Clock,
   Music,
   Sparkles,
   Timer,
@@ -27,7 +25,7 @@ import {
   Camera,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
-import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -135,17 +133,10 @@ export default function GymScreen() {
 
   const loadExercises = async () => {
     if (!user) {
-      console.log('❌ No user found');
       return;
     }
-
-    console.log('✅ User authenticated:', user.id);
     setLoading(true);
     try {
-      // Verificar sesión
-      const { data: sessionData } = await supabase.auth.getSession();
-      console.log('📱 Session active:', !!sessionData.session);
-
       const { data, error } = await supabase
         .from('user_assets')
         .select('*')
@@ -154,11 +145,8 @@ export default function GymScreen() {
         .order('order', { ascending: true });
 
       if (error) {
-        console.error('❌ Supabase error:', error);
         throw error;
       }
-
-      console.log('✅ Data loaded:', data?.length || 0, 'exercises');
 
       if (data && data.length > 0) {
         const mappedExercises: Exercise[] = data.map((item, index) => ({
@@ -173,11 +161,9 @@ export default function GymScreen() {
         setExercises(mappedExercises);
         setViewMode('FOCUS');
       } else {
-        console.log('📋 No exercises found, showing STRUCTURE mode');
         setViewMode('STRUCTURE');
       }
-    } catch (error) {
-      console.error('💥 Error loading exercises:', error);
+    } catch {
       setViewMode('STRUCTURE');
     } finally {
       setLoading(false);
@@ -791,23 +777,24 @@ export default function GymScreen() {
               <View className="items-center py-4 border-b border-zinc-800">
                 <View className="w-12 h-1 bg-zinc-700 rounded-full mb-4" />
 
-              {/* Header */}
-              <View className="px-6 pb-4 flex-row justify-between items-center w-full">
-                <View className="flex-1">
-                  <Text className="text-savage-text text-2xl font-bold">{modalExercise.name}</Text>
-                  <Text className="text-zinc-500 text-sm mt-1 tracking-wider">
-                    HISTORIAL DE VIDEOS
-                  </Text>
+                {/* Header */}
+                <View className="px-6 pb-4 flex-row justify-between items-center w-full">
+                  <View className="flex-1">
+                    <Text className="text-savage-text text-2xl font-bold">{modalExercise.name}</Text>
+                    <Text className="text-zinc-500 text-sm mt-1 tracking-wider">
+                      HISTORIAL DE VIDEOS
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      setHistorialModalVisible(false);
+                    }}
+                    className="bg-zinc-900 p-3 rounded-lg"
+                  >
+                    <X color="#DC2626" size={24} />
+                  </TouchableOpacity>
                 </View>
-                <TouchableOpacity
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    setHistorialModalVisible(false);
-                  }}
-                  className="bg-zinc-900 p-3 rounded-lg"
-                >
-                  <X color="#DC2626" size={24} />
-                </TouchableOpacity>
               </View>
             </GestureDetector>
 
@@ -915,23 +902,24 @@ export default function GymScreen() {
               <View className="items-center py-4 border-b border-zinc-800">
                 <View className="w-12 h-1 bg-zinc-700 rounded-full mb-4" />
 
-              {/* Header */}
-              <View className="px-6 pb-4 flex-row justify-between items-center w-full">
-                <View className="flex-1">
-                  <Text className="text-savage-text text-2xl font-bold">{modalExercise.name}</Text>
-                  <Text className="text-zinc-500 text-sm mt-1 tracking-wider">
-                    ESTRUCTURA DE SERIES
-                  </Text>
+                {/* Header */}
+                <View className="px-6 pb-4 flex-row justify-between items-center w-full">
+                  <View className="flex-1">
+                    <Text className="text-savage-text text-2xl font-bold">{modalExercise.name}</Text>
+                    <Text className="text-zinc-500 text-sm mt-1 tracking-wider">
+                      ESTRUCTURA DE SERIES
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      setStructureModalVisible(false);
+                    }}
+                    className="bg-zinc-900 p-3 rounded-lg"
+                  >
+                    <X color="#DC2626" size={24} />
+                  </TouchableOpacity>
                 </View>
-                <TouchableOpacity
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    setStructureModalVisible(false);
-                  }}
-                  className="bg-zinc-900 p-3 rounded-lg"
-                >
-                  <X color="#DC2626" size={24} />
-                </TouchableOpacity>
               </View>
             </GestureDetector>
 
