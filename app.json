@@ -1,8 +1,8 @@
 {
   "expo": {
     "name": "TRENS",
-    "slug": "trens-local",
-    "version": "1.0.2",
+    "slug": "trens-dev",
+    "version": "1.0.1",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "assetBundlePatterns": ["**/*"],
