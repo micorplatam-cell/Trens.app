@@ -9,9 +9,11 @@ import {
   ScrollView,
   Pressable,
   PanResponder,
+  AppState,
 } from 'react-native';
 import { Image } from 'expo-image';
 import React, { useState, useEffect, useRef } from 'react';
+import { useIsFocused } from '@react-navigation/native';
 import { supabase } from '../../../lib/supabase';
 import { useAuth } from '../../_layout';
 import {
@@ -23,9 +25,15 @@ import {
   Sparkles,
   Timer,
   Edit3,
-  Camera,
+  Camera as CameraIcon,
+  Video,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import * as FileSystem from 'expo-file-system/legacy';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
+import * as ImagePicker from 'expo-image-picker';
+import { VideoView, useVideoPlayer } from 'expo-video';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
   useSharedValue,
@@ -33,6 +41,74 @@ import Animated, {
   withSpring,
   runOnJS,
 } from 'react-native-reanimated';
+
+// ============================================================================
+// HELPERS
+// ============================================================================
+const isVideoUrl = (url: string | null | undefined): boolean => {
+  if (!url) return false;
+  const lowerUrl = url.toLowerCase();
+  return (
+    lowerUrl.includes('.mp4') ||
+    lowerUrl.includes('.mov') ||
+    lowerUrl.includes('.m4v') ||
+    lowerUrl.includes('.3gp') ||
+    lowerUrl.includes('.webm')
+  );
+};
+
+// ============================================================================
+// COMPONENTE: VIDEO HERO
+// ============================================================================
+const VideoHero = ({
+  videoUrl,
+  videoMuted,
+  isActive,
+}: {
+  videoUrl: string;
+  videoMuted: boolean;
+  isActive: boolean;
+}) => {
+  const player = useVideoPlayer(videoUrl, (player) => {
+    player.loop = true;
+    player.muted = videoMuted;
+    // No llamar play() aquí, se controla con isActive
+  });
+
+  // Control principal: play/pause basado SOLO en isActive
+  React.useEffect(() => {
+    if (!player) return;
+
+    if (isActive) {
+      player.muted = videoMuted;
+      player.play();
+    } else {
+      player.pause();
+    }
+  }, [isActive, videoMuted, player]);
+
+  // Reanudar video cuando la app vuelve al foreground (solo si isActive)
+  React.useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active' && player && isActive) {
+        player.play();
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [player, isActive]);
+
+  return (
+    <VideoView
+      style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT * 0.5 }}
+      player={player}
+      contentFit="cover"
+      nativeControls={false}
+    />
+  );
+};
 
 // ============================================================================
 // TYPES
@@ -88,6 +164,7 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 // ============================================================================
 export default function GymScreen() {
   const { user } = useAuth();
+  const isFocused = useIsFocused(); // Detecta si esta pantalla está activa
   const [viewMode, setViewMode] = useState<ViewMode>('LOADING');
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [templates, setTemplates] = useState<AssetTemplate[]>([]);
@@ -114,6 +191,25 @@ export default function GymScreen() {
   const [historialModalVisible, setHistorialModalVisible] = useState(false);
   const [structureModalVisible, setStructureModalVisible] = useState(false);
   const [modalExercise, setModalExercise] = useState<Exercise | null>(null);
+
+  // Camera State
+  const [cameraModalVisible, setCameraModalVisible] = useState(false);
+  const [permission, requestPermission] = useCameraPermissions();
+  const cameraRef = useRef<any>(null);
+  const [captureProcessing, setCaptureProcessing] = useState(false);
+
+  // Editor State
+  const [editorVisible, setEditorVisible] = useState(false);
+  const [imageToEdit, setImageToEdit] = useState<string | null>(null);
+  const [mediaType, setMediaType] = useState<'photo' | 'video'>('photo');
+  const [videoMuted, setVideoMuted] = useState(true);
+  const [isPickingFromGallery, setIsPickingFromGallery] = useState(false);
+
+  // Video playback control - trackea el ejercicio actualmente visible
+  const [activeExerciseIndex, setActiveExerciseIndex] = useState(0);
+  const viewabilityConfig = useRef({
+    itemVisiblePercentThreshold: 50, // Considera visible si está 50% en pantalla
+  });
 
   // Modal drag state
   const translateYHistorial = useSharedValue(0);
@@ -325,6 +421,218 @@ export default function GymScreen() {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // ============================================================================
+  // CAMERA FUNCTIONS
+  // ============================================================================
+  const openCamera = async () => {
+    if (!permission || !permission.granted) {
+      const result = await requestPermission();
+      if (!result.granted) {
+        alert('Se requiere permiso de cámara para esta función');
+        return;
+      }
+    }
+
+    setCameraModalVisible(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  };
+
+  const pickFromGallery = async () => {
+    try {
+      setIsPickingFromGallery(true); // Pausar videos mientras se elige de galería
+
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        alert('Se requiere permiso para acceder a la galería');
+        setIsPickingFromGallery(false);
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images', 'videos'],
+        allowsEditing: false,
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        const asset = result.assets[0];
+        setMediaType(asset.type === 'video' ? 'video' : 'photo');
+        setImageToEdit(asset.uri);
+        setEditorVisible(true);
+      }
+
+      setIsPickingFromGallery(false); // Reanudar videos
+    } catch (error) {
+      console.error('💥 Error picking from gallery:', error);
+      alert('Error al seleccionar archivo');
+      setIsPickingFromGallery(false);
+    }
+  };
+
+  const handleEditorSave = async () => {
+    if (!imageToEdit) return;
+
+    try {
+      setCaptureProcessing(true);
+      setEditorVisible(false);
+
+      if (mediaType === 'video') {
+        // Para videos, subir directamente sin procesamiento
+        await uploadExerciseMedia(imageToEdit, 'video');
+      } else {
+        // Para fotos, procesar y recortar cuadrado
+        // Primero obtener info de la imagen para calcular crop correcto
+        const imageInfo = await manipulateAsync(imageToEdit, []);
+        const { width: origWidth, height: origHeight } = imageInfo;
+
+        // Calcular el tamaño del lado más pequeño para crop cuadrado
+        const cropSize = Math.min(origWidth, origHeight);
+        const originX = (origWidth - cropSize) / 2;
+        const originY = (origHeight - cropSize) / 2;
+
+        // Recortar cuadrado desde el centro y luego resize a 1080x1080
+        const manipulatedImage = await manipulateAsync(
+          imageToEdit,
+          [
+            {
+              crop: {
+                originX,
+                originY,
+                width: cropSize,
+                height: cropSize,
+              },
+            },
+            { resize: { width: 1080, height: 1080 } },
+          ],
+          { compress: 0.7, format: SaveFormat.JPEG }
+        );
+
+        await uploadExerciseMedia(manipulatedImage.uri, 'photo');
+      }
+
+      setImageToEdit(null);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (error) {
+      console.error('💥 Error saving edited image:', error);
+      alert('Error al guardar');
+    } finally {
+      setCaptureProcessing(false);
+    }
+  };
+
+  const capturePhoto = async () => {
+    if (!cameraRef.current || captureProcessing) return;
+
+    try {
+      setCaptureProcessing(true);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+
+      const photo = await cameraRef.current.takePictureAsync({
+        quality: 0.8,
+        base64: false,
+      });
+
+      // Comprimir y hacer cuadrada la imagen (1:1)
+      const manipulatedImage = await manipulateAsync(
+        photo.uri,
+        [
+          { resize: { width: 1080 } },
+          {
+            crop: {
+              originX: 0,
+              originY: 0,
+              width: 1080,
+              height: 1080,
+            },
+          },
+        ],
+        { compress: 0.7, format: SaveFormat.JPEG }
+      );
+
+      await uploadExerciseMedia(manipulatedImage.uri, 'photo');
+    } catch (error) {
+      console.error('💥 Error capturing photo:', error);
+      alert('Error al capturar foto');
+    } finally {
+      setCaptureProcessing(false);
+    }
+  };
+
+  const uploadExerciseMedia = async (uri: string, type: 'photo' | 'video') => {
+    if (!user) return;
+
+    try {
+      const currentExercise = exercises[currentExerciseIndex];
+      if (!currentExercise) return;
+
+      // Eliminar el archivo anterior del storage si existe
+      if (currentExercise.image_url) {
+        const oldPath = currentExercise.image_url.split('/').pop();
+        if (oldPath && oldPath !== currentExercise.image_url) {
+          try {
+            await supabase.storage
+              .from('exercise-media')
+              .remove([`${user.id}/${currentExercise.id}/${oldPath}`]);
+          } catch (deleteError) {
+            console.warn('No se pudo eliminar archivo anterior:', deleteError);
+          }
+        }
+      }
+
+      // Leer archivo como base64
+      const base64 = await FileSystem.readAsStringAsync(uri, {
+        encoding: 'base64',
+      });
+
+      const fileExt = type === 'photo' ? 'jpg' : 'mp4';
+      const fileName = `exercise_${Date.now()}.${fileExt}`;
+      const filePath = `${user.id}/${currentExercise.id}/${fileName}`;
+
+      // Convertir base64 a ArrayBuffer
+      const byteCharacters = atob(base64);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+
+      // Upload a Supabase Storage
+      const { data, error } = await supabase.storage
+        .from('exercise-media')
+        .upload(filePath, byteArray, {
+          contentType: type === 'photo' ? 'image/jpeg' : 'video/mp4',
+          upsert: true,
+        });
+
+      if (error) throw error;
+
+      // Obtener URL pública
+      const { data: urlData } = supabase.storage.from('exercise-media').getPublicUrl(filePath);
+
+      console.log('📹 Media uploaded:', { type, filePath, url: urlData.publicUrl });
+
+      // Actualizar en la base de datos
+      const { error: updateError } = await supabase
+        .from('user_assets')
+        .update({ asset_url: urlData.publicUrl })
+        .eq('id', currentExercise.id);
+
+      if (updateError) throw updateError;
+
+      // Actualizar estado local
+      const updatedExercises = exercises.map((ex) =>
+        ex.id === currentExercise.id ? { ...ex, image_url: urlData.publicUrl } : ex
+      );
+      setExercises(updatedExercises);
+
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setCameraModalVisible(false);
+    } catch (error) {
+      console.error('💥 Error uploading media:', error);
+      alert('Error al guardar el archivo');
+    }
   };
 
   // ============================================================================
@@ -716,6 +1024,156 @@ export default function GymScreen() {
     </Modal>
   );
 
+  // MODAL: EDITOR SIMPLE
+  const renderEditorModal = () => (
+    <Modal visible={editorVisible} animationType="slide" statusBarTranslucent>
+      <View className="flex-1 bg-black">
+        {/* Header */}
+        <View className="flex-row justify-between items-center px-6 pt-14 pb-4 border-b border-zinc-800">
+          <TouchableOpacity
+            onPress={() => {
+              setEditorVisible(false);
+              setImageToEdit(null);
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            }}
+            className="bg-zinc-900 px-4 py-2 rounded-full"
+          >
+            <Text className="text-white font-bold">✕ CANCELAR</Text>
+          </TouchableOpacity>
+          <Text className="text-white font-bold text-lg">AJUSTAR RECORTE</Text>
+          <TouchableOpacity
+            onPress={() => {
+              handleEditorSave();
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+            }}
+            className="bg-red-600 px-4 py-2 rounded-full"
+          >
+            <Text className="text-white font-bold">✓ GUARDAR</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Preview cuadrado centrado */}
+        <View className="flex-1 justify-center items-center">
+          {imageToEdit && (
+            <Image
+              source={{ uri: imageToEdit }}
+              style={{
+                width: SCREEN_WIDTH * 0.9,
+                height: SCREEN_WIDTH * 0.9,
+              }}
+              className="rounded-lg"
+              contentFit="cover"
+            />
+          )}
+
+          {/* Overlay con guías de recorte */}
+          <View
+            style={{
+              position: 'absolute',
+              width: SCREEN_WIDTH * 0.9,
+              height: SCREEN_WIDTH * 0.9,
+              borderWidth: 2,
+              borderColor: '#DC2626',
+              borderStyle: 'dashed',
+            }}
+          />
+        </View>
+
+        {/* Info */}
+        <View className="px-6 py-8 border-t border-zinc-800">
+          <Text className="text-zinc-400 text-center text-sm">
+            La imagen se recortará en formato cuadrado 1:1
+          </Text>
+          {mediaType === 'video' && (
+            <Text className="text-zinc-400 text-center text-sm mt-2">
+              📹 Máximo 10 segundos de video
+            </Text>
+          )}
+        </View>
+      </View>
+    </Modal>
+  );
+
+  const renderCameraModal = () => (
+    <Modal
+      visible={cameraModalVisible}
+      animationType="slide"
+      transparent={false}
+      onRequestClose={() => setCameraModalVisible(false)}
+    >
+      <View className="flex-1 bg-savage-black">
+        {/* HEADER */}
+        <View className="absolute top-0 left-0 right-0 z-50 bg-black/90 px-6 pt-14 pb-4">
+          <View className="flex-row justify-between items-center mb-2">
+            <TouchableOpacity
+              onPress={() => {
+                setCameraModalVisible(false);
+              }}
+            >
+              <X color="#FFFFFF" size={28} />
+            </TouchableOpacity>
+            <Text className="text-savage-text font-bold text-lg tracking-wider">CAPTURAR FOTO</Text>
+            <View style={{ width: 28 }} />
+          </View>
+          <Text className="text-zinc-500 text-center text-sm">
+            {exercises[currentExerciseIndex]?.name}
+          </Text>
+        </View>
+
+        {/* CAMERA VIEW - FORMATO CUADRADO */}
+        <View className="flex-1 justify-center items-center bg-black">
+          <CameraView
+            ref={cameraRef}
+            style={{
+              width: SCREEN_WIDTH,
+              height: SCREEN_WIDTH,
+              overflow: 'hidden',
+            }}
+            facing="back"
+          />
+        </View>
+
+        {/* PROCESSING INDICATOR */}
+        {captureProcessing && (
+          <View className="absolute inset-0 bg-black/80 justify-center items-center">
+            <ActivityIndicator size="large" color="#DC2626" />
+            <Text className="text-white mt-4 font-bold">PROCESANDO...</Text>
+          </View>
+        )}
+
+        {/* CONTROLS */}
+        <View className="absolute bottom-0 left-0 right-0 pb-10 pt-6 bg-gradient-to-t from-black via-black/90 to-transparent">
+          {/* BOTÓN GALERÍA */}
+          <View className="flex-row justify-center mb-6">
+            <TouchableOpacity
+              onPress={() => {
+                setCameraModalVisible(false);
+                setTimeout(() => pickFromGallery(), 300);
+              }}
+              className="bg-zinc-900 px-6 py-3 rounded-full border border-zinc-700"
+            >
+              <Text className="text-white font-bold">📁 SELECCIONAR DE GALERÍA</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* CAPTURE BUTTON */}
+          <View className="items-center">
+            <TouchableOpacity
+              onPress={capturePhoto}
+              disabled={captureProcessing}
+              className="w-20 h-20 rounded-full border-4 border-white bg-transparent items-center justify-center"
+            >
+              <View className="w-16 h-16 rounded-full bg-white" />
+            </TouchableOpacity>
+            <Text className="text-zinc-500 text-xs mt-4 tracking-wider">
+              TOCA PARA CAPTURAR FOTO
+            </Text>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+
   const renderVideoViewer = () => (
     <Modal
       visible={videoViewerVisible}
@@ -825,7 +1283,7 @@ export default function GymScreen() {
             <ScrollView className="flex-1 px-6 py-6" showsVerticalScrollIndicator={true}>
               {modalExercise.videos.length === 0 ? (
                 <View className="flex-1 justify-center items-center py-20">
-                  <Camera color="#3F3F46" size={64} />
+                  <CameraIcon color="#3F3F46" size={64} />
                   <Text className="text-zinc-600 text-center mt-4 text-lg">
                     Sin videos registrados
                   </Text>
@@ -1045,18 +1503,72 @@ export default function GymScreen() {
         keyExtractor={(item) => item.id}
         pagingEnabled
         showsVerticalScrollIndicator={false}
+        viewabilityConfig={viewabilityConfig.current}
+        onViewableItemsChanged={({ viewableItems }) => {
+          // Actualizar el índice del ejercicio activo cuando cambia el visible
+          if (viewableItems.length > 0 && viewableItems[0].index !== null) {
+            setActiveExerciseIndex(viewableItems[0].index);
+          }
+        }}
         onMomentumScrollEnd={() => {
           // Haptic Feedback al cambiar ejercicio
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         }}
         renderItem={({ item, index }) => (
           <View style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT }} className="bg-black">
-            {/* IMAGEN HERO */}
-            <Image
-              source={{ uri: item.image_url }}
-              style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT * 0.5 }}
-              contentFit="cover"
-            />
+            {/* IMAGEN/VIDEO HERO */}
+            <View>
+              {isVideoUrl(item.image_url) ? (
+                <VideoHero
+                  videoUrl={item.image_url!}
+                  videoMuted={videoMuted}
+                  isActive={
+                    isFocused &&
+                    index === activeExerciseIndex &&
+                    !editorVisible &&
+                    !cameraModalVisible &&
+                    !isPickingFromGallery
+                  }
+                />
+              ) : (
+                <Image
+                  source={{ uri: item.image_url }}
+                  style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT * 0.5 }}
+                  contentFit="cover"
+                />
+              )}
+
+              {/* BOTÓN MUTE/AUDIO (solo para videos) */}
+              {isVideoUrl(item.image_url) && (
+                <TouchableOpacity
+                  onPress={() => {
+                    setVideoMuted(!videoMuted);
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  }}
+                  className="absolute bottom-6 left-6 bg-black/70 p-3 rounded-full border border-zinc-700"
+                >
+                  <Text className="text-white text-xl">{videoMuted ? '🔇' : '🔊'}</Text>
+                </TouchableOpacity>
+              )}
+
+              {/* BOTÓN CÁMARA (SOBRE LA IMAGEN) */}
+              <TouchableOpacity
+                onPress={() => {
+                  setCurrentExerciseIndex(index);
+                  openCamera();
+                }}
+                className="absolute bottom-6 right-6 bg-savage-red p-4 rounded-full shadow-lg border-2 border-white"
+                style={{
+                  shadowColor: '#DC2626',
+                  shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: 0.6,
+                  shadowRadius: 8,
+                  elevation: 8,
+                }}
+              >
+                <CameraIcon color="#FFFFFF" size={28} strokeWidth={2.5} />
+              </TouchableOpacity>
+            </View>
 
             {/* OVERLAY GRADIENTE */}
             <View className="absolute top-0 left-0 right-0 h-1/2 bg-gradient-to-b from-transparent to-black" />
@@ -1158,6 +1670,8 @@ export default function GymScreen() {
       {renderVideoViewer()}
       {renderHistorialModal()}
       {renderStructureModal()}
+      {renderCameraModal()}
+      {renderEditorModal()}
     </GestureHandlerRootView>
   );
 }
