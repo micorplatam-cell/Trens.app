@@ -10,6 +10,7 @@ import {
   Pressable,
   PanResponder,
   AppState,
+  TextInput,
 } from 'react-native';
 import { Image } from 'expo-image';
 import React, { useState, useEffect, useRef } from 'react';
@@ -41,6 +42,7 @@ import Animated, {
   withSpring,
   runOnJS,
 } from 'react-native-reanimated';
+import Slider from '@react-native-community/slider';
 
 // ============================================================================
 // HELPERS
@@ -115,12 +117,21 @@ const VideoHero = ({
 // ============================================================================
 type ViewMode = 'LOADING' | 'FOCUS' | 'STRUCTURE';
 type SeriesType = 'WARMUP' | 'FEEDER' | 'EFFECTIVE' | 'INTENSITY';
+type UserLevel = 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED' | 'PRO';
 
 interface Series {
   id: string;
   type: SeriesType;
   reps: string;
   note?: string;
+}
+
+interface SeriesConfig {
+  id: string;
+  reps: number;
+  type: 'WARMUP' | 'APPROACH' | 'EFFECTIVE' | 'FAILURE';
+  note: string;
+  weight: number;
 }
 
 interface VideoRecord {
@@ -150,6 +161,7 @@ interface ExerciseAlternative {
   name: string;
   image_url: string;
   videos: VideoRecord[];
+  series: Series[];
 }
 
 interface AssetTemplate {
@@ -209,6 +221,12 @@ export default function GymScreen() {
   // Editor State
   const [editorVisible, setEditorVisible] = useState(false);
   const [imageToEdit, setImageToEdit] = useState<string | null>(null);
+
+  // Series Config Modal State
+  const [seriesConfigModalVisible, setSeriesConfigModalVisible] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState<AssetTemplate | null>(null);
+  const [seriesConfig, setSeriesConfig] = useState<SeriesConfig[]>([]);
+  const [userLevel, setUserLevel] = useState<UserLevel>('INTERMEDIATE');
   const [mediaType, setMediaType] = useState<'photo' | 'video'>('photo');
   const [videoMuted, setVideoMuted] = useState(true);
   const [isPickingFromGallery, setIsPickingFromGallery] = useState(false);
@@ -224,6 +242,9 @@ export default function GymScreen() {
 
   // ID del ejercicio actual (puede ser principal o alternativa)
   const [currentVariationId, setCurrentVariationId] = useState<string | null>(null);
+
+  // Auto-repair flag para evitar loops infinitos
+  const autoRepairDone = useRef(false);
 
   // Modal drag state
   const translateYHistorial = useSharedValue(0);
@@ -324,8 +345,6 @@ export default function GymScreen() {
           .eq('user_id', user.id)
           .order('order_index', { ascending: true });
 
-
-
         // Cargar los datos completos de las alternativas
         const alternativeIds = alternativesData?.map((a: any) => a.alternative_exercise_id) || [];
         const { data: alternativeAssets } = await supabase
@@ -333,26 +352,134 @@ export default function GymScreen() {
           .select('*')
           .in('id', alternativeIds);
 
+        // AUTO-REPARACIÓN: Detectar y corregir IDs obsoletos
+        const orphanedRelations =
+          alternativesData?.filter((rel: any) => {
+            const mainExists = data.some((ex: any) => ex.id === rel.main_exercise_id);
+            return !mainExists;
+          }) || [];
 
+        if (orphanedRelations.length > 0 && data.length > 0 && !autoRepairDone.current) {
+          autoRepairDone.current = true; // Marcar como hecho
+          console.log(
+            '🔧 AUTO-REPAIR: Detectadas',
+            orphanedRelations.length,
+            'relaciones huérfanas'
+          );
+          console.log(
+            '📋 Ejercicios disponibles:',
+            data.map((ex: any) => ({ id: ex.id, name: ex.name, order: ex.order }))
+          );
+
+          // Buscar el ejercicio con order más bajo (el primero que se agregó)
+          const targetExercise = data.reduce((prev: any, curr: any) =>
+            curr.order < prev.order ? curr : prev
+          );
+
+          console.log(
+            '🔧 Reasignando alternativas al ejercicio:',
+            targetExercise.name,
+            '(ID:',
+            targetExercise.id,
+            ')'
+          );
+
+          // Actualizar todas las relaciones huérfanas de una vez
+          const { data: updateData, error: updateError } = await supabase
+            .from('user_exercise_alternatives')
+            .update({ main_exercise_id: targetExercise.id })
+            .in(
+              'id',
+              orphanedRelations.map((o: any) => o.id)
+            )
+            .select();
+
+          console.log('📝 Resultado del UPDATE:');
+          console.log('  - Data:', updateData);
+          console.log('  - Error:', updateError);
+
+          if (updateError) {
+            console.error('❌ Error actualizando relaciones:', updateError);
+            alert(
+              'Error al actualizar alternativas. Ejecuta clean_bicep_duplicates.sql en Supabase.'
+            );
+          } else {
+            console.log('✅ Relaciones actualizadas correctamente');
+            console.log('🔄 Recargando ejercicios completos en 1 segundo...');
+
+            // Resetear flag para que pueda volver a cargar
+            autoRepairDone.current = false;
+
+            // Recargar todo de nuevo para obtener las relaciones actualizadas
+            setLoading(true);
+            setTimeout(() => {
+              loadExercises();
+            }, 1000); // Esperar más tiempo para que se propague el cambio
+            return; // Salir de esta ejecución
+          }
+        }
 
         const mappedExercises: Exercise[] = data.map((item, index) => {
           // Buscar alternativas vinculadas a este ejercicio
           const alternativeRelations =
             alternativesData?.filter((rel: any) => rel.main_exercise_id === item.id) || [];
 
+          // LOG de depuración
+          if (item.name?.toLowerCase().includes('curl')) {
+            console.log('🔍 BICEP CURL - MAPEO:');
+            console.log('  - Exercise ID:', item.id);
+            console.log('  - Total alternativesData:', alternativesData?.length || 0);
 
+            // Mostrar TODAS las relaciones con detalles
+            if (alternativesData && alternativesData.length > 0) {
+              console.log('  - TODAS las relaciones cargadas:');
+              alternativesData.forEach((rel: any) => {
+                console.log('    >', {
+                  relId: rel.id,
+                  mainId: rel.main_exercise_id,
+                  altId: rel.alternative_exercise_id,
+                  match: rel.main_exercise_id === item.id,
+                });
+              });
+            }
 
+            console.log('  - Relations para ESTE ejercicio:', alternativeRelations.length);
+            if (alternativeRelations.length > 0) {
+              console.log('  - Relaciones encontradas:', alternativeRelations);
+            }
+          }
+
+          // Cargar estructura personalizada si existe (ANTES de mapear alternativas)
+          const customSeriesData: SeriesConfig[] = item.metadata?.custom_series || [];
+          const seriesForState: Series[] =
+            customSeriesData.length > 0
+              ? customSeriesData.map((s: SeriesConfig) => ({
+                  id: s.id,
+                  type:
+                    s.type === 'WARMUP'
+                      ? 'WARMUP'
+                      : s.type === 'APPROACH'
+                        ? 'FEEDER'
+                        : s.type === 'FAILURE'
+                          ? 'INTENSITY'
+                          : 'EFFECTIVE',
+                  reps: s.reps.toString(),
+                  note: s.note || undefined,
+                }))
+              : generateDefaultSeries(item.metadata?.sets || '4x10');
+
+          // Mapear alternativas CON las series del ejercicio principal
           const alternatives: ExerciseAlternative[] = alternativeRelations.map((rel: any) => {
             const asset = alternativeAssets?.find((a: any) => a.id === rel.alternative_exercise_id);
+
             return {
               id: asset?.id || '',
               name: asset?.name || 'UNKNOWN',
               image_url: asset?.asset_url || '',
-              videos: generateMockVideos(asset?.id || '', 0),
+              videos: [], // Las alternativas usan la imagen/video del asset_url
+              series: seriesForState, // Usar las mismas series del ejercicio principal
             };
           });
-
-
 
           return {
             id: item.id,
@@ -360,7 +487,7 @@ export default function GymScreen() {
             sets: item.metadata?.sets || '0x0',
             image_url: item.asset_url || '',
             order: item.order || 0,
-            series: generateDefaultSeries(item.metadata?.sets || '4x10'),
+            series: seriesForState,
             videos: generateMockVideos(item.id, index),
             alternatives,
           };
@@ -758,13 +885,105 @@ export default function GymScreen() {
   };
 
   // ============================================================================
+  // SERIES CONFIG FUNCTIONS
+  // ============================================================================
+  const openSeriesConfigModal = (template: AssetTemplate) => {
+    setSelectedTemplate(template);
+    setSeriesConfig([]);
+    setModalVisible(false);
+    setSeriesConfigModalVisible(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  };
+
+  const addSeriesManually = () => {
+    const newSeries: SeriesConfig = {
+      id: Date.now().toString(),
+      reps: 10,
+      type: 'EFFECTIVE',
+      note: '',
+      weight: 0,
+    };
+    setSeriesConfig([...seriesConfig, newSeries]);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
+
+  const removeSeriesConfig = (id: string) => {
+    setSeriesConfig(seriesConfig.filter((s) => s.id !== id));
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  };
+
+  const updateSeriesConfig = (id: string, field: keyof SeriesConfig, value: any) => {
+    setSeriesConfig(seriesConfig.map((s) => (s.id === id ? { ...s, [field]: value } : s)));
+  };
+
+  const generateRecommendedStructure = () => {
+    const structures: Record<UserLevel, SeriesConfig[]> = {
+      BEGINNER: [
+        { id: '1', reps: 12, type: 'WARMUP', note: 'Calentamiento', weight: 0 },
+        { id: '2', reps: 10, type: 'EFFECTIVE', note: '', weight: 0 },
+        { id: '3', reps: 10, type: 'EFFECTIVE', note: '', weight: 0 },
+        { id: '4', reps: 10, type: 'EFFECTIVE', note: '', weight: 0 },
+      ],
+      INTERMEDIATE: [
+        { id: '1', reps: 12, type: 'WARMUP', note: 'Calentamiento', weight: 0 },
+        { id: '2', reps: 10, type: 'APPROACH', note: 'Aproximación', weight: 0 },
+        { id: '3', reps: 8, type: 'EFFECTIVE', note: '', weight: 0 },
+        { id: '4', reps: 8, type: 'EFFECTIVE', note: '', weight: 0 },
+        { id: '5', reps: 8, type: 'EFFECTIVE', note: '', weight: 0 },
+      ],
+      ADVANCED: [
+        { id: '1', reps: 12, type: 'WARMUP', note: 'Calentamiento', weight: 0 },
+        { id: '2', reps: 8, type: 'APPROACH', note: 'Aproximación 1', weight: 0 },
+        { id: '3', reps: 6, type: 'APPROACH', note: 'Aproximación 2', weight: 0 },
+        { id: '4', reps: 6, type: 'EFFECTIVE', note: '', weight: 0 },
+        { id: '5', reps: 6, type: 'EFFECTIVE', note: '', weight: 0 },
+        { id: '6', reps: 6, type: 'EFFECTIVE', note: '', weight: 0 },
+        { id: '7', reps: 12, type: 'FAILURE', note: 'Al fallo', weight: 0 },
+      ],
+      PRO: [
+        { id: '1', reps: 15, type: 'WARMUP', note: 'Calentamiento', weight: 0 },
+        { id: '2', reps: 10, type: 'APPROACH', note: 'Aproximación 1', weight: 0 },
+        { id: '3', reps: 8, type: 'APPROACH', note: 'Aproximación 2', weight: 0 },
+        { id: '4', reps: 6, type: 'APPROACH', note: 'Aproximación 3', weight: 0 },
+        { id: '5', reps: 5, type: 'EFFECTIVE', note: '', weight: 0 },
+        { id: '6', reps: 5, type: 'EFFECTIVE', note: '', weight: 0 },
+        { id: '7', reps: 5, type: 'EFFECTIVE', note: '', weight: 0 },
+        { id: '8', reps: 5, type: 'EFFECTIVE', note: '', weight: 0 },
+        { id: '9', reps: 15, type: 'FAILURE', note: 'Al fallo', weight: 0 },
+      ],
+    };
+
+    setSeriesConfig(structures[userLevel]);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
+
+  // ============================================================================
   // ADD EXERCISE FROM TEMPLATE
   // ============================================================================
-  const addExerciseFromTemplate = async (template: AssetTemplate) => {
+  const addExerciseFromTemplate = async (
+    template: AssetTemplate,
+    customSeries?: SeriesConfig[]
+  ) => {
     if (!user) return;
 
     setAdding(true);
     try {
+      // Verificar si ya existe un ejercicio activo con el mismo nombre
+      const { data: existingActive } = await supabase
+        .from('user_assets')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('asset_type', 'gym_exercise')
+        .eq('name', template.name)
+        .is('deleted_at', null)
+        .single();
+
+      if (existingActive) {
+        alert('Este ejercicio ya está agregado en tu rutina');
+        setAdding(false);
+        return;
+      }
+
       // Verificar si existe un ejercicio eliminado con el mismo nombre
       const { data: existingDeleted } = await supabase
         .from('user_assets')
@@ -779,13 +998,22 @@ export default function GymScreen() {
       let error;
 
       if (existingDeleted) {
-        // Reactivar ejercicio eliminado (mantiene asset_url personalizado)
+        // Reactivar ejercicio eliminado (mantiene asset_url personalizado PERO actualiza metadata)
         const result = await supabase
           .from('user_assets')
           .update({
             deleted_at: null,
             order: exercises.length,
             updated_at: new Date().toISOString(),
+            metadata: {
+              sets: customSeries
+                ? `${customSeries.length}x${customSeries[0]?.reps || 10}`
+                : template.default_metadata.sets,
+              rest: template.default_metadata.rest,
+              category: template.category,
+              difficulty: template.difficulty,
+              custom_series: customSeries || null,
+            },
           })
           .eq('id', existingDeleted.id)
           .select()
@@ -803,10 +1031,13 @@ export default function GymScreen() {
             name: template.name,
             asset_url: template.image_url,
             metadata: {
-              sets: template.default_metadata.sets,
+              sets: customSeries
+                ? `${customSeries.length}x${customSeries[0]?.reps || 10}`
+                : template.default_metadata.sets,
               rest: template.default_metadata.rest,
               category: template.category,
               difficulty: template.difficulty,
+              custom_series: customSeries || null, // Guardar configuración personalizada
             },
             order: exercises.length,
           })
@@ -823,13 +1054,30 @@ export default function GymScreen() {
         // No crear alternativas automáticamente
         // El usuario las vinculará manualmente más adelante
 
+        // Convertir SeriesConfig a Series para el estado local
+        const seriesForState: Series[] = customSeries
+          ? customSeries.map((s) => ({
+              id: s.id,
+              type:
+                s.type === 'WARMUP'
+                  ? 'WARMUP'
+                  : s.type === 'APPROACH'
+                    ? 'FEEDER'
+                    : s.type === 'FAILURE'
+                      ? 'INTENSITY'
+                      : 'EFFECTIVE',
+              reps: s.reps.toString(),
+              note: s.note || undefined,
+            }))
+          : generateDefaultSeries(data.metadata.sets);
+
         const newExercise: Exercise = {
           id: data.id,
           name: data.name,
           sets: data.metadata.sets,
           image_url: data.asset_url,
           order: data.order,
-          series: generateDefaultSeries(data.metadata.sets),
+          series: seriesForState,
           videos: [], // Sin historial al principio
           alternatives: [], // Se cargarán en próximo loadExercises
         };
@@ -891,6 +1139,295 @@ export default function GymScreen() {
   }
 
   // ============================================================================
+  // RENDER SERIES CONFIG MODAL
+  // ============================================================================
+  const getSeriesTypeColor = (type: SeriesConfig['type']) => {
+    const colors = {
+      WARMUP: { bg: 'bg-blue-500/20', text: 'text-blue-400', bar: '#3B82F6' },
+      APPROACH: { bg: 'bg-yellow-500/20', text: 'text-yellow-400', bar: '#EAB308' },
+      EFFECTIVE: { bg: 'bg-green-500/20', text: 'text-green-400', bar: '#22C55E' },
+      FAILURE: { bg: 'bg-red-500/20', text: 'text-red-400', bar: '#EF4444' },
+    };
+    return colors[type];
+  };
+
+  const getSeriesTypeLabel = (type: SeriesConfig['type']) => {
+    return {
+      WARMUP: 'Calentamiento',
+      APPROACH: 'Aproximación',
+      EFFECTIVE: 'Efectiva',
+      FAILURE: 'Al Fallo',
+    }[type];
+  };
+
+  const renderSeriesConfigModal = () => (
+    <Modal
+      visible={seriesConfigModalVisible}
+      animationType="slide"
+      transparent={false}
+      statusBarTranslucent
+    >
+      <View className="flex-1 bg-savage-black">
+        {/* HEADER */}
+        <View className="px-6 pt-16 pb-4 border-b border-zinc-800">
+          <View className="flex-row justify-between items-center mb-4">
+            <Text className="text-savage-text text-3xl font-bold italic">CONFIGURAR EJERCICIO</Text>
+            <TouchableOpacity
+              onPress={() => {
+                setSeriesConfigModalVisible(false);
+                setModalVisible(true);
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              }}
+              className="bg-zinc-900 p-3 rounded-lg"
+            >
+              <X color="#DC2626" size={24} />
+            </TouchableOpacity>
+          </View>
+
+          {/* EXERCISE INFO */}
+          {selectedTemplate && (
+            <View className="flex-row items-center bg-zinc-900 p-4 rounded-lg">
+              <Image
+                source={{ uri: selectedTemplate.image_url }}
+                style={{ width: 60, height: 60 }}
+                className="rounded-lg mr-4"
+                contentFit="cover"
+              />
+              <View className="flex-1">
+                <Text className="text-white font-bold text-lg">{selectedTemplate.name}</Text>
+                <Text className="text-zinc-500 text-sm">{selectedTemplate.category}</Text>
+              </View>
+            </View>
+          )}
+        </View>
+
+        {/* SERIES LIST */}
+        <ScrollView className="flex-1 px-6 pt-4">
+          {seriesConfig.map((serie, index) => {
+            const colors = getSeriesTypeColor(serie.type);
+            return (
+              <View
+                key={serie.id}
+                className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 mb-3"
+              >
+                {/* HEADER */}
+                <View className="flex-row justify-between items-center mb-3">
+                  <Text className="text-white font-bold">SERIE {index + 1}</Text>
+                  <TouchableOpacity onPress={() => removeSeriesConfig(serie.id)}>
+                    <Trash2 color="#DC2626" size={20} />
+                  </TouchableOpacity>
+                </View>
+
+                {/* REPETICIONES */}
+                <Text className="text-zinc-500 text-sm mb-2">Repeticiones *</Text>
+                <View className="flex-row items-center mb-3">
+                  <TouchableOpacity
+                    onPress={() =>
+                      updateSeriesConfig(serie.id, 'reps', Math.max(1, serie.reps - 1))
+                    }
+                    className="bg-zinc-800 px-4 py-2 rounded-l-lg"
+                  >
+                    <Text className="text-white font-bold">-</Text>
+                  </TouchableOpacity>
+                  <TextInput
+                    className="bg-black px-6 py-2 border-y border-zinc-700 text-white font-mono font-bold text-center"
+                    keyboardType="numeric"
+                    value={serie.reps.toString()}
+                    onChangeText={(text) => {
+                      const num = parseInt(text) || 0;
+                      updateSeriesConfig(serie.id, 'reps', Math.max(1, num));
+                    }}
+                  />
+                  <TouchableOpacity
+                    onPress={() => updateSeriesConfig(serie.id, 'reps', serie.reps + 1)}
+                    className="bg-zinc-800 px-4 py-2 rounded-r-lg"
+                  >
+                    <Text className="text-white font-bold">+</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* TIPO DE SERIE CON SLIDER */}
+                <Text className="text-zinc-500 text-sm mb-2">Tipo de Serie *</Text>
+                <View className="mb-3">
+                  <View className="flex-row justify-between mb-2">
+                    {(['WARMUP', 'APPROACH', 'EFFECTIVE', 'FAILURE'] as const).map((type) => {
+                      const isActive = serie.type === type;
+                      const typeColors = getSeriesTypeColor(type);
+                      return (
+                        <TouchableOpacity
+                          key={type}
+                          onPress={() => updateSeriesConfig(serie.id, 'type', type)}
+                          className={`flex-1 mx-1 py-2 rounded ${
+                            isActive ? typeColors.bg : 'bg-zinc-800'
+                          }`}
+                        >
+                          <Text
+                            className={`text-center text-xs font-bold ${
+                              isActive ? typeColors.text : 'text-zinc-600'
+                            }`}
+                          >
+                            {getSeriesTypeLabel(type)}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                  {/* SLIDER ARRASTRABLE */}
+                  <Slider
+                    style={{ width: '100%', height: 40 }}
+                    minimumValue={0}
+                    maximumValue={3}
+                    value={
+                      serie.type === 'WARMUP'
+                        ? 0
+                        : serie.type === 'APPROACH'
+                          ? 1
+                          : serie.type === 'EFFECTIVE'
+                            ? 2
+                            : 3
+                    }
+                    onValueChange={(value) => {
+                      const types: SeriesConfig['type'][] = [
+                        'WARMUP',
+                        'APPROACH',
+                        'EFFECTIVE',
+                        'FAILURE',
+                      ];
+                      const index = Math.round(value);
+                      updateSeriesConfig(serie.id, 'type', types[index]);
+                    }}
+                    onSlidingComplete={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    }}
+                    minimumTrackTintColor={colors.bar}
+                    maximumTrackTintColor="#27272a"
+                    thumbTintColor={colors.bar}
+                  />
+                </View>
+
+                {/* PESO */}
+                <Text className="text-zinc-500 text-sm mb-2">Peso (kg)</Text>
+                <View className="flex-row items-center mb-3">
+                  <TouchableOpacity
+                    onPress={() =>
+                      updateSeriesConfig(serie.id, 'weight', Math.max(0, serie.weight - 2.5))
+                    }
+                    className="bg-zinc-800 px-4 py-2 rounded-l-lg"
+                  >
+                    <Text className="text-white font-bold">-</Text>
+                  </TouchableOpacity>
+                  <TextInput
+                    className="bg-black px-6 py-2 border-y border-zinc-700 text-white font-mono font-bold text-center"
+                    keyboardType="numeric"
+                    value={serie.weight.toString()}
+                    onChangeText={(text) => {
+                      const num = parseFloat(text) || 0;
+                      updateSeriesConfig(serie.id, 'weight', Math.max(0, num));
+                    }}
+                  />
+                  <TouchableOpacity
+                    onPress={() => updateSeriesConfig(serie.id, 'weight', serie.weight + 2.5)}
+                    className="bg-zinc-800 px-4 py-2 rounded-r-lg"
+                  >
+                    <Text className="text-white font-bold">+</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* INDICACIÓN */}
+                <Text className="text-zinc-500 text-sm mb-2">Indicación</Text>
+                <TextInput
+                  className="bg-black border border-zinc-700 rounded-lg p-3 text-white"
+                  placeholder="Sin indicación"
+                  placeholderTextColor="#71717a"
+                  value={serie.note}
+                  onChangeText={(text) => updateSeriesConfig(serie.id, 'note', text)}
+                  multiline
+                />
+              </View>
+            );
+          })}
+
+          {/* AGREGAR SERIE */}
+          <TouchableOpacity
+            onPress={addSeriesManually}
+            className="bg-zinc-900 border-2 border-dashed border-zinc-700 rounded-lg p-4 mb-3 items-center"
+          >
+            <Plus color="#FFFFFF" size={32} />
+            <Text className="text-white font-bold mt-2">AGREGAR SERIE</Text>
+          </TouchableOpacity>
+        </ScrollView>
+
+        {/* FOOTER */}
+        <View className="border-t border-zinc-800 p-6 bg-savage-dark">
+          <TouchableOpacity
+            onPress={generateRecommendedStructure}
+            className="bg-zinc-900 border border-savage-red p-4 rounded-lg mb-3"
+          >
+            <Text className="text-savage-red font-bold text-center">
+              AGREGAR ESTRUCTURA RECOMENDADA ({userLevel})
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={async () => {
+              if (seriesConfig.length === 0) {
+                alert('Debes agregar al menos una serie');
+                return;
+              }
+              if (!selectedTemplate) return;
+
+              setSeriesConfigModalVisible(false);
+
+              // Verificar si el ejercicio ya existe
+              const existingExercise = exercises.find((ex) => ex.id === selectedTemplate.id);
+
+              if (existingExercise) {
+                // Actualizar ejercicio existente
+                try {
+                  const { error } = await supabase
+                    .from('user_assets')
+                    .update({
+                      metadata: {
+                        ...selectedTemplate.default_metadata,
+                        sets: `${seriesConfig.length}x${seriesConfig[0]?.reps || 10}`,
+                        custom_series: seriesConfig,
+                      },
+                    })
+                    .eq('id', selectedTemplate.id);
+
+                  if (error) throw error;
+
+                  // Recargar ejercicios sin cambiar de modo
+                  await loadExercises();
+                } catch (error) {
+                  console.error('Error actualizando ejercicio:', error);
+                  alert('Error al actualizar ejercicio');
+                }
+              } else {
+                // Agregar nuevo ejercicio
+                await addExerciseFromTemplate(selectedTemplate, seriesConfig);
+              }
+            }}
+            className="bg-savage-red p-4 rounded-lg"
+            disabled={adding}
+          >
+            {adding ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text className="text-white font-bold text-center text-lg">
+                {exercises.find((ex) => ex.id === selectedTemplate?.id)
+                  ? 'ACTUALIZAR'
+                  : 'GUARDAR Y AGREGAR'}{' '}
+                ({seriesConfig.length} SERIES)
+              </Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+
+  // ============================================================================
   // RENDER CATALOG MODAL
   // ============================================================================
   const renderCatalogModal = () => (
@@ -927,7 +1464,7 @@ export default function GymScreen() {
 
             return (
               <TouchableOpacity
-                onPress={() => addExerciseFromTemplate(item)}
+                onPress={() => openSeriesConfigModal(item)}
                 disabled={adding}
                 className="flex-row bg-savage-dark border border-zinc-800 rounded-lg p-4 mb-3 items-center"
               >
@@ -1005,7 +1542,34 @@ export default function GymScreen() {
             </View>
           }
           renderItem={({ item, index }) => (
-            <View className="bg-savage-dark border border-zinc-800 rounded-lg p-4 mb-3 flex-row items-center">
+            <TouchableOpacity
+              onPress={async () => {
+                // Cargar template del ejercicio para editarlo
+                const { data } = await supabase
+                  .from('user_assets')
+                  .select('*')
+                  .eq('id', item.id)
+                  .single();
+
+                if (data) {
+                  const template: AssetTemplate = {
+                    id: data.id,
+                    name: data.name,
+                    asset_url: data.asset_url,
+                    category: data.metadata?.category || 'OTRO',
+                    difficulty: data.metadata?.difficulty || 'MEDIO',
+                    default_metadata: data.metadata || {},
+                  };
+
+                  // Cargar series existentes
+                  const existingSeries: SeriesConfig[] = data.metadata?.custom_series || [];
+                  setSeriesConfig(existingSeries);
+                  setSelectedTemplate(template);
+                  setSeriesConfigModalVisible(true);
+                }
+              }}
+              className="bg-savage-dark border border-zinc-800 rounded-lg p-4 mb-3 flex-row items-center"
+            >
               {/* ORDER NUMBER */}
               <View className="bg-savage-red rounded px-3 py-1 mr-4">
                 <Text className="text-savage-text font-bold font-mono">{index + 1}</Text>
@@ -1023,6 +1587,28 @@ export default function GymScreen() {
               <View className="flex-1">
                 <Text className="text-savage-text font-bold text-lg mb-1">{item.name}</Text>
                 <Text className="text-zinc-500 font-mono text-sm">{item.sets}</Text>
+                {/* RESUMEN DE ESTRUCTURA */}
+                {item.series && item.series.length > 0 && (
+                  <View className="flex-row flex-wrap gap-1 mt-2">
+                    {item.series.map((s, idx) => {
+                      const typeColors = {
+                        WARMUP: 'bg-blue-500',
+                        FEEDER: 'bg-yellow-500',
+                        EFFECTIVE: 'bg-green-500',
+                        INTENSITY: 'bg-red-500',
+                      };
+                      const colorClass = typeColors[s.type] || 'bg-zinc-500';
+                      return (
+                        <View
+                          key={idx}
+                          className={`${colorClass} w-6 h-6 rounded-full items-center justify-center`}
+                        >
+                          <Text className="text-white text-xs font-bold">{s.reps}</Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
               </View>
 
               <TouchableOpacity
@@ -1031,7 +1617,7 @@ export default function GymScreen() {
               >
                 <Trash2 color="#DC2626" size={20} />
               </TouchableOpacity>
-            </View>
+            </TouchableOpacity>
           )}
         />
 
@@ -1058,6 +1644,7 @@ export default function GymScreen() {
 
         {/* CATALOG MODAL */}
         {renderCatalogModal()}
+        {renderSeriesConfigModal()}
       </View>
     );
   }
@@ -1511,36 +2098,48 @@ export default function GymScreen() {
 
             {/* Lista de Series */}
             <ScrollView className="flex-1 px-6 py-6" showsVerticalScrollIndicator={true}>
-              {modalExercise.series.map((serie, idx) => (
-                <View
-                  key={serie.id}
-                  className="flex-row items-center mb-4 bg-zinc-900/50 p-5 rounded-xl border border-zinc-800"
-                >
-                  {/* Número de Serie */}
-                  <View className="bg-savage-red rounded-full w-10 h-10 justify-center items-center mr-4">
-                    <Text className="text-white font-bold text-lg font-mono">{idx + 1}</Text>
-                  </View>
+              {modalExercise.series.map((serie, idx) => {
+                const typeInfo = {
+                  WARMUP: { color: '#3b82f6', label: 'Calentamiento' },
+                  FEEDER: { color: '#eab308', label: 'Aproximación' },
+                  EFFECTIVE: { color: '#22c55e', label: 'Efectiva' },
+                  INTENSITY: { color: '#ef4444', label: 'Al Fallo' },
+                };
+                const info = typeInfo[serie.type] || { color: '#71717a', label: serie.type };
 
-                  {/* Color Tag */}
+                return (
                   <View
-                    className="w-4 h-4 rounded-full mr-4"
-                    style={{ backgroundColor: getSeriesColor(serie.type) }}
-                  />
+                    key={serie.id}
+                    className="flex-row items-center mb-4 bg-zinc-900/50 p-5 rounded-xl border border-zinc-800"
+                  >
+                    {/* Número de Serie */}
+                    <View className="bg-savage-red rounded-full w-10 h-10 justify-center items-center mr-4">
+                      <Text className="text-white font-bold text-lg font-mono">{idx + 1}</Text>
+                    </View>
 
-                  {/* Info */}
-                  <View className="flex-1">
-                    <Text className="text-savage-text font-bold text-xl mb-1">
-                      {serie.reps} REPS
-                    </Text>
-                    <Text className="text-zinc-500 text-xs uppercase tracking-wider">
-                      {serie.type}
-                    </Text>
-                    {serie.note && (
-                      <Text className="text-zinc-600 text-sm mt-2 italic">"{serie.note}"</Text>
-                    )}
+                    {/* Color Tag - Esfera más grande */}
+                    <View
+                      className="w-8 h-8 rounded-full mr-4 items-center justify-center"
+                      style={{ backgroundColor: info.color }}
+                    >
+                      <Text className="text-white text-xs font-bold">{serie.reps}</Text>
+                    </View>
+
+                    {/* Info */}
+                    <View className="flex-1">
+                      <Text className="text-savage-text font-bold text-xl mb-1">
+                        {serie.reps} REPS
+                      </Text>
+                      <Text className="text-zinc-500 text-xs uppercase tracking-wider">
+                        {info.label}
+                      </Text>
+                      {serie.note && (
+                        <Text className="text-zinc-600 text-sm mt-2 italic">"{serie.note}"</Text>
+                      )}
+                    </View>
                   </View>
-                </View>
-              ))}
+                );
+              })}
             </ScrollView>
           </Animated.View>
         </View>
@@ -1684,7 +2283,6 @@ export default function GymScreen() {
               onMomentumScrollEnd={(event) => {
                 const newIndex = Math.round(event.nativeEvent.contentOffset.x / SCREEN_WIDTH);
                 setActiveAlternatives((prev) => ({ ...prev, [index]: newIndex }));
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               }}
               renderItem={({ item: variation }) => (
                 <View style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT }} className="bg-black">
@@ -1820,40 +2418,46 @@ export default function GymScreen() {
                       </View>
                     </TouchableOpacity>
 
-                    {/* CARD ESTRUCTURA - Solo en ejercicio principal */}
-                    {variation.isMain && (
-                      <TouchableOpacity
-                        onPress={() => {
-                          setModalExercise(item);
-                          setStructureModalVisible(true);
-                        }}
-                        className="bg-zinc-900/80 backdrop-blur-xl p-5 rounded-xl border border-zinc-800"
-                      >
-                        <View className="flex-row items-center justify-between">
-                          <View className="flex-1">
-                            <Text className="text-zinc-500 text-xs tracking-widest mb-2">
-                              ESTRUCTURA
-                            </Text>
-                            <Text className="text-white font-bold text-lg">
-                              {item.series.length} SERIES DE{' '}
-                              {item.series.filter((s) => s.type === 'WARMUP').length > 0 &&
-                                `🟡×${item.series.filter((s) => s.type === 'WARMUP').length} `}
-                              {item.series.filter((s) => s.type === 'FEEDER').length > 0 &&
-                                `🔵×${item.series.filter((s) => s.type === 'FEEDER').length} `}
-                              {item.series.filter((s) => s.type === 'EFFECTIVE').length > 0 &&
-                                `🔴×${item.series.filter((s) => s.type === 'EFFECTIVE').length} `}
-                              {item.series.filter((s) => s.type === 'INTENSITY').length > 0 &&
-                                `🟣×${item.series.filter((s) => s.type === 'INTENSITY').length}`}
-                            </Text>
-                          </View>
-                          <View className="bg-zinc-800 px-3 py-1 rounded-full">
-                            <Text className="text-zinc-400 font-bold font-mono">
-                              {item.series.length}
-                            </Text>
+                    {/* CARD ESTRUCTURA - Mostrar en todas las variaciones */}
+                    <TouchableOpacity
+                      onPress={() => {
+                        setModalExercise(item);
+                        setStructureModalVisible(true);
+                      }}
+                      className="bg-zinc-900/80 backdrop-blur-xl p-5 rounded-xl border border-zinc-800"
+                    >
+                      <View className="flex-row items-center justify-between">
+                        <View className="flex-1">
+                          <Text className="text-zinc-500 text-xs tracking-widest mb-2">
+                            ESTRUCTURA
+                          </Text>
+                          <View className="flex-row flex-wrap gap-1">
+                            {(variation.series || item.series).map((s, idx) => {
+                              const typeColors = {
+                                WARMUP: 'bg-blue-500',
+                                FEEDER: 'bg-yellow-500',
+                                EFFECTIVE: 'bg-green-500',
+                                INTENSITY: 'bg-red-500',
+                              };
+                              const colorClass = typeColors[s.type] || 'bg-zinc-500';
+                              return (
+                                <View
+                                  key={idx}
+                                  className={`${colorClass} w-8 h-8 rounded-full items-center justify-center`}
+                                >
+                                  <Text className="text-white text-xs font-bold">{s.reps}</Text>
+                                </View>
+                              );
+                            })}
                           </View>
                         </View>
-                      </TouchableOpacity>
-                    )}
+                        <View className="bg-zinc-800 px-3 py-1 rounded-full">
+                          <Text className="text-zinc-400 font-bold font-mono">
+                            {(variation.series || item.series).length}
+                          </Text>
+                        </View>
+                      </View>
+                    </TouchableOpacity>
                   </View>
 
                   {/* FOOTER "PRÓXIMO" - Solo en ejercicio principal */}
