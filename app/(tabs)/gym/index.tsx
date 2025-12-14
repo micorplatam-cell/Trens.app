@@ -142,6 +142,14 @@ interface Exercise {
   order: number;
   series: Series[];
   videos: VideoRecord[];
+  alternatives?: ExerciseAlternative[]; // Ejercicios alternativos
+}
+
+interface ExerciseAlternative {
+  id: string;
+  name: string;
+  image_url: string;
+  videos: VideoRecord[];
 }
 
 interface AssetTemplate {
@@ -210,6 +218,12 @@ export default function GymScreen() {
   const viewabilityConfig = useRef({
     itemVisiblePercentThreshold: 50, // Considera visible si está 50% en pantalla
   });
+
+  // Trackear alternativa activa por cada ejercicio (exerciseIndex -> alternativeIndex)
+  const [activeAlternatives, setActiveAlternatives] = useState<Record<number, number>>({});
+
+  // ID del ejercicio actual (puede ser principal o alternativa)
+  const [currentVariationId, setCurrentVariationId] = useState<string | null>(null);
 
   // Modal drag state
   const translateYHistorial = useSharedValue(0);
@@ -295,6 +309,7 @@ export default function GymScreen() {
         .select('*')
         .eq('user_id', user.id)
         .eq('asset_type', 'gym_exercise')
+        .is('deleted_at', null) // Solo ejercicios activos
         .order('order', { ascending: true });
 
       if (error) {
@@ -302,15 +317,46 @@ export default function GymScreen() {
       }
 
       if (data && data.length > 0) {
-        const mappedExercises: Exercise[] = data.map((item, index) => ({
-          id: item.id,
-          name: item.name || 'UNNAMED',
-          sets: item.metadata?.sets || '0x0',
-          image_url: item.asset_url || '',
-          order: item.order || 0,
-          series: generateDefaultSeries(item.metadata?.sets || '4x10'),
-          videos: generateMockVideos(item.id, index), // Mock data por ahora
-        }));
+        // Cargar alternativas desde user_exercise_alternatives
+        const { data: alternativesData } = await supabase
+          .from('user_exercise_alternatives')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('order_index', { ascending: true });
+
+        // Cargar los datos completos de las alternativas
+        const alternativeIds = alternativesData?.map((a: any) => a.alternative_exercise_id) || [];
+        const { data: alternativeAssets } = await supabase
+          .from('user_assets')
+          .select('*')
+          .in('id', alternativeIds);
+
+        const mappedExercises: Exercise[] = data.map((item, index) => {
+          // Buscar alternativas vinculadas a este ejercicio
+          const alternativeRelations =
+            alternativesData?.filter((rel: any) => rel.main_exercise_id === item.id) || [];
+
+          const alternatives: ExerciseAlternative[] = alternativeRelations.map((rel: any) => {
+            const asset = alternativeAssets?.find((a: any) => a.id === rel.alternative_exercise_id);
+            return {
+              id: asset?.id || '',
+              name: asset?.name || 'UNKNOWN',
+              image_url: asset?.asset_url || '',
+              videos: generateMockVideos(asset?.id || '', 0),
+            };
+          });
+
+          return {
+            id: item.id,
+            name: item.name || 'UNNAMED',
+            sets: item.metadata?.sets || '0x0',
+            image_url: item.asset_url || '',
+            order: item.order || 0,
+            series: generateDefaultSeries(item.metadata?.sets || '4x10'),
+            videos: generateMockVideos(item.id, index),
+            alternatives,
+          };
+        });
         setExercises(mappedExercises);
         setViewMode('FOCUS');
       } else {
@@ -564,7 +610,23 @@ export default function GymScreen() {
     if (!user) return;
 
     try {
-      const currentExercise = exercises[currentExerciseIndex];
+      // Usar el ID de la variación actual (puede ser principal o alternativa)
+      const exerciseIdToUpdate = currentVariationId || exercises[currentExerciseIndex]?.id;
+      if (!exerciseIdToUpdate) return;
+
+      // Buscar el ejercicio (puede estar en exercises o en alternatives)
+      let currentExercise = exercises.find((ex) => ex.id === exerciseIdToUpdate);
+      if (!currentExercise) {
+        // Buscar en alternativas
+        for (const ex of exercises) {
+          const found = ex.alternatives?.find((alt) => alt.id === exerciseIdToUpdate);
+          if (found) {
+            currentExercise = found as any;
+            break;
+          }
+        }
+      }
+
       if (!currentExercise) return;
 
       // Eliminar el archivo anterior del storage si existe
@@ -574,7 +636,7 @@ export default function GymScreen() {
           try {
             await supabase.storage
               .from('exercise-media')
-              .remove([`${user.id}/${currentExercise.id}/${oldPath}`]);
+              .remove([`${user.id}/${exerciseIdToUpdate}/${oldPath}`]);
           } catch (deleteError) {
             console.warn('No se pudo eliminar archivo anterior:', deleteError);
           }
@@ -588,7 +650,7 @@ export default function GymScreen() {
 
       const fileExt = type === 'photo' ? 'jpg' : 'mp4';
       const fileName = `exercise_${Date.now()}.${fileExt}`;
-      const filePath = `${user.id}/${currentExercise.id}/${fileName}`;
+      const filePath = `${user.id}/${exerciseIdToUpdate}/${fileName}`;
 
       // Convertir base64 a ArrayBuffer
       const byteCharacters = atob(base64);
@@ -617,14 +679,26 @@ export default function GymScreen() {
       const { error: updateError } = await supabase
         .from('user_assets')
         .update({ asset_url: urlData.publicUrl })
-        .eq('id', currentExercise.id);
+        .eq('id', exerciseIdToUpdate);
 
       if (updateError) throw updateError;
 
-      // Actualizar estado local
-      const updatedExercises = exercises.map((ex) =>
-        ex.id === currentExercise.id ? { ...ex, image_url: urlData.publicUrl } : ex
-      );
+      // Actualizar estado local - puede ser ejercicio principal o alternativa
+      const updatedExercises = exercises.map((ex) => {
+        if (ex.id === exerciseIdToUpdate) {
+          return { ...ex, image_url: urlData.publicUrl };
+        }
+        // Si es alternativa, actualizar dentro del array de alternatives
+        if (ex.alternatives && ex.alternatives.length > 0) {
+          return {
+            ...ex,
+            alternatives: ex.alternatives.map((alt) =>
+              alt.id === exerciseIdToUpdate ? { ...alt, image_url: urlData.publicUrl } : alt
+            ),
+          };
+        }
+        return ex;
+      });
       setExercises(updatedExercises);
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -675,25 +749,57 @@ export default function GymScreen() {
 
     setAdding(true);
     try {
-      const newOrder = exercises.length;
-
-      const { data, error } = await supabase
+      // Verificar si existe un ejercicio eliminado con el mismo nombre
+      const { data: existingDeleted } = await supabase
         .from('user_assets')
-        .insert({
-          user_id: user.id,
-          asset_type: 'gym_exercise',
-          name: template.name,
-          asset_url: template.image_url,
-          metadata: {
-            sets: template.default_metadata.sets,
-            rest: template.default_metadata.rest,
-            category: template.category,
-            difficulty: template.difficulty,
-          },
-          order: newOrder,
-        })
-        .select()
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('asset_type', 'gym_exercise')
+        .eq('name', template.name)
+        .not('deleted_at', 'is', null)
         .single();
+
+      let data;
+      let error;
+
+      if (existingDeleted) {
+        // Reactivar ejercicio eliminado (mantiene asset_url personalizado)
+        const result = await supabase
+          .from('user_assets')
+          .update({
+            deleted_at: null,
+            order: exercises.length,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', existingDeleted.id)
+          .select()
+          .single();
+
+        data = result.data;
+        error = result.error;
+      } else {
+        // Crear nuevo ejercicio con imagen por defecto
+        const result = await supabase
+          .from('user_assets')
+          .insert({
+            user_id: user.id,
+            asset_type: 'gym_exercise',
+            name: template.name,
+            asset_url: template.image_url,
+            metadata: {
+              sets: template.default_metadata.sets,
+              rest: template.default_metadata.rest,
+              category: template.category,
+              difficulty: template.difficulty,
+            },
+            order: exercises.length,
+          })
+          .select()
+          .single();
+
+        data = result.data;
+        error = result.error;
+      }
 
       if (error) throw error;
 
@@ -724,7 +830,11 @@ export default function GymScreen() {
   // ============================================================================
   const deleteExercise = async (id: string) => {
     try {
-      const { error } = await supabase.from('user_assets').delete().eq('id', id);
+      // Soft delete: marcar como eliminado en lugar de borrar
+      const { error } = await supabase
+        .from('user_assets')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('id', id);
 
       if (error) throw error;
 
@@ -1514,153 +1624,222 @@ export default function GymScreen() {
           // Haptic Feedback al cambiar ejercicio
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         }}
-        renderItem={({ item, index }) => (
-          <View style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT }} className="bg-black">
-            {/* IMAGEN/VIDEO HERO */}
-            <View>
-              {isVideoUrl(item.image_url) ? (
-                <VideoHero
-                  videoUrl={item.image_url!}
-                  videoMuted={videoMuted}
-                  isActive={
-                    isFocused &&
-                    index === activeExerciseIndex &&
-                    !editorVisible &&
-                    !cameraModalVisible &&
-                    !isPickingFromGallery
-                  }
-                />
-              ) : (
-                <Image
-                  source={{ uri: item.image_url }}
-                  style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT * 0.5 }}
-                  contentFit="cover"
-                />
-              )}
+        renderItem={({ item, index }) => {
+          // Preparar array de ejercicios: principal + alternativas
+          const allVariations = [
+            {
+              id: item.id,
+              name: item.name,
+              image_url: item.image_url,
+              videos: item.videos,
+              isMain: true,
+            },
+            ...(item.alternatives || []).map((alt) => ({ ...alt, isMain: false })),
+          ];
 
-              {/* BOTÓN MUTE/AUDIO (solo para videos) */}
-              {isVideoUrl(item.image_url) && (
-                <TouchableOpacity
-                  onPress={() => {
-                    setVideoMuted(!videoMuted);
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  }}
-                  className="absolute bottom-6 left-6 bg-black/70 p-3 rounded-full border border-zinc-700"
-                >
-                  <Text className="text-white text-xl">{videoMuted ? '🔇' : '🔊'}</Text>
-                </TouchableOpacity>
-              )}
+          const activeAltIndex = activeAlternatives[index] || 0;
 
-              {/* BOTÓN CÁMARA (SOBRE LA IMAGEN) */}
-              <TouchableOpacity
-                onPress={() => {
-                  setCurrentExerciseIndex(index);
-                  openCamera();
-                }}
-                className="absolute bottom-6 right-6 bg-savage-red p-4 rounded-full shadow-lg border-2 border-white"
-                style={{
-                  shadowColor: '#DC2626',
-                  shadowOffset: { width: 0, height: 4 },
-                  shadowOpacity: 0.6,
-                  shadowRadius: 8,
-                  elevation: 8,
-                }}
-              >
-                <CameraIcon color="#FFFFFF" size={28} strokeWidth={2.5} />
-              </TouchableOpacity>
-            </View>
-
-            {/* OVERLAY GRADIENTE */}
-            <View className="absolute top-0 left-0 right-0 h-1/2 bg-gradient-to-b from-transparent to-black" />
-
-            {/* TÍTULO EJERCICIO */}
-            <View className="absolute top-32 left-6">
-              <Text className="text-savage-text text-4xl font-bold uppercase tracking-wide">
-                {item.name}
-              </Text>
-            </View>
-
-            {/* BOTÓN NOTAS */}
-            <TouchableOpacity
-              onPress={() => {
-                setCurrentExerciseIndex(index);
-                setNotesModalVisible(true);
+          return (
+            <FlatList
+              horizontal
+              data={allVariations}
+              keyExtractor={(variation) => variation.id}
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              initialScrollIndex={activeAltIndex}
+              getItemLayout={(_, idx) => ({
+                length: SCREEN_WIDTH,
+                offset: SCREEN_WIDTH * idx,
+                index: idx,
+              })}
+              onMomentumScrollEnd={(event) => {
+                const newIndex = Math.round(event.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+                setActiveAlternatives((prev) => ({ ...prev, [index]: newIndex }));
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               }}
-              className="absolute top-32 right-20 z-50 bg-black/70 p-3 rounded-full border border-zinc-700"
-            >
-              <Edit3 color="#FFFFFF" size={20} />
-            </TouchableOpacity>
-
-            {/* CARDS EN LA PARTE INFERIOR */}
-            <View className="absolute bottom-20 left-0 right-0 px-6 pb-6 bg-gradient-to-t from-black via-black/95 to-transparent pt-12">
-              {/* CARD HISTORIAL */}
-              <TouchableOpacity
-                onPress={() => {
-                  setModalExercise(item);
-                  setHistorialModalVisible(true);
-                }}
-                className="bg-zinc-900/80 backdrop-blur-xl p-5 rounded-xl border border-zinc-800 mb-3"
-              >
-                <View className="flex-row items-center justify-between">
-                  <View className="flex-1">
-                    <Text className="text-zinc-500 text-xs tracking-widest mb-2">HISTORIAL</Text>
-                    {item.videos.length > 0 ? (
-                      <>
-                        <Text className="text-white font-bold text-lg mb-1">
-                          Último: {item.videos[0].weight}kg × {item.videos[0].reps} reps
-                        </Text>
-                        <Text className="text-zinc-600 text-sm">{item.videos[0].date}</Text>
-                      </>
+              renderItem={({ item: variation }) => (
+                <View style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT }} className="bg-black">
+                  {/* IMAGEN/VIDEO HERO */}
+                  <View>
+                    {isVideoUrl(variation.image_url) ? (
+                      <VideoHero
+                        videoUrl={variation.image_url!}
+                        videoMuted={videoMuted}
+                        isActive={
+                          isFocused &&
+                          index === activeExerciseIndex &&
+                          activeAltIndex ===
+                            allVariations.findIndex((v) => v.id === variation.id) &&
+                          !editorVisible &&
+                          !cameraModalVisible &&
+                          !isPickingFromGallery
+                        }
+                      />
                     ) : (
-                      <Text className="text-zinc-600">Sin registros</Text>
+                      <Image
+                        source={{ uri: variation.image_url }}
+                        style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT * 0.5 }}
+                        contentFit="cover"
+                      />
+                    )}
+
+                    {/* BOTÓN MUTE/AUDIO (solo para videos) */}
+                    {isVideoUrl(variation.image_url) && (
+                      <TouchableOpacity
+                        onPress={() => {
+                          setVideoMuted(!videoMuted);
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        }}
+                        className="absolute bottom-6 left-6 bg-black/70 p-3 rounded-full border border-zinc-700"
+                      >
+                        <Text className="text-white text-xl">{videoMuted ? '🔇' : '🔊'}</Text>
+                      </TouchableOpacity>
+                    )}
+
+                    {/* BOTÓN CÁMARA (SOBRE LA IMAGEN) - Todas las variaciones */}
+                    <TouchableOpacity
+                      onPress={() => {
+                        setCurrentExerciseIndex(index);
+                        setCurrentVariationId(variation.id); // Guardar ID de la variación actual
+                        openCamera();
+                      }}
+                      className="absolute bottom-6 right-6 bg-savage-red p-4 rounded-full shadow-lg border-2 border-white"
+                      style={{
+                        shadowColor: '#DC2626',
+                        shadowOffset: { width: 0, height: 4 },
+                        shadowOpacity: 0.6,
+                        shadowRadius: 8,
+                        elevation: 8,
+                      }}
+                    >
+                      <CameraIcon color="#FFFFFF" size={28} strokeWidth={2.5} />
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* OVERLAY GRADIENTE */}
+                  <View className="absolute top-0 left-0 right-0 h-1/2 bg-gradient-to-b from-transparent to-black" />
+
+                  {/* TÍTULO EJERCICIO */}
+                  <View className="absolute top-32 left-6 right-20">
+                    <Text className="text-savage-text text-4xl font-bold uppercase tracking-wide">
+                      {variation.name}
+                    </Text>
+                    {!variation.isMain && (
+                      <Text className="text-zinc-500 text-sm mt-1">ALTERNATIVA</Text>
+                    )}
+
+                    {/* INDICADORES DE ALTERNATIVAS (DOTS) */}
+                    {allVariations.length > 1 && (
+                      <View className="flex-row gap-2 mt-3">
+                        {allVariations.map((_, dotIndex) => (
+                          <View
+                            key={dotIndex}
+                            className={`h-2 rounded-full ${
+                              dotIndex === activeAltIndex ? 'w-6 bg-savage-red' : 'w-2 bg-zinc-600'
+                            }`}
+                          />
+                        ))}
+                      </View>
                     )}
                   </View>
-                  <View className="bg-zinc-800 px-3 py-1 rounded-full">
-                    <Text className="text-zinc-400 font-bold font-mono">{item.videos.length}</Text>
-                  </View>
-                </View>
-              </TouchableOpacity>
 
-              {/* CARD ESTRUCTURA */}
-              <TouchableOpacity
-                onPress={() => {
-                  setModalExercise(item);
-                  setStructureModalVisible(true);
-                }}
-                className="bg-zinc-900/80 backdrop-blur-xl p-5 rounded-xl border border-zinc-800"
-              >
-                <View className="flex-row items-center justify-between">
-                  <View className="flex-1">
-                    <Text className="text-zinc-500 text-xs tracking-widest mb-2">ESTRUCTURA</Text>
-                    <Text className="text-white font-bold text-lg">
-                      {item.series.length} SERIES DE{' '}
-                      {item.series.filter((s) => s.type === 'WARMUP').length > 0 &&
-                        `🟡×${item.series.filter((s) => s.type === 'WARMUP').length} `}
-                      {item.series.filter((s) => s.type === 'FEEDER').length > 0 &&
-                        `🔵×${item.series.filter((s) => s.type === 'FEEDER').length} `}
-                      {item.series.filter((s) => s.type === 'EFFECTIVE').length > 0 &&
-                        `🔴×${item.series.filter((s) => s.type === 'EFFECTIVE').length} `}
-                      {item.series.filter((s) => s.type === 'INTENSITY').length > 0 &&
-                        `🟣×${item.series.filter((s) => s.type === 'INTENSITY').length}`}
-                    </Text>
-                  </View>
-                  <View className="bg-zinc-800 px-3 py-1 rounded-full">
-                    <Text className="text-zinc-400 font-bold font-mono">{item.series.length}</Text>
-                  </View>
-                </View>
-              </TouchableOpacity>
-            </View>
+                  {/* BOTÓN NOTAS */}
+                  <TouchableOpacity
+                    onPress={() => {
+                      setCurrentExerciseIndex(index);
+                      setNotesModalVisible(true);
+                    }}
+                    className="absolute top-32 right-20 z-50 bg-black/70 p-3 rounded-full border border-zinc-700"
+                  >
+                    <Edit3 color="#FFFFFF" size={20} />
+                  </TouchableOpacity>
 
-            {/* FOOTER "PRÓXIMO" */}
-            {index < exercises.length - 1 && (
-              <View className="absolute bottom-0 left-0 right-0 bg-zinc-900 py-3 px-6 border-t border-zinc-800">
-                <Text className="text-zinc-500 text-xs tracking-wider uppercase">
-                  PRÓXIMO: {exercises[index + 1].name}
-                </Text>
-              </View>
-            )}
-          </View>
-        )}
+                  {/* CARDS EN LA PARTE INFERIOR */}
+                  <View className="absolute bottom-20 left-0 right-0 px-6 pb-6 bg-gradient-to-t from-black via-black/95 to-transparent pt-12">
+                    {/* CARD HISTORIAL */}
+                    <TouchableOpacity
+                      onPress={() => {
+                        setModalExercise(item);
+                        setHistorialModalVisible(true);
+                      }}
+                      className="bg-zinc-900/80 backdrop-blur-xl p-5 rounded-xl border border-zinc-800 mb-3"
+                    >
+                      <View className="flex-row items-center justify-between">
+                        <View className="flex-1">
+                          <Text className="text-zinc-500 text-xs tracking-widest mb-2">
+                            HISTORIAL
+                          </Text>
+                          {variation.videos.length > 0 ? (
+                            <>
+                              <Text className="text-white font-bold text-lg mb-1">
+                                Último: {variation.videos[0].weight}kg × {variation.videos[0].reps}{' '}
+                                reps
+                              </Text>
+                              <Text className="text-zinc-600 text-sm">
+                                {variation.videos[0].date}
+                              </Text>
+                            </>
+                          ) : (
+                            <Text className="text-zinc-600">Sin registros</Text>
+                          )}
+                        </View>
+                        <View className="bg-zinc-800 px-3 py-1 rounded-full">
+                          <Text className="text-zinc-400 font-bold font-mono">
+                            {variation.videos.length}
+                          </Text>
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+
+                    {/* CARD ESTRUCTURA - Solo en ejercicio principal */}
+                    {variation.isMain && (
+                      <TouchableOpacity
+                        onPress={() => {
+                          setModalExercise(item);
+                          setStructureModalVisible(true);
+                        }}
+                        className="bg-zinc-900/80 backdrop-blur-xl p-5 rounded-xl border border-zinc-800"
+                      >
+                        <View className="flex-row items-center justify-between">
+                          <View className="flex-1">
+                            <Text className="text-zinc-500 text-xs tracking-widest mb-2">
+                              ESTRUCTURA
+                            </Text>
+                            <Text className="text-white font-bold text-lg">
+                              {item.series.length} SERIES DE{' '}
+                              {item.series.filter((s) => s.type === 'WARMUP').length > 0 &&
+                                `🟡×${item.series.filter((s) => s.type === 'WARMUP').length} `}
+                              {item.series.filter((s) => s.type === 'FEEDER').length > 0 &&
+                                `🔵×${item.series.filter((s) => s.type === 'FEEDER').length} `}
+                              {item.series.filter((s) => s.type === 'EFFECTIVE').length > 0 &&
+                                `🔴×${item.series.filter((s) => s.type === 'EFFECTIVE').length} `}
+                              {item.series.filter((s) => s.type === 'INTENSITY').length > 0 &&
+                                `🟣×${item.series.filter((s) => s.type === 'INTENSITY').length}`}
+                            </Text>
+                          </View>
+                          <View className="bg-zinc-800 px-3 py-1 rounded-full">
+                            <Text className="text-zinc-400 font-bold font-mono">
+                              {item.series.length}
+                            </Text>
+                          </View>
+                        </View>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  {/* FOOTER "PRÓXIMO" - Solo en ejercicio principal */}
+                  {variation.isMain && index < exercises.length - 1 && (
+                    <View className="absolute bottom-0 left-0 right-0 bg-zinc-900 py-3 px-6 border-t border-zinc-800">
+                      <Text className="text-zinc-500 text-xs tracking-wider uppercase">
+                        PRÓXIMO: {exercises[index + 1].name}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              )}
+            />
+          );
+        }}
       />
 
       {/* MODALS */}
