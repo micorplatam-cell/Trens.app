@@ -324,6 +324,8 @@ export default function GymScreen() {
           .eq('user_id', user.id)
           .order('order_index', { ascending: true });
 
+
+
         // Cargar los datos completos de las alternativas
         const alternativeIds = alternativesData?.map((a: any) => a.alternative_exercise_id) || [];
         const { data: alternativeAssets } = await supabase
@@ -331,10 +333,14 @@ export default function GymScreen() {
           .select('*')
           .in('id', alternativeIds);
 
+
+
         const mappedExercises: Exercise[] = data.map((item, index) => {
           // Buscar alternativas vinculadas a este ejercicio
           const alternativeRelations =
             alternativesData?.filter((rel: any) => rel.main_exercise_id === item.id) || [];
+
+
 
           const alternatives: ExerciseAlternative[] = alternativeRelations.map((rel: any) => {
             const asset = alternativeAssets?.find((a: any) => a.id === rel.alternative_exercise_id);
@@ -345,6 +351,8 @@ export default function GymScreen() {
               videos: generateMockVideos(asset?.id || '', 0),
             };
           });
+
+
 
           return {
             id: item.id,
@@ -358,12 +366,20 @@ export default function GymScreen() {
           };
         });
         setExercises(mappedExercises);
-        setViewMode('FOCUS');
+
+        // Solo cambiar a FOCUS si no estamos ya en algún modo
+        if (viewMode === 'LOADING') {
+          setViewMode('FOCUS');
+        }
       } else {
-        setViewMode('STRUCTURE');
+        if (viewMode === 'LOADING') {
+          setViewMode('STRUCTURE');
+        }
       }
     } catch {
-      setViewMode('STRUCTURE');
+      if (viewMode === 'LOADING') {
+        setViewMode('STRUCTURE');
+      }
     } finally {
       setLoading(false);
     }
@@ -804,6 +820,9 @@ export default function GymScreen() {
       if (error) throw error;
 
       if (data) {
+        // No crear alternativas automáticamente
+        // El usuario las vinculará manualmente más adelante
+
         const newExercise: Exercise = {
           id: data.id,
           name: data.name,
@@ -812,10 +831,14 @@ export default function GymScreen() {
           order: data.order,
           series: generateDefaultSeries(data.metadata.sets),
           videos: [], // Sin historial al principio
+          alternatives: [], // Se cargarán en próximo loadExercises
         };
 
         setExercises([...exercises, newExercise]);
         setModalVisible(false);
+
+        // Recargar ejercicios para obtener alternativas (sin cambiar modo)
+        setTimeout(() => loadExercises(), 500);
       }
     } catch (error) {
       console.error('💥 Error adding exercise:', error);
@@ -897,42 +920,48 @@ export default function GymScreen() {
           data={templates}
           keyExtractor={(item) => item.id}
           className="flex-1 px-6 pt-4"
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              onPress={() => addExerciseFromTemplate(item)}
-              disabled={adding}
-              className="flex-row bg-savage-dark border border-zinc-800 rounded-lg p-4 mb-3 items-center"
-            >
-              {/* IMAGE */}
-              <Image
-                source={{ uri: item.image_url }}
-                style={{ width: 80, height: 80 }}
-                className="rounded-lg mr-4"
-                contentFit="cover"
-              />
+          renderItem={({ item }) => {
+            // Buscar si el ejercicio ya existe con imagen personalizada
+            const existingExercise = exercises.find((ex) => ex.name === item.name);
+            const imageUrl = existingExercise?.image_url || item.image_url;
 
-              {/* INFO */}
-              <View className="flex-1">
-                <Text className="text-savage-text font-bold text-lg mb-1">{item.name}</Text>
-                <Text className="text-zinc-500 text-sm mb-2">{item.description}</Text>
-                <View className="flex-row gap-2">
-                  <View className="bg-zinc-900 px-2 py-1 rounded">
-                    <Text className="text-zinc-400 text-xs font-mono">{item.category}</Text>
-                  </View>
-                  <View className="bg-savage-red/20 px-2 py-1 rounded">
-                    <Text className="text-savage-red text-xs font-bold">{item.difficulty}</Text>
+            return (
+              <TouchableOpacity
+                onPress={() => addExerciseFromTemplate(item)}
+                disabled={adding}
+                className="flex-row bg-savage-dark border border-zinc-800 rounded-lg p-4 mb-3 items-center"
+              >
+                {/* IMAGE */}
+                <Image
+                  source={{ uri: imageUrl }}
+                  style={{ width: 80, height: 80 }}
+                  className="rounded-lg mr-4"
+                  contentFit="cover"
+                />
+
+                {/* INFO */}
+                <View className="flex-1">
+                  <Text className="text-savage-text font-bold text-lg mb-1">{item.name}</Text>
+                  <Text className="text-zinc-500 text-sm mb-2">{item.description}</Text>
+                  <View className="flex-row gap-2">
+                    <View className="bg-zinc-900 px-2 py-1 rounded">
+                      <Text className="text-zinc-400 text-xs font-mono">{item.category}</Text>
+                    </View>
+                    <View className="bg-savage-red/20 px-2 py-1 rounded">
+                      <Text className="text-savage-red text-xs font-bold">{item.difficulty}</Text>
+                    </View>
                   </View>
                 </View>
-              </View>
 
-              {/* ARROW */}
-              {adding ? (
-                <ActivityIndicator color="#DC2626" size="small" />
-              ) : (
-                <Text className="text-savage-red text-2xl font-bold">→</Text>
-              )}
-            </TouchableOpacity>
-          )}
+                {/* ARROW */}
+                {adding ? (
+                  <ActivityIndicator color="#DC2626" size="small" />
+                ) : (
+                  <Text className="text-savage-red text-2xl font-bold">→</Text>
+                )}
+              </TouchableOpacity>
+            );
+          }}
         />
       </View>
     </Modal>
