@@ -59,6 +59,19 @@ const isVideoUrl = (url: string | null | undefined): boolean => {
   );
 };
 
+const getDayOfWeek = (): DayOfWeek => {
+  const days: DayOfWeek[] = [
+    'Domingo',
+    'Lunes',
+    'Martes',
+    'Miércoles',
+    'Jueves',
+    'Viernes',
+    'Sábado',
+  ];
+  return days[new Date().getDay()];
+};
+
 // ============================================================================
 // COMPONENTE: VIDEO HERO
 // ============================================================================
@@ -104,7 +117,7 @@ const VideoHero = ({
 
   return (
     <VideoView
-      style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT * 0.5 }}
+      style={{ width: SCREEN_WIDTH, aspectRatio: 1 }}
       player={player}
       contentFit="cover"
       nativeControls={false}
@@ -118,12 +131,28 @@ const VideoHero = ({
 type ViewMode = 'LOADING' | 'FOCUS' | 'STRUCTURE';
 type SeriesType = 'WARMUP' | 'FEEDER' | 'EFFECTIVE' | 'INTENSITY';
 type UserLevel = 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED' | 'PRO';
+type DayOfWeek = 'Lunes' | 'Martes' | 'Miércoles' | 'Jueves' | 'Viernes' | 'Sábado' | 'Domingo';
 
 interface Series {
   id: string;
   type: SeriesType;
   reps: string;
   note?: string;
+  weight?: number;
+}
+
+interface TrainingDay {
+  id: string;
+  dayNumber: number; // 1, 2, 3...
+  muscleGroups: string; // "Pecho y Tríceps"
+  exercises: Exercise[];
+}
+
+interface TrainingProgram {
+  frequency: number; // 3, 4, 5, 6 días por semana
+  days: TrainingDay[];
+  lastAccessDate: string | null; // ISO date
+  currentDayIndex: number; // 0, 1, 2...
 }
 
 interface SeriesConfig {
@@ -153,6 +182,7 @@ interface Exercise {
   order: number;
   series: Series[];
   videos: VideoRecord[];
+  training_days: number[]; // Array de días donde aparece este ejercicio
   alternatives?: ExerciseAlternative[]; // Ejercicios alternativos
 }
 
@@ -186,7 +216,10 @@ export default function GymScreen() {
   const { user } = useAuth();
   const isFocused = useIsFocused(); // Detecta si esta pantalla está activa
   const [viewMode, setViewMode] = useState<ViewMode>('LOADING');
-  const [exercises, setExercises] = useState<Exercise[]>([]);
+  const [exercises, setExercises] = useState<Exercise[]>([]); // Ejercicios del día actual
+  const [allUserExercises, setAllUserExercises] = useState<{ name: string; image_url: string }[]>(
+    []
+  ); // TODOS los ejercicios del usuario
   const [templates, setTemplates] = useState<AssetTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
@@ -230,6 +263,19 @@ export default function GymScreen() {
   const [mediaType, setMediaType] = useState<'photo' | 'video'>('photo');
   const [videoMuted, setVideoMuted] = useState(true);
   const [isPickingFromGallery, setIsPickingFromGallery] = useState(false);
+
+  // Training Program State
+  const [trainingProgram, setTrainingProgram] = useState<TrainingProgram>({
+    frequency: 3,
+    days: [
+      { id: '1', dayNumber: 1, muscleGroups: 'Pecho y Espalda', exercises: [] },
+      { id: '2', dayNumber: 2, muscleGroups: 'Hombros, Bíceps y Tríceps', exercises: [] },
+      { id: '3', dayNumber: 3, muscleGroups: 'Piernas', exercises: [] },
+    ],
+    lastAccessDate: null,
+    currentDayIndex: 0,
+  });
+  const [selectedDayIndex, setSelectedDayIndex] = useState(0);
 
   // Video playback control - trackea el ejercicio actualmente visible
   const [activeExerciseIndex, setActiveExerciseIndex] = useState(0);
@@ -312,19 +358,97 @@ export default function GymScreen() {
   }, [historialModalVisible, structureModalVisible]);
 
   // ============================================================================
+  // TRAINING DAY LOGIC
+  // ============================================================================
+  const updateTrainingDay = async () => {
+    if (!user) return;
+
+    try {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('training_last_access, training_current_day')
+        .eq('id', user.id)
+        .single();
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayISO = today.toISOString();
+
+      let newDayIndex = trainingProgram.currentDayIndex;
+
+      if (profile?.training_last_access) {
+        const lastAccess = new Date(profile.training_last_access);
+        lastAccess.setHours(0, 0, 0, 0);
+        const lastAccessISO = lastAccess.toISOString();
+
+        // Si han pasado uno o más días, avanzar al siguiente día de entrenamiento
+        if (todayISO > lastAccessISO) {
+          newDayIndex = (profile.training_current_day || 0) + 1;
+          if (newDayIndex >= trainingProgram.frequency) {
+            newDayIndex = 0; // Reiniciar ciclo
+          }
+        } else {
+          // Mismo día, mantener el índice actual
+          newDayIndex = profile.training_current_day || 0;
+        }
+      } else {
+        // Primera vez, empezar en día 1 (índice 0)
+        newDayIndex = 0;
+      }
+
+      // Actualizar en Supabase
+      await supabase
+        .from('profiles')
+        .update({
+          training_last_access: todayISO,
+          training_current_day: newDayIndex,
+        })
+        .eq('id', user.id);
+
+      // Actualizar estado local
+      setTrainingProgram((prev) => ({
+        ...prev,
+        lastAccessDate: todayISO,
+        currentDayIndex: newDayIndex,
+      }));
+      setSelectedDayIndex(newDayIndex);
+    } catch (error) {
+      console.error('Error updating training day:', error);
+    }
+  };
+
+  useEffect(() => {
+    if (isFocused && user) {
+      updateTrainingDay();
+    }
+  }, [isFocused, user]);
+
+  // ============================================================================
   // FETCH EXERCISES FROM SUPABASE
   // ============================================================================
   useEffect(() => {
-    loadExercises();
     loadTemplates();
-  }, []);
+    if (user) {
+      loadAllUserExercises(); // Cargar TODOS los ejercicios del usuario al inicio
+    }
+  }, [user]);
 
-  const loadExercises = async () => {
+  // Recargar ejercicios cuando cambie el día seleccionado o el usuario
+  useEffect(() => {
+    if (user) {
+      loadExercises(selectedDayIndex);
+    }
+  }, [selectedDayIndex, user]);
+
+  const loadExercises = async (dayIndex: number | null = null) => {
     if (!user) {
       return;
     }
     setLoading(true);
+    const targetDayIndex = dayIndex !== null ? dayIndex : selectedDayIndex;
+
     try {
+      // Cargar TODOS los ejercicios del usuario y filtrar en cliente
       const { data, error } = await supabase
         .from('user_assets')
         .select('*')
@@ -333,11 +457,40 @@ export default function GymScreen() {
         .is('deleted_at', null) // Solo ejercicios activos
         .order('order', { ascending: true });
 
-      if (error) {
-        throw error;
+      if (error) throw error;
+
+      // Filtrar por día de entrenamiento usando array training_days
+      const filteredData =
+        data?.filter((item: any) => {
+          const itemDays = item.training_days || [0]; // Default [0] si no existe
+          return itemDays.includes(targetDayIndex);
+        }) || [];
+
+      console.log(`� TOTAL EJERCICIOS EN DB: ${data?.length || 0}`);
+      console.log(
+        '  - TODOS:',
+        data?.map((e: any) => ({
+          name: e.name,
+          id: e.id?.substring(0, 8),
+          hasCustomImage: !e.asset_url?.includes('unsplash'),
+          training_days: e.training_days,
+          created: e.created_at?.substring(0, 10),
+        }))
+      );
+
+      console.log(`📅 DÍA ${targetDayIndex}: ${filteredData.length} ejercicios filtrados`);
+      if (filteredData.length > 0) {
+        console.log(
+          '  - Filtrados:',
+          filteredData.map((e: any) => ({
+            name: e.name,
+            hasCustomImage: !e.asset_url?.includes('unsplash'),
+            training_days: e.training_days,
+          }))
+        );
       }
 
-      if (data && data.length > 0) {
+      if (filteredData && filteredData.length > 0) {
         // Cargar alternativas desde user_exercise_alternatives
         const { data: alternativesData } = await supabase
           .from('user_exercise_alternatives')
@@ -347,107 +500,65 @@ export default function GymScreen() {
 
         // Cargar los datos completos de las alternativas
         const alternativeIds = alternativesData?.map((a: any) => a.alternative_exercise_id) || [];
+
+        console.log('🔍 DEBUG ALTERNATIVAS:');
+        console.log('  - Total relaciones:', alternativesData?.length || 0);
+        console.log('  - IDs de alternativas:', alternativeIds);
+
         const { data: alternativeAssets } = await supabase
           .from('user_assets')
           .select('*')
           .in('id', alternativeIds);
 
-        // AUTO-REPARACIÓN: Detectar y corregir IDs obsoletos
+        console.log('  - Assets cargados:', alternativeAssets?.length || 0);
+        if (alternativeAssets && alternativeAssets.length > 0) {
+          console.log(
+            '  - Assets details:',
+            alternativeAssets.map((a: any) => ({
+              id: a.id,
+              name: a.name,
+              url: a.asset_url,
+            }))
+          );
+        }
+
+        // AUTO-REPARACIÓN: Detectar y corregir IDs obsoletos (verificar contra TODOS los ejercicios, no solo filteredData)
         const orphanedRelations =
           alternativesData?.filter((rel: any) => {
-            const mainExists = data.some((ex: any) => ex.id === rel.main_exercise_id);
+            const mainExists = data?.some((ex: any) => ex.id === rel.main_exercise_id);
             return !mainExists;
           }) || [];
 
-        if (orphanedRelations.length > 0 && data.length > 0 && !autoRepairDone.current) {
-          autoRepairDone.current = true; // Marcar como hecho
+        if (orphanedRelations.length > 0 && !autoRepairDone.current) {
+          autoRepairDone.current = true;
           console.log(
-            '🔧 AUTO-REPAIR: Detectadas',
+            '🗑️ AUTO-CLEANUP: Eliminando',
             orphanedRelations.length,
             'relaciones huérfanas'
           );
-          console.log(
-            '📋 Ejercicios disponibles:',
-            data.map((ex: any) => ({ id: ex.id, name: ex.name, order: ex.order }))
-          );
 
-          // Buscar el ejercicio con order más bajo (el primero que se agregó)
-          const targetExercise = data.reduce((prev: any, curr: any) =>
-            curr.order < prev.order ? curr : prev
-          );
-
-          console.log(
-            '🔧 Reasignando alternativas al ejercicio:',
-            targetExercise.name,
-            '(ID:',
-            targetExercise.id,
-            ')'
-          );
-
-          // Actualizar todas las relaciones huérfanas de una vez
-          const { data: updateData, error: updateError } = await supabase
+          // ELIMINAR relaciones huérfanas en lugar de reasignarlas
+          const { error: deleteError } = await supabase
             .from('user_exercise_alternatives')
-            .update({ main_exercise_id: targetExercise.id })
+            .delete()
             .in(
               'id',
               orphanedRelations.map((o: any) => o.id)
-            )
-            .select();
-
-          console.log('📝 Resultado del UPDATE:');
-          console.log('  - Data:', updateData);
-          console.log('  - Error:', updateError);
-
-          if (updateError) {
-            console.error('❌ Error actualizando relaciones:', updateError);
-            alert(
-              'Error al actualizar alternativas. Ejecuta clean_bicep_duplicates.sql en Supabase.'
             );
+
+          if (deleteError) {
+            console.error('❌ Error eliminando relaciones huérfanas:', deleteError);
           } else {
-            console.log('✅ Relaciones actualizadas correctamente');
-            console.log('🔄 Recargando ejercicios completos en 1 segundo...');
-
-            // Resetear flag para que pueda volver a cargar
-            autoRepairDone.current = false;
-
-            // Recargar todo de nuevo para obtener las relaciones actualizadas
-            setLoading(true);
-            setTimeout(() => {
-              loadExercises();
-            }, 1000); // Esperar más tiempo para que se propague el cambio
-            return; // Salir de esta ejecución
+            console.log('✅ Relaciones huérfanas eliminadas correctamente');
           }
+
+          // Continuar con el mapeo normal (sin recargar)
         }
 
-        const mappedExercises: Exercise[] = data.map((item, index) => {
+        const mappedExercises: Exercise[] = filteredData.map((item, index) => {
           // Buscar alternativas vinculadas a este ejercicio
           const alternativeRelations =
             alternativesData?.filter((rel: any) => rel.main_exercise_id === item.id) || [];
-
-          // LOG de depuración
-          if (item.name?.toLowerCase().includes('curl')) {
-            console.log('🔍 BICEP CURL - MAPEO:');
-            console.log('  - Exercise ID:', item.id);
-            console.log('  - Total alternativesData:', alternativesData?.length || 0);
-
-            // Mostrar TODAS las relaciones con detalles
-            if (alternativesData && alternativesData.length > 0) {
-              console.log('  - TODAS las relaciones cargadas:');
-              alternativesData.forEach((rel: any) => {
-                console.log('    >', {
-                  relId: rel.id,
-                  mainId: rel.main_exercise_id,
-                  altId: rel.alternative_exercise_id,
-                  match: rel.main_exercise_id === item.id,
-                });
-              });
-            }
-
-            console.log('  - Relations para ESTE ejercicio:', alternativeRelations.length);
-            if (alternativeRelations.length > 0) {
-              console.log('  - Relaciones encontradas:', alternativeRelations);
-            }
-          }
 
           // Cargar estructura personalizada si existe (ANTES de mapear alternativas)
           const customSeriesData: SeriesConfig[] = item.metadata?.custom_series || [];
@@ -465,6 +576,7 @@ export default function GymScreen() {
                           : 'EFFECTIVE',
                   reps: s.reps.toString(),
                   note: s.note || undefined,
+                  weight: s.weight || 0,
                 }))
               : generateDefaultSeries(item.metadata?.sets || '4x10');
 
@@ -488,6 +600,7 @@ export default function GymScreen() {
             image_url: item.asset_url || '',
             order: item.order || 0,
             series: seriesForState,
+            training_days: item.training_days || [0],
             videos: generateMockVideos(item.id, index),
             alternatives,
           };
@@ -499,6 +612,9 @@ export default function GymScreen() {
           setViewMode('FOCUS');
         }
       } else {
+        // No hay ejercicios para este día - limpiar estado
+        setExercises([]);
+
         if (viewMode === 'LOADING') {
           setViewMode('STRUCTURE');
         }
@@ -527,6 +643,32 @@ export default function GymScreen() {
       }
     } catch (error) {
       console.error('💥 Error loading templates:', error);
+    }
+  };
+
+  const loadAllUserExercises = async () => {
+    if (!user) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('user_assets')
+        .select('name, asset_url')
+        .eq('user_id', user.id)
+        .eq('asset_type', 'gym_exercise')
+        .is('deleted_at', null);
+
+      if (error) throw error;
+
+      if (data) {
+        setAllUserExercises(
+          data.map((ex) => ({
+            name: ex.name,
+            image_url: ex.asset_url,
+          }))
+        );
+      }
+    } catch (error) {
+      console.error('💥 Error loading all user exercises:', error);
     }
   };
 
@@ -819,11 +961,14 @@ export default function GymScreen() {
       console.log('📹 Media uploaded:', { type, filePath, url: urlData.publicUrl });
 
       // Actualizar en la base de datos
-      const { error: updateError } = await supabase
+      console.log('💾 Actualizando DB:', { exerciseIdToUpdate, newUrl: urlData.publicUrl });
+      const { error: updateError, data: updateData } = await supabase
         .from('user_assets')
         .update({ asset_url: urlData.publicUrl })
-        .eq('id', exerciseIdToUpdate);
+        .eq('id', exerciseIdToUpdate)
+        .select();
 
+      console.log('✅ DB actualizada:', { error: updateError, data: updateData });
       if (updateError) throw updateError;
 
       // Actualizar estado local - puede ser ejercicio principal o alternativa
@@ -843,6 +988,26 @@ export default function GymScreen() {
         return ex;
       });
       setExercises(updatedExercises);
+
+      // Actualizar también en allUserExercises para que el catálogo muestre la imagen nueva
+      const exerciseName =
+        exercises.find((ex) => ex.id === exerciseIdToUpdate)?.name ||
+        exercises
+          .flatMap((ex) => ex.alternatives || [])
+          .find((alt) => alt.id === exerciseIdToUpdate)?.name;
+
+      if (exerciseName) {
+        setAllUserExercises((prev) => {
+          const exists = prev.find((ex) => ex.name === exerciseName);
+          if (exists) {
+            return prev.map((ex) =>
+              ex.name === exerciseName ? { ...ex, image_url: urlData.publicUrl } : ex
+            );
+          } else {
+            return [...prev, { name: exerciseName, image_url: urlData.publicUrl }];
+          }
+        });
+      }
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setCameraModalVisible(false);
@@ -968,84 +1133,111 @@ export default function GymScreen() {
 
     setAdding(true);
     try {
-      // Verificar si ya existe un ejercicio activo con el mismo nombre
-      const { data: existingActive } = await supabase
+      // Verificar si ya existe un ejercicio con el mismo nombre (SIN importar el día)
+      const { data: existingExercise, error: searchError } = await supabase
         .from('user_assets')
         .select('*')
         .eq('user_id', user.id)
         .eq('asset_type', 'gym_exercise')
         .eq('name', template.name)
         .is('deleted_at', null)
-        .single();
+        .maybeSingle();
 
-      if (existingActive) {
-        alert('Este ejercicio ya está agregado en tu rutina');
-        setAdding(false);
-        return;
+      if (searchError) {
+        console.error('Error buscando ejercicio existente:', searchError);
       }
-
-      // Verificar si existe un ejercicio eliminado con el mismo nombre
-      const { data: existingDeleted } = await supabase
-        .from('user_assets')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('asset_type', 'gym_exercise')
-        .eq('name', template.name)
-        .not('deleted_at', 'is', null)
-        .single();
 
       let data;
       let error;
 
-      if (existingDeleted) {
-        // Reactivar ejercicio eliminado (mantiene asset_url personalizado PERO actualiza metadata)
+      if (existingExercise) {
+        // El ejercicio YA EXISTE - agregar este día a su array training_days
+        const currentDays = existingExercise.training_days || [0];
+
+        if (currentDays.includes(selectedDayIndex)) {
+          alert('Este ejercicio ya está agregado en este día de entrenamiento');
+          setAdding(false);
+          return;
+        }
+
+        // Agregar el nuevo día al array
+        const updatedDays = [...currentDays, selectedDayIndex].sort();
+
         const result = await supabase
           .from('user_assets')
           .update({
-            deleted_at: null,
-            order: exercises.length,
+            training_days: updatedDays,
             updated_at: new Date().toISOString(),
-            metadata: {
-              sets: customSeries
-                ? `${customSeries.length}x${customSeries[0]?.reps || 10}`
-                : template.default_metadata.sets,
-              rest: template.default_metadata.rest,
-              category: template.category,
-              difficulty: template.difficulty,
-              custom_series: customSeries || null,
-            },
           })
-          .eq('id', existingDeleted.id)
+          .eq('id', existingExercise.id)
           .select()
           .single();
 
         data = result.data;
         error = result.error;
       } else {
-        // Crear nuevo ejercicio con imagen por defecto
-        const result = await supabase
+        // Verificar si existe un ejercicio eliminado con el mismo nombre
+        const { data: existingDeleted } = await supabase
           .from('user_assets')
-          .insert({
-            user_id: user.id,
-            asset_type: 'gym_exercise',
-            name: template.name,
-            asset_url: template.image_url,
-            metadata: {
-              sets: customSeries
-                ? `${customSeries.length}x${customSeries[0]?.reps || 10}`
-                : template.default_metadata.sets,
-              rest: template.default_metadata.rest,
-              category: template.category,
-              difficulty: template.difficulty,
-              custom_series: customSeries || null, // Guardar configuración personalizada
-            },
-            order: exercises.length,
-          })
-          .select()
-          .single();
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('asset_type', 'gym_exercise')
+          .eq('name', template.name)
+          .not('deleted_at', 'is', null)
+          .maybeSingle();
 
-        data = result.data;
-        error = result.error;
+        if (existingDeleted) {
+          // Reactivar ejercicio eliminado (mantiene asset_url personalizado)
+          const result = await supabase
+            .from('user_assets')
+            .update({
+              deleted_at: null,
+              training_days: [selectedDayIndex], // Asignar al día seleccionado
+              order: exercises.length,
+              updated_at: new Date().toISOString(),
+              metadata: {
+                sets: customSeries
+                  ? `${customSeries.length}x${customSeries[0]?.reps || 10}`
+                  : template.default_metadata.sets,
+                rest: template.default_metadata.rest,
+                category: template.category,
+                difficulty: template.difficulty,
+                custom_series: customSeries || null,
+              },
+            })
+            .eq('id', existingDeleted.id)
+            .select()
+            .single();
+
+          data = result.data;
+          error = result.error;
+        } else {
+          // Crear NUEVO ejercicio con imagen por defecto
+          const result = await supabase
+            .from('user_assets')
+            .insert({
+              user_id: user.id,
+              asset_type: 'gym_exercise',
+              name: template.name,
+              asset_url: template.image_url,
+              training_days: [selectedDayIndex], // Array con el día seleccionado
+              metadata: {
+                sets: customSeries
+                  ? `${customSeries.length}x${customSeries[0]?.reps || 10}`
+                  : template.default_metadata.sets,
+                rest: template.default_metadata.rest,
+                category: template.category,
+                difficulty: template.difficulty,
+                custom_series: customSeries || null,
+              },
+              order: exercises.length,
+            })
+            .select()
+            .single();
+
+          data = result.data;
+          error = result.error;
+        }
       }
 
       if (error) throw error;
@@ -1078,6 +1270,7 @@ export default function GymScreen() {
           image_url: data.asset_url,
           order: data.order,
           series: seriesForState,
+          training_days: data.training_days || [selectedDayIndex],
           videos: [], // Sin historial al principio
           alternatives: [], // Se cargarán en próximo loadExercises
         };
@@ -1101,14 +1294,41 @@ export default function GymScreen() {
   // ============================================================================
   const deleteExercise = async (id: string) => {
     try {
-      // Soft delete: marcar como eliminado en lugar de borrar
-      const { error } = await supabase
+      // Obtener el ejercicio actual
+      const { data: exercise, error: fetchError } = await supabase
         .from('user_assets')
-        .update({ deleted_at: new Date().toISOString() })
-        .eq('id', id);
+        .select('training_days')
+        .eq('id', id)
+        .single();
 
-      if (error) throw error;
+      if (fetchError) throw fetchError;
 
+      const currentDays = exercise?.training_days || [0];
+
+      if (currentDays.length > 1) {
+        // Si está en MÚLTIPLES días, solo REMOVER el día actual del array
+        const updatedDays = currentDays.filter((day) => day !== selectedDayIndex);
+
+        const { error } = await supabase
+          .from('user_assets')
+          .update({
+            training_days: updatedDays,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', id);
+
+        if (error) throw error;
+      } else {
+        // Si está en UN SOLO día, hacer soft delete completo
+        const { error } = await supabase
+          .from('user_assets')
+          .update({ deleted_at: new Date().toISOString() })
+          .eq('id', id);
+
+        if (error) throw error;
+      }
+
+      // Remover del estado local (solo para el día actual)
       setExercises(exercises.filter((ex) => ex.id !== id));
     } catch (error) {
       console.error('💥 Error deleting exercise:', error);
@@ -1119,8 +1339,26 @@ export default function GymScreen() {
   // ============================================================================
   // SAVE AND TRAIN
   // ============================================================================
-  const saveAndTrain = () => {
+  const saveAndTrain = async () => {
     if (exercises.length === 0) return;
+
+    // Actualizar el día actual en el perfil
+    if (user) {
+      await supabase
+        .from('profiles')
+        .update({
+          training_current_day: selectedDayIndex,
+          training_last_access: new Date().toISOString(),
+        })
+        .eq('id', user.id);
+
+      setTrainingProgram((prev) => ({
+        ...prev,
+        currentDayIndex: selectedDayIndex,
+        lastAccessDate: new Date().toISOString(),
+      }));
+    }
+
     setViewMode('FOCUS');
   };
 
@@ -1188,7 +1426,11 @@ export default function GymScreen() {
           {selectedTemplate && (
             <View className="flex-row items-center bg-zinc-900 p-4 rounded-lg">
               <Image
-                source={{ uri: selectedTemplate.image_url }}
+                source={{
+                  uri:
+                    exercises.find((ex) => ex.name === selectedTemplate.name)?.image_url ||
+                    selectedTemplate.image_url,
+                }}
                 style={{ width: 60, height: 60 }}
                 className="rounded-lg mr-4"
                 contentFit="cover"
@@ -1458,8 +1700,8 @@ export default function GymScreen() {
           keyExtractor={(item) => item.id}
           className="flex-1 px-6 pt-4"
           renderItem={({ item }) => {
-            // Buscar si el ejercicio ya existe con imagen personalizada
-            const existingExercise = exercises.find((ex) => ex.name === item.name);
+            // Buscar si el ejercicio ya existe con imagen personalizada (en cualquier día)
+            const existingExercise = allUserExercises.find((ex) => ex.name === item.name);
             const imageUrl = existingExercise?.image_url || item.image_url;
 
             return (
@@ -1510,12 +1752,49 @@ export default function GymScreen() {
   if (viewMode === 'STRUCTURE') {
     return (
       <View className="flex-1 bg-savage-black">
-        {/* HEADER */}
+        {/* HEADER CON WHEEL ENGRANAJE */}
         <View className="px-6 pt-16 pb-4 border-b border-zinc-800">
-          <Text className="text-savage-text text-4xl font-bold italic mb-2">STRUCTURE</Text>
-          <Text className="text-zinc-500 text-sm tracking-wider">
-            CONFIGURA TU RUTINA DE ENTRENAMIENTO
-          </Text>
+          <Text className="text-savage-text text-4xl font-bold italic mb-4">STRUCTURE</Text>
+
+          {/* WHEEL SELECTOR DÍAS - AHORA HORIZONTAL */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ paddingRight: 24 }}
+          >
+            {trainingProgram.days.map((day, index) => {
+              const isActive = selectedDayIndex === index;
+              const isCurrent = trainingProgram.currentDayIndex === index;
+
+              return (
+                <TouchableOpacity
+                  key={day.id}
+                  onPress={() => {
+                    setSelectedDayIndex(index);
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  }}
+                  className={`mr-3 px-4 py-3 rounded-lg border-2 ${
+                    isActive ? 'bg-savage-red border-savage-red' : 'bg-zinc-900/50 border-zinc-800'
+                  }`}
+                >
+                  <View className="flex-row items-center gap-2">
+                    {isCurrent && (
+                      <View
+                        className={`w-2 h-2 rounded-full ${isActive ? 'bg-white' : 'bg-green-500'}`}
+                      />
+                    )}
+                    <Text
+                      className={`font-bold text-xs uppercase tracking-wider ${
+                        isActive ? 'text-white' : 'text-zinc-400'
+                      }`}
+                    >
+                      {day.muscleGroups}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
         </View>
 
         {/* EXERCISES LIST */}
@@ -1586,27 +1865,35 @@ export default function GymScreen() {
               {/* INFO */}
               <View className="flex-1">
                 <Text className="text-savage-text font-bold text-lg mb-1">{item.name}</Text>
-                <Text className="text-zinc-500 font-mono text-sm">{item.sets}</Text>
                 {/* RESUMEN DE ESTRUCTURA */}
                 {item.series && item.series.length > 0 && (
                   <View className="flex-row flex-wrap gap-1 mt-2">
-                    {item.series.map((s, idx) => {
-                      const typeColors = {
-                        WARMUP: 'bg-blue-500',
-                        FEEDER: 'bg-yellow-500',
-                        EFFECTIVE: 'bg-green-500',
-                        INTENSITY: 'bg-red-500',
-                      };
-                      const colorClass = typeColors[s.type] || 'bg-zinc-500';
-                      return (
-                        <View
-                          key={idx}
-                          className={`${colorClass} w-6 h-6 rounded-full items-center justify-center`}
-                        >
-                          <Text className="text-white text-xs font-bold">{s.reps}</Text>
-                        </View>
-                      );
-                    })}
+                    {item.series
+                      .filter((s) => s && typeof s === 'object')
+                      .map((s, idx) => {
+                        const typeColors = {
+                          WARMUP: 'bg-blue-500',
+                          FEEDER: 'bg-yellow-500',
+                          EFFECTIVE: 'bg-green-500',
+                          INTENSITY: 'bg-red-500',
+                        };
+                        const colorClass = typeColors[s.type] || 'bg-zinc-500';
+                        return (
+                          <View
+                            key={String(idx)}
+                            className={`${colorClass} w-8 h-8 rounded-full items-center justify-center`}
+                          >
+                            <Text className="text-white text-[10px] font-bold leading-tight">
+                              {String(s.reps || 0)}
+                            </Text>
+                            {s.weight && Number(s.weight) > 0 ? (
+                              <Text className="text-white text-[7px] leading-none">
+                                {Number(s.weight)}kg
+                              </Text>
+                            ) : null}
+                          </View>
+                        );
+                      })}
                   </View>
                 )}
               </View>
@@ -1984,8 +2271,8 @@ export default function GymScreen() {
       >
         <View className="flex-1 bg-transparent">
           <Animated.View
-            className="flex-1 bg-black"
-            style={[{ width: SCREEN_WIDTH }, animatedStyleHistorial]}
+            className="bg-black"
+            style={[{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT * 0.85 }, animatedStyleHistorial]}
           >
             {/* Drag Handle + Header (Área para arrastrar) */}
             <Animated.View
@@ -2037,10 +2324,17 @@ export default function GymScreen() {
 
                     {/* Datos */}
                     <View className="flex-1 p-4 justify-center">
-                      <Text className="text-white font-bold text-3xl font-mono mb-2">
-                        {video.weight}kg
-                      </Text>
-                      <Text className="text-zinc-400 text-lg mb-3">{video.reps} reps</Text>
+                      <View className="flex-row items-baseline mb-2">
+                        <Text className="text-white font-bold text-3xl font-mono">
+                          {video.weight}
+                        </Text>
+                        <Text className="text-zinc-500 text-sm ml-1">kg</Text>
+                        <Text className="text-zinc-700 text-2xl mx-2">×</Text>
+                        <Text className="text-white font-bold text-3xl font-mono">
+                          {video.reps}
+                        </Text>
+                        <Text className="text-zinc-500 text-sm ml-1">reps</Text>
+                      </View>
                       <Text className="text-zinc-600 text-sm">{video.date}</Text>
                       <View className="flex-row items-center mt-2">
                         <View
@@ -2075,8 +2369,8 @@ export default function GymScreen() {
       >
         <View className="flex-1 bg-transparent">
           <Animated.View
-            className="flex-1 bg-black"
-            style={[{ width: SCREEN_WIDTH }, animatedStyleStructure]}
+            className="bg-black"
+            style={[{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT * 0.85 }, animatedStyleStructure]}
           >
             {/* Drag Handle + Header (Área para arrastrar) */}
             <Animated.View
@@ -2098,48 +2392,69 @@ export default function GymScreen() {
 
             {/* Lista de Series */}
             <ScrollView className="flex-1 px-6 py-6" showsVerticalScrollIndicator={true}>
-              {modalExercise.series.map((serie, idx) => {
-                const typeInfo = {
-                  WARMUP: { color: '#3b82f6', label: 'Calentamiento' },
-                  FEEDER: { color: '#eab308', label: 'Aproximación' },
-                  EFFECTIVE: { color: '#22c55e', label: 'Efectiva' },
-                  INTENSITY: { color: '#ef4444', label: 'Al Fallo' },
-                };
-                const info = typeInfo[serie.type] || { color: '#71717a', label: serie.type };
+              {(modalExercise.series || [])
+                .filter((serie) => serie && typeof serie === 'object')
+                .map((serie, idx) => {
+                  const typeInfo = {
+                    WARMUP: { color: '#3b82f6', label: 'Calentamiento' },
+                    FEEDER: { color: '#eab308', label: 'Aproximación' },
+                    EFFECTIVE: { color: '#22c55e', label: 'Efectiva' },
+                    INTENSITY: { color: '#ef4444', label: 'Al Fallo' },
+                  };
+                  const info = typeInfo[serie.type as keyof typeof typeInfo] || {
+                    color: '#71717a',
+                    label: 'Efectiva',
+                  };
 
-                return (
-                  <View
-                    key={serie.id}
-                    className="flex-row items-center mb-4 bg-zinc-900/50 p-5 rounded-xl border border-zinc-800"
-                  >
-                    {/* Número de Serie */}
-                    <View className="bg-savage-red rounded-full w-10 h-10 justify-center items-center mr-4">
-                      <Text className="text-white font-bold text-lg font-mono">{idx + 1}</Text>
-                    </View>
-
-                    {/* Color Tag - Esfera más grande */}
+                  return (
                     <View
-                      className="w-8 h-8 rounded-full mr-4 items-center justify-center"
-                      style={{ backgroundColor: info.color }}
+                      key={serie.id || String(idx)}
+                      className="flex-row items-center mb-4 bg-zinc-900/50 p-5 rounded-xl border border-zinc-800"
                     >
-                      <Text className="text-white text-xs font-bold">{serie.reps}</Text>
-                    </View>
+                      {/* Número de Serie */}
+                      <View className="bg-savage-red rounded-full w-10 h-10 justify-center items-center mr-4">
+                        <Text className="text-white font-bold text-lg font-mono">{idx + 1}</Text>
+                      </View>
 
-                    {/* Info */}
-                    <View className="flex-1">
-                      <Text className="text-savage-text font-bold text-xl mb-1">
-                        {serie.reps} REPS
-                      </Text>
-                      <Text className="text-zinc-500 text-xs uppercase tracking-wider">
-                        {info.label}
-                      </Text>
-                      {serie.note && (
-                        <Text className="text-zinc-600 text-sm mt-2 italic">"{serie.note}"</Text>
-                      )}
+                      {/* Color Tag - Esfera más grande */}
+                      <View
+                        className="w-8 h-8 rounded-full mr-4 items-center justify-center"
+                        style={{ backgroundColor: info.color }}
+                      >
+                        <Text className="text-white text-xs font-bold">
+                          {String(serie.reps || 0)}
+                        </Text>
+                      </View>
+
+                      {/* Info */}
+                      <View className="flex-1">
+                        <View className="flex-row items-baseline mb-1">
+                          <Text className="text-savage-text font-bold text-xl">
+                            {String(serie.reps || 0)}
+                          </Text>
+                          <Text className="text-zinc-500 text-sm ml-1">REPS</Text>
+                          {serie.weight && Number(serie.weight) > 0 ? (
+                            <>
+                              <Text className="text-zinc-700 text-lg mx-2">×</Text>
+                              <Text className="text-savage-red font-bold text-xl">
+                                {String(serie.weight)}
+                              </Text>
+                              <Text className="text-zinc-500 text-sm ml-1">kg</Text>
+                            </>
+                          ) : null}
+                        </View>
+                        <Text className="text-zinc-500 text-xs uppercase tracking-wider">
+                          {String(info.label)}
+                        </Text>
+                        {serie.note ? (
+                          <Text className="text-zinc-600 text-sm mt-2 italic">
+                            "{String(serie.note)}"
+                          </Text>
+                        ) : null}
+                      </View>
                     </View>
-                  </View>
-                );
-              })}
+                  );
+                })}
             </ScrollView>
           </Animated.View>
         </View>
@@ -2156,7 +2471,7 @@ export default function GymScreen() {
       <View className="absolute top-0 left-0 right-0 z-50 bg-black/90 px-6 pt-14 pb-4 flex-row justify-between items-center">
         <View className="flex-1 items-center">
           <Text className="text-savage-text text-xl font-bold tracking-wider uppercase">
-            PUSH DAY A
+            {trainingProgram.days[selectedDayIndex]?.muscleGroups || 'ENTRENAMIENTO'}
           </Text>
           <Text className="text-zinc-500 text-sm font-mono">{getCurrentTime()}</Text>
         </View>
@@ -2432,23 +2747,32 @@ export default function GymScreen() {
                             ESTRUCTURA
                           </Text>
                           <View className="flex-row flex-wrap gap-1">
-                            {(variation.series || item.series).map((s, idx) => {
-                              const typeColors = {
-                                WARMUP: 'bg-blue-500',
-                                FEEDER: 'bg-yellow-500',
-                                EFFECTIVE: 'bg-green-500',
-                                INTENSITY: 'bg-red-500',
-                              };
-                              const colorClass = typeColors[s.type] || 'bg-zinc-500';
-                              return (
-                                <View
-                                  key={idx}
-                                  className={`${colorClass} w-8 h-8 rounded-full items-center justify-center`}
-                                >
-                                  <Text className="text-white text-xs font-bold">{s.reps}</Text>
-                                </View>
-                              );
-                            })}
+                            {(variation.series || item.series || [])
+                              .filter((s) => s && typeof s === 'object')
+                              .map((s, idx) => {
+                                const typeColors = {
+                                  WARMUP: 'bg-blue-500',
+                                  FEEDER: 'bg-yellow-500',
+                                  EFFECTIVE: 'bg-green-500',
+                                  INTENSITY: 'bg-red-500',
+                                };
+                                const colorClass = typeColors[s.type] || 'bg-zinc-500';
+                                return (
+                                  <View
+                                    key={String(idx)}
+                                    className={`${colorClass} w-8 h-8 rounded-full items-center justify-center`}
+                                  >
+                                    <Text className="text-white text-[10px] font-bold leading-tight">
+                                      {String(s.reps || 0)}
+                                    </Text>
+                                    {s.weight && Number(s.weight) > 0 ? (
+                                      <Text className="text-white text-[7px] leading-none">
+                                        {Number(s.weight)}kg
+                                      </Text>
+                                    ) : null}
+                                  </View>
+                                );
+                              })}
                           </View>
                         </View>
                         <View className="bg-zinc-800 px-3 py-1 rounded-full">
