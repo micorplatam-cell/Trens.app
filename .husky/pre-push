@@ -1,0 +1,25 @@
+#!/bin/sh
+. "$(dirname "$0")/_/husky.sh"
+
+echo "🚀 Validando código antes de push..."
+
+# Type-check
+echo "🔍 Ejecutando type-check..."
+npm run type-check
+
+if [ $? -ne 0 ]; then
+  echo "❌ ERROR: Type-check falló."
+  echo "💡 Consejo: Ejecuta 'npm run type-check' para ver los errores específicos."
+  exit 1
+fi
+
+# Lint (opcional - comentado por defecto)
+# echo "🔍 Ejecutando linter..."
+# npm run lint
+# 
+# if [ $? -ne 0 ]; then
+#   echo "❌ ERROR: Lint falló. Ejecuta 'npm run lint:fix' para corregir automáticamente."
+#   exit 1
+# fi
+
+echo "✅ Todas las validaciones pasaron. Procediendo con push..."
