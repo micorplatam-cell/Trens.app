@@ -21,7 +21,7 @@ jobs:
           cache: 'npm'
       
       - name: 📦 Instalar dependencias
-        run: npm ci
+        run: npm install --legacy-peer-deps
       
       - name: 🔍 Ejecutar type-check
         run: npm run type-check
