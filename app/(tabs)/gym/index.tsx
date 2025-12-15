@@ -1307,7 +1307,7 @@ export default function GymScreen() {
 
       if (currentDays.length > 1) {
         // Si está en MÚLTIPLES días, solo REMOVER el día actual del array
-        const updatedDays = currentDays.filter((day) => day !== selectedDayIndex);
+        const updatedDays = currentDays.filter((day: number) => day !== selectedDayIndex);
 
         const { error } = await supabase
           .from('user_assets')
@@ -1834,7 +1834,8 @@ export default function GymScreen() {
                   const template: AssetTemplate = {
                     id: data.id,
                     name: data.name,
-                    asset_url: data.asset_url,
+                    description: data.metadata?.description || '',
+                    image_url: data.asset_url || '',
                     category: data.metadata?.category || 'OTRO',
                     difficulty: data.metadata?.difficulty || 'MEDIO',
                     default_metadata: data.metadata || {},
@@ -2747,16 +2748,16 @@ export default function GymScreen() {
                             ESTRUCTURA
                           </Text>
                           <View className="flex-row flex-wrap gap-1">
-                            {(variation.series || item.series || [])
-                              .filter((s) => s && typeof s === 'object')
-                              .map((s, idx) => {
-                                const typeColors = {
+                            {((variation as any).series || (item as any).series || [])
+                              .filter((s: any) => s && typeof s === 'object')
+                              .map((s: any, idx: number) => {
+                                const typeColors: Record<string, string> = {
                                   WARMUP: 'bg-blue-500',
                                   FEEDER: 'bg-yellow-500',
                                   EFFECTIVE: 'bg-green-500',
                                   INTENSITY: 'bg-red-500',
                                 };
-                                const colorClass = typeColors[s.type] || 'bg-zinc-500';
+                                const colorClass = typeColors[s.type as string] || 'bg-zinc-500';
                                 return (
                                   <View
                                     key={String(idx)}
@@ -2777,7 +2778,7 @@ export default function GymScreen() {
                         </View>
                         <View className="bg-zinc-800 px-3 py-1 rounded-full">
                           <Text className="text-zinc-400 font-bold font-mono">
-                            {(variation.series || item.series).length}
+                            {((variation as any).series || (item as any).series || []).length}
                           </Text>
                         </View>
                       </View>
