@@ -1948,8 +1948,8 @@ export default function GymScreen() {
       onRequestClose={() => setNotesModalVisible(false)}
     >
       <View className="flex-1 bg-black/95 justify-center px-6">
-        <View className="bg-zinc-900 rounded-2xl p-6 border border-zinc-800">
-          <Text className="text-savage-text text-2xl font-bold mb-4">NOTAS</Text>
+        <View className="bg-glass-strong rounded-savage p-6 border border-glass-border">
+          <Text className="text-savage-text text-2xl font-bold mb-4 tracking-wider">NOTAS</Text>
           <Text className="text-zinc-500 text-sm mb-4">
             Ejercicio: {exercises[currentExerciseIndex]?.name}
           </Text>
@@ -1977,9 +1977,9 @@ export default function GymScreen() {
       onRequestClose={() => setSpotifyModalVisible(false)}
     >
       <View className="flex-1 bg-black/90 justify-center px-6">
-        <View className="bg-zinc-900 rounded-2xl p-6 border border-green-500">
+        <View className="bg-glass-strong rounded-savage p-6 border border-green-500">
           <View className="flex-row justify-between items-center mb-6">
-            <Text className="text-savage-text text-2xl font-bold">SPOTIFY</Text>
+            <Text className="text-savage-text text-2xl font-bold tracking-wider">SPOTIFY</Text>
             <TouchableOpacity onPress={() => setSpotifyModalVisible(false)}>
               <X color="#FFFFFF" size={24} />
             </TouchableOpacity>
@@ -2016,8 +2016,8 @@ export default function GymScreen() {
             </TouchableOpacity>
           </View>
 
-          <View className="flex-1 bg-zinc-900 rounded-2xl p-4 border border-savage-red">
-            <Text className="text-zinc-500 text-sm mb-4">
+          <View className="flex-1 bg-glass-strong rounded-savage p-4 border border-savage-red">
+            <Text className="text-zinc-400 text-sm mb-4 tracking-wider">
               Contexto: {exercises[currentExerciseIndex]?.name}
             </Text>
             <Text className="text-zinc-600">
@@ -2705,7 +2705,7 @@ export default function GymScreen() {
                         setModalExercise(item);
                         setHistorialModalVisible(true);
                       }}
-                      className="bg-zinc-900/80 backdrop-blur-xl p-5 rounded-xl border border-zinc-800 mb-3"
+                      className="bg-glass-strong/80 backdrop-blur-xl p-5 rounded-savage border border-glass-border mb-3"
                     >
                       <View className="flex-row items-center justify-between">
                         <View className="flex-1">
@@ -2740,7 +2740,7 @@ export default function GymScreen() {
                         setModalExercise(item);
                         setStructureModalVisible(true);
                       }}
-                      className="bg-zinc-900/80 backdrop-blur-xl p-5 rounded-xl border border-zinc-800"
+                      className="bg-glass-strong/80 backdrop-blur-xl p-5 rounded-savage border border-glass-border"
                     >
                       <View className="flex-row items-center justify-between">
                         <View className="flex-1">

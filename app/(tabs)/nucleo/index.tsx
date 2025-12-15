@@ -1,28 +1,89 @@
-import { View, Text, TouchableOpacity } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
+import { Dumbbell, Bike, Waves, ChevronRight } from 'lucide-react-native';
+import * as Haptics from 'expo-haptics';
+
+const SPORTS = [
+  { id: 'gym', name: 'GYM', icon: Dumbbell, description: 'FUERZA & HIPERTROFIA' },
+  { id: 'moto', name: 'MOTO', icon: Bike, description: 'ENDURO & MOTOCROSS' },
+  { id: 'surf', name: 'SURF', icon: Waves, description: 'OLAS & FREESTYLE' },
+];
 
 export default function NucleoScreen() {
   const router = useRouter();
 
-  return (
-    <View className="flex-1 bg-savage-black p-6 pt-16">
-      <Text className="text-savage-text text-4xl font-bold italic mb-2">NUCLEO</Text>
-      <Text className="text-zinc-500 text-lg mb-8">SELECT YOUR ARENA</Text>
+  const handleSportSelect = (sportId: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (sportId === 'gym') {
+      router.push('/(tabs)/gym');
+    }
+  };
 
-      <View className="flex-row flex-wrap gap-4">
-        {['SURF', 'MOTO', 'GYM'].map((sport) => (
-          <TouchableOpacity
-            key={sport}
-            className="w-full bg-savage-dark p-6 rounded border border-zinc-800 mb-4"
-          >
-            <Text className="text-savage-text text-xl font-bold">{sport}</Text>
-          </TouchableOpacity>
-        ))}
+  return (
+    <View className="flex-1 bg-savage-black">
+      {/* Header */}
+      <View className="px-6 pt-16 pb-6">
+        <Text className="text-savage-text text-4xl font-bold italic mb-2">NUCLEO</Text>
+        <Text className="text-zinc-400 text-lg tracking-wider">SELECCIONA TU ARENA</Text>
       </View>
 
-       <TouchableOpacity onPress={() => router.push('/(auth)/login')} className="mt-10">
-          <Text className="text-zinc-700">Back to Login (Dev)</Text>
-      </TouchableOpacity>
+      {/* Sports Grid */}
+      <ScrollView className="flex-1 px-6" showsVerticalScrollIndicator={false}>
+        {SPORTS.map((sport) => {
+          const IconComponent = sport.icon;
+          const isAvailable = sport.id === 'gym';
+
+          return (
+            <TouchableOpacity
+              key={sport.id}
+              onPress={() => handleSportSelect(sport.id)}
+              disabled={!isAvailable}
+              className={`mb-4 p-6 rounded-2xl border ${
+                isAvailable
+                  ? 'bg-glass-strong border-savage-red'
+                  : 'bg-glass-light border-zinc-800 opacity-50'
+              }`}
+              style={{
+                shadowColor: isAvailable ? '#DC2626' : 'transparent',
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: isAvailable ? 0.3 : 0,
+                shadowRadius: 8,
+                elevation: isAvailable ? 4 : 0,
+              }}
+            >
+              <View className="flex-row items-center justify-between">
+                <View className="flex-row items-center">
+                  <View
+                    className={`w-16 h-16 rounded-2xl items-center justify-center mr-4 ${
+                      isAvailable ? 'bg-savage-red' : 'bg-zinc-800'
+                    }`}
+                  >
+                    <IconComponent color="#FFFFFF" size={32} />
+                  </View>
+                  <View>
+                    <Text className="text-savage-text text-2xl font-bold tracking-wider">
+                      {sport.name}
+                    </Text>
+                    <Text className="text-zinc-500 text-sm tracking-wide">{sport.description}</Text>
+                    {!isAvailable && (
+                      <Text className="text-zinc-600 text-xs mt-1">PRÓXIMAMENTE</Text>
+                    )}
+                  </View>
+                </View>
+                {isAvailable && <ChevronRight color="#DC2626" size={28} />}
+              </View>
+            </TouchableOpacity>
+          );
+        })}
+
+        {/* Dev Link */}
+        <TouchableOpacity
+          onPress={() => router.push('/(auth)/login')}
+          className="mt-10 mb-20 items-center"
+        >
+          <Text className="text-zinc-700 text-sm">← Volver al Login (Dev)</Text>
+        </TouchableOpacity>
+      </ScrollView>
     </View>
   );
 }

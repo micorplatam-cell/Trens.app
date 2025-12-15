@@ -1,3 +1,9 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ============================================
+   TRENS GLOBAL STYLES - SAVAGE MODE
+   NativeWind handles all styling via Tailwind.
+   CSS custom properties don't work in React Native.
+   ============================================ */

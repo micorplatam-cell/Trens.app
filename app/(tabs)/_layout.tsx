@@ -9,12 +9,14 @@ export default function TabsLayout() {
         headerShown: false,
         tabBarStyle: {
           backgroundColor: '#000000',
-          borderTopColor: '#1A1A1A',
-          height: 80,
+          borderTopColor: '#27272a',
+          borderTopWidth: 1,
+          height: 85,
+          paddingBottom: 25,
           paddingTop: 10,
         },
         tabBarActiveTintColor: '#DC2626',
-        tabBarInactiveTintColor: '#666666',
+        tabBarInactiveTintColor: '#71717a',
         tabBarShowLabel: false,
       }}
     >
@@ -33,8 +35,18 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="pro/index"
         options={{
-          tabBarIcon: () => (
-            <View className="bg-savage-red p-3 rounded-full -mt-8 border-4 border-savage-black">
+          tabBarIcon: ({ focused }) => (
+            <View
+              className={`p-4 rounded-full ${focused ? 'bg-savage-red' : 'bg-zinc-800'}`}
+              style={{
+                marginBottom: 20,
+                shadowColor: focused ? '#DC2626' : 'transparent',
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: focused ? 0.5 : 0,
+                shadowRadius: 8,
+                elevation: focused ? 8 : 0,
+              }}
+            >
               <Camera color="#FFFFFF" size={32} />
             </View>
           ),
