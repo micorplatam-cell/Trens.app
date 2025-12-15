@@ -13,15 +13,17 @@
 **Problema:** Errores "Text strings must be rendered within a <Text> component"
 
 **Solución implementada:**
+
 - Filtrado de series inválidas antes de renderizar: `.filter((s: any) => s && typeof s === 'object')`
 - Conversión explícita de valores dinámicos: `String(s.reps || 0)`, `Number(s.weight)`
 - Cambio de condicionales `&&` a operadores ternarios con `null`
 - Aplicado en 3 ubicaciones del código:
   - Línea ~1893: Series circles en vista STRUCTURE
-  - Línea ~2764: Series circles en modal ESTRUCTURA  
+  - Línea ~2764: Series circles en modal ESTRUCTURA
   - Línea ~2417: Modal de estructura de series
 
 **Archivos modificados:**
+
 - `app/(tabs)/gym/index.tsx`
 
 ---
@@ -31,6 +33,7 @@
 **Problema:** Selector vertical difícil de usar, texto cortado, mal contraste en fondo negro
 
 **Solución implementada:**
+
 - Cambio de diseño vertical a **horizontal tipo pills**
 - Scroll horizontal con mejor UX
 - Días activos: fondo rojo con texto blanco
@@ -39,6 +42,7 @@
 - Mejor contraste y legibilidad
 
 **Código clave (línea ~1756):**
+
 ```tsx
 <ScrollView
   horizontal
@@ -48,13 +52,11 @@
   {trainingProgram.days.map((day, index) => {
     const isActive = selectedDayIndex === index;
     const isCurrent = trainingProgram.currentDayIndex === index;
-    
+
     return (
       <TouchableOpacity
         className={`mr-3 px-4 py-3 rounded-lg border-2 ${
-          isActive
-            ? 'bg-savage-red border-savage-red'
-            : 'bg-zinc-900/50 border-zinc-800'
+          isActive ? 'bg-savage-red border-savage-red' : 'bg-zinc-900/50 border-zinc-800'
         }`}
       >
         {/* ... */}
@@ -65,6 +67,7 @@
 ```
 
 **Archivos modificados:**
+
 - `app/(tabs)/gym/index.tsx`
 
 ---
@@ -74,15 +77,18 @@
 **Problema:** Type-check fallaba en GitHub Actions con 8 errores
 
 **Errores corregidos:**
+
 1. **Línea 1310:** Parámetro `day` sin tipo → `(day: number)`
 2. **Línea 1837:** `asset_url` → `image_url` + agregado `description`
 3. **Líneas 2750-2759:** Tipos faltantes en filter/map de series
 4. **Línea 2780:** Acceso a propiedad `series` en union types con casting
 
 **Archivos modificados:**
+
 - `app/(tabs)/gym/index.tsx`
 
 **Validación:**
+
 ```bash
 npm run type-check  # ✅ Sin errores
 ```
@@ -94,12 +100,14 @@ npm run type-check  # ✅ Sin errores
 **Objetivo:** Prevenir commits/push con errores de TypeScript
 
 **Implementación:**
+
 - **Husky instalado** y configurado
 - **Pre-commit hook:** Ejecuta `type-check` antes de commit
-- **Pre-push hook:** Ejecuta `type-check` antes de push  
+- **Pre-push hook:** Ejecuta `type-check` antes de push
 - **GitHub Action:** CI/CD con validación automática en push
 
 **Archivos creados/modificados:**
+
 - `.husky/pre-commit` - Hook pre-commit
 - `.husky/pre-push` - Hook pre-push
 - `.github/workflows/type-check.yml` - GitHub Action
@@ -107,6 +115,7 @@ npm run type-check  # ✅ Sin errores
 - `package.json` - Script `prepare: "husky"`
 
 **Uso:**
+
 ```bash
 # Hacer commit (ejecuta type-check automáticamente)
 git commit -m "mensaje"
@@ -116,6 +125,7 @@ git commit -m "mensaje"
 ```
 
 **Bypass (NO RECOMENDADO):**
+
 ```bash
 git commit --no-verify -m "mensaje"
 git push --no-verify
@@ -128,13 +138,15 @@ git push --no-verify
 **Problema:** `npm ci` fallaba por conflictos de peer dependencies (React 19.1.0 vs 19.2.3)
 
 **Solución:**
+
 ```yaml
 # Cambio en .github/workflows/type-check.yml
 - name: 📦 Instalar dependencias
-  run: npm install --legacy-peer-deps  # Antes: npm ci
+  run: npm install --legacy-peer-deps # Antes: npm ci
 ```
 
 **Archivos modificados:**
+
 - `.github/workflows/type-check.yml`
 
 ---
@@ -142,16 +154,19 @@ git push --no-verify
 ## 📊 Estado Actual del Proyecto
 
 ### Base de Datos (Supabase)
+
 - **6 ejercicios** configurados
 - **Estructura correcta:** `training_days` como INTEGER[]
 - **Sin duplicados:** Un ejercicio = un UUID, aparece en múltiples días
 
 ### Ejercicios por Día
+
 - **Día 0 (PECHO Y ESPALDA):** 3 ejercicios (TRICEP DIPS, PULL-UPS, BICEP CURL)
 - **Día 1:** 2 ejercicios (PLANK, SHOULDER PRESS)
 - **Día 2:** 2 ejercicios (TRICEP DIPS, BENCH PRESS, PULL-UPS)
 
 ### Arquitectura de Training Days
+
 - Un ejercicio puede estar en múltiples días
 - Se guarda como array: `training_days: [0, 2]`
 - Al eliminar, solo se remueve del día específico
@@ -186,10 +201,12 @@ npx supabase migration new  # Nueva migración
 ## 📁 Archivos Clave
 
 ### Código Principal
+
 - `app/(tabs)/gym/index.tsx` - Módulo GYM principal (2814 líneas)
 - `lib/supabase.ts` - Cliente Supabase
 
 ### Configuración
+
 - `.husky/pre-commit` - Hook pre-commit
 - `.husky/pre-push` - Hook pre-push
 - `.github/workflows/type-check.yml` - GitHub Action
@@ -197,12 +214,14 @@ npx supabase migration new  # Nueva migración
 - `tsconfig.json` - Configuración TypeScript
 
 ### Documentación
+
 - `docs/VALIDACION_AUTOMATICA.md` - Sistema de validación
 - `docs/CAMERA_FEATURE.md` - Feature de cámara
 - `docs/GALLERY_EDITOR_FEATURE.md` - Feature de galería
 - `docs/TRAINING_DAYS_SYSTEM.md` - Sistema de días de entrenamiento
 
 ### Migraciones
+
 - `supabase/migrations/008_fix_training_days_array.sql` - Migración a array
 - `supabase/migrations/009_consolidate_duplicates.sql` - Limpiar duplicados
 
@@ -211,14 +230,17 @@ npx supabase migration new  # Nueva migración
 ## 🔧 Problemas Conocidos y Soluciones
 
 ### 1. Error "Text strings must be rendered"
+
 **Causa:** Valores dinámicos sin conversión explícita  
 **Solución:** Usar `String()` y `Number()` siempre
 
 ### 2. Type-check falla en GitHub
+
 **Causa:** Conflictos de peer dependencies  
 **Solución:** Ya configurado `--legacy-peer-deps` en workflow
 
 ### 3. Chat no se sincroniza entre dispositivos
+
 **Causa:** GitHub Copilot Chat es local por sesión  
 **Solución:** Usar este documento de resumen
 
@@ -227,12 +249,14 @@ npx supabase migration new  # Nueva migración
 ## 📱 Trabajar desde Celular
 
 ### Acceder al Codespace
+
 1. Ve a: `https://github.com/codespaces`
 2. Busca: `congenial-funicular-wrp966v9qggv25w6`
 3. Toca ⋯ → "Open in browser"
 4. VS Code se abrirá en el navegador
 
 ### Continuar Desarrollo
+
 - Todo el código y herramientas están disponibles
 - Git hooks funcionan igual
 - Terminal disponible

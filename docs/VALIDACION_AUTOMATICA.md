@@ -9,11 +9,13 @@ Este proyecto tiene configurado un sistema de validación automática para preve
 Se ejecutan automáticamente en tu máquina local:
 
 #### Pre-commit Hook
+
 - **Se ejecuta:** Antes de cada `git commit`
 - **Valida:** Type-check de TypeScript
 - **Previene:** Commits con errores de tipos
 
 #### Pre-push Hook
+
 - **Se ejecuta:** Antes de cada `git push`
 - **Valida:** Type-check de TypeScript
 - **Previene:** Push con código que no compila
@@ -129,6 +131,7 @@ npm run prepare
 ## ❓ Troubleshooting
 
 ### Hook no se ejecuta
+
 ```bash
 # Reinstalar hooks
 npm run prepare
@@ -136,6 +139,7 @@ chmod +x .husky/*
 ```
 
 ### Hooks se ejecutan en CI
+
 ```bash
 # Agregar en .github/workflows antes de npm ci:
 - run: npm pkg delete scripts.prepare
