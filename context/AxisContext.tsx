@@ -3,7 +3,15 @@
 // Incluye: Contexto dinámico, Sistema de Aliases, Integración LLM
 // ============================================================================
 
-import React, { createContext, useContext, useState, useCallback, useMemo, useEffect, ReactNode } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useMemo,
+  useEffect,
+  ReactNode,
+} from 'react';
 import { useAxisExecutor } from '../hooks/useAxisExecutor';
 import { supabase } from '../lib/supabase';
 import { callGemini, continueAfterToolExecution } from '../services/axis/gemini';
@@ -396,11 +404,17 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
     // Helper: Resolver "este ejercicio", "el actual", etc. al activeAsset
     const resolveExerciseName = (name: string): string => {
       const contextualPhrases = [
-        'este ejercicio', 'este', 'el actual', 'el que estoy viendo',
-        'el de ahora', 'este de aquí', 'el ejercicio actual', 'éste'
+        'este ejercicio',
+        'este',
+        'el actual',
+        'el que estoy viendo',
+        'el de ahora',
+        'este de aquí',
+        'el ejercicio actual',
+        'éste',
       ];
       const lowerName = name.toLowerCase().trim();
-      if (contextualPhrases.some(phrase => lowerName.includes(phrase)) && activeAsset) {
+      if (contextualPhrases.some((phrase) => lowerName.includes(phrase)) && activeAsset) {
         return activeAsset.name;
       }
       return name.trim();
@@ -422,7 +436,9 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
     // Patrón: "cambia X por Y" o "reemplaza X por Y"
     if (lower.includes('cambia') || lower.includes('reemplaza') || lower.includes('pon')) {
       // Patrón con "por"
-      const matchWithPor = text.match(/(?:cambia|reemplaza|pon)\s+(.+?)\s+(?:por|en lugar de)\s+(.+)/i);
+      const matchWithPor = text.match(
+        /(?:cambia|reemplaza|pon)\s+(.+?)\s+(?:por|en lugar de)\s+(.+)/i
+      );
       if (matchWithPor) {
         const oldExerciseName = resolveExerciseName(matchWithPor[1]);
         const newExerciseName = matchWithPor[2].trim();
@@ -432,20 +448,28 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
         });
         return [result];
       }
-      
+
       // Patrón sin especificar nuevo: "cambia este ejercicio" (usa activeAsset)
       if (activeAsset && (lower.includes('este') || lower.includes('actual'))) {
         // Si dice "por otro" sin especificar, sugerir alternativas DEL CATÁLOGO REAL
-        if (lower.includes('por otro') || lower.includes('tu decide') || lower.includes('tú decide') || lower.includes('escoge') || lower.includes('elige')) {
+        if (
+          lower.includes('por otro') ||
+          lower.includes('tu decide') ||
+          lower.includes('tú decide') ||
+          lower.includes('escoge') ||
+          lower.includes('elige')
+        ) {
           // Filtrar ejercicios disponibles excluyendo el actual
           const suggestions = availableExercises
-            .filter(ex => ex !== activeAsset.name)
+            .filter((ex) => ex !== activeAsset.name)
             .slice(0, 5);
-          
-          return [{
-            success: false,
-            message: `🏋️ Estás en **${activeAsset.name}**. ¿Por cuál quieres cambiarlo?\n\nEjercicios disponibles:\n${suggestions.map(s => `• ${s}`).join('\n')}\n\nDime el nombre exacto.`,
-          }];
+
+          return [
+            {
+              success: false,
+              message: `🏋️ Estás en **${activeAsset.name}**. ¿Por cuál quieres cambiarlo?\n\nEjercicios disponibles:\n${suggestions.map((s) => `• ${s}`).join('\n')}\n\nDime el nombre exacto.`,
+            },
+          ];
         }
       }
     }

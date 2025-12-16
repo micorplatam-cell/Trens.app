@@ -10,7 +10,11 @@ import type { AxisToolCall, AxisToolName, ToolDefinition } from '../../types/axi
 // ============================================================================
 interface GeminiMessage {
   role: 'user' | 'model';
-  parts: Array<{ text: string } | { functionCall: GeminiFunctionCall } | { functionResponse: GeminiFunctionResponse }>;
+  parts: Array<
+    | { text: string }
+    | { functionCall: GeminiFunctionCall }
+    | { functionResponse: GeminiFunctionResponse }
+  >;
 }
 
 interface GeminiFunctionCall {
@@ -28,11 +32,14 @@ interface GeminiToolDeclaration {
   description: string;
   parameters: {
     type: 'object';
-    properties: Record<string, {
-      type: string;
-      description: string;
-      enum?: string[];
-    }>;
+    properties: Record<
+      string,
+      {
+        type: string;
+        description: string;
+        enum?: string[];
+      }
+    >;
     required: string[];
   };
 }
@@ -52,7 +59,8 @@ interface GeminiResponse {
 // ============================================================================
 // GEMINI API CONFIG
 // ============================================================================
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent';
+const GEMINI_API_URL =
+  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent';
 
 // ============================================================================
 // CONVERT TOOL DEFINITIONS TO GEMINI FORMAT
@@ -106,12 +114,17 @@ CONTEXTO ACTUAL:
 - Nivel del usuario: ${context.userLevel}
 - Día de entrenamiento: ${context.currentTrainingDay + 1}
 
-${context.activeAsset ? (() => {
-  const series = context.activeAsset.liquidData?.custom_series as Array<{id: string; reps: number; weight: number; type: string}> | undefined || [];
-  const seriesCount = series.length;
-  const lastIndex = seriesCount > 0 ? seriesCount - 1 : 0;
-  
-  return `
+${
+  context.activeAsset
+    ? (() => {
+        const series =
+          (context.activeAsset.liquidData?.custom_series as
+            | Array<{ id: string; reps: number; weight: number; type: string }>
+            | undefined) || [];
+        const seriesCount = series.length;
+        const lastIndex = seriesCount > 0 ? seriesCount - 1 : 0;
+
+        return `
 🎯 EJERCICIO ACTUALMENTE EN PANTALLA:
 - Nombre EXACTO: "${context.activeAsset.name}"
 - Tipo: ${context.activeAsset.type}
@@ -134,14 +147,22 @@ ${series.map((s, i) => `  Serie ${i + 1} (índice ${i}): ${s.reps} reps × ${s.w
 ⚠️ IMPORTANTE: Cuando el usuario diga "este ejercicio", "el ejercicio actual", "el que estoy viendo", "este", "reemplázalo", etc., 
 se refiere a "${context.activeAsset.name}". USA EXACTAMENTE ESE NOMBRE en los parámetros de las herramientas.
 `;
-})() : 'No hay ejercicio activo en pantalla.'}
+      })()
+    : 'No hay ejercicio activo en pantalla.'
+}
 
-${context.customAliases && context.customAliases.length > 0 ? `
+${
+  context.customAliases && context.customAliases.length > 0
+    ? `
 ALIAS DEL USUARIO:
 ${context.customAliases.map((a) => `- "${a.trigger}": ${a.description || 'Acción personalizada'}`).join('\n')}
-` : ''}
+`
+    : ''
+}
 
-${context.availableExercises && context.availableExercises.length > 0 ? `
+${
+  context.availableExercises && context.availableExercises.length > 0
+    ? `
 � CATÁLOGO DE EJERCICIOS (OBLIGATORIO - SOLO PUEDES USAR ESTOS):
 ${context.availableExercises.join(', ')}
 
@@ -151,7 +172,9 @@ ${context.availableExercises.join(', ')}
 - Si el ejercicio actual es DEADLIFT, sugiere: SQUAT, BENCH PRESS (de la lista)
 - Si el ejercicio actual es SQUAT, sugiere: DEADLIFT, LUNGES (si existe)
 - JAMÁS inventes nombres como "ROMANIAN DEADLIFT" o "HACK SQUAT" si no están en la lista
-` : ''}
+`
+    : ''
+}
 
 INSTRUCCIONES CRÍTICAS:
 1. Cuando el usuario pida modificar su rutina, dieta, o cualquier dato, USA LAS HERRAMIENTAS DISPONIBLES.

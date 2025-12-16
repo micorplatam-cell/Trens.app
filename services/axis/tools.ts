@@ -182,7 +182,7 @@ export async function gymRemoveExercise(
 
     // Solo quitar de un día específico
     const currentDays = typedExercise.training_days || [];
-    const updatedDays = currentDays.filter(d => d !== trainingDay);
+    const updatedDays = currentDays.filter((d) => d !== trainingDay);
 
     if (updatedDays.length === 0) {
       // Era el único día, hacer soft delete
@@ -228,7 +228,12 @@ export async function gymReplaceExercise(
   trainingDay?: number
 ): Promise<AxisToolResult> {
   // Primero eliminar
-  const removeResult = await gymRemoveExercise(userId, oldExerciseName, trainingDay, trainingDay === undefined);
+  const removeResult = await gymRemoveExercise(
+    userId,
+    oldExerciseName,
+    trainingDay,
+    trainingDay === undefined
+  );
   if (!removeResult.success) return removeResult;
 
   // Luego agregar
@@ -268,19 +273,15 @@ export async function gymListExercises(
     let exercises = (data || []) as UserAsset[];
 
     if (trainingDay !== undefined) {
-      exercises = exercises.filter(ex =>
-        (ex.training_days || []).includes(trainingDay)
-      );
+      exercises = exercises.filter((ex) => (ex.training_days || []).includes(trainingDay));
     }
 
-    const summary = exercises.map(ex => ({
+    const summary = exercises.map((ex) => ({
       id: ex.id,
       name: ex.name,
       days: ex.training_days,
       series: (ex.metadata as Record<string, unknown>)?.custom_series
-        ? (
-          (ex.metadata as Record<string, unknown>).custom_series as unknown[]
-        ).length
+        ? ((ex.metadata as Record<string, unknown>).custom_series as unknown[]).length
         : 0,
       category: (ex.metadata as Record<string, unknown>)?.category,
     }));
@@ -373,25 +374,34 @@ export async function assetUpdateField(
     }
 
     const typedAsset = asset as UserAsset;
-    const currentMetadata = JSON.parse(JSON.stringify(typedAsset.metadata || {})) as Record<string, unknown>;
-    
+    const currentMetadata = JSON.parse(JSON.stringify(typedAsset.metadata || {})) as Record<
+      string,
+      unknown
+    >;
+
     // Navegar al campo usando lodash-style path: "custom_series.0.weight"
     const pathParts = fieldPath.split('.');
-    
+
     // Navegar hasta el penúltimo nivel
     let target: unknown = currentMetadata;
     for (let i = 0; i < pathParts.length - 1; i++) {
       const key = pathParts[i];
       const isIndex = /^\d+$/.test(key);
-      
+
       if (isIndex) {
         // Es un índice de array
         const idx = parseInt(key, 10);
         if (!Array.isArray(target)) {
-          return { success: false, message: `Se esperaba un array en "${pathParts.slice(0, i).join('.')}"` };
+          return {
+            success: false,
+            message: `Se esperaba un array en "${pathParts.slice(0, i).join('.')}"`,
+          };
         }
         if (idx >= (target as unknown[]).length) {
-          return { success: false, message: `Índice ${idx} fuera de rango. Hay ${(target as unknown[]).length} elementos (0-${(target as unknown[]).length - 1}).` };
+          return {
+            success: false,
+            message: `Índice ${idx} fuera de rango. Hay ${(target as unknown[]).length} elementos (0-${(target as unknown[]).length - 1}).`,
+          };
         }
         target = (target as unknown[])[idx];
       } else {
@@ -407,10 +417,10 @@ export async function assetUpdateField(
     // Aplicar cambio en el último nivel
     const finalKey = pathParts[pathParts.length - 1];
     const isIndexFinal = /^\d+$/.test(finalKey);
-    
+
     let finalTarget: Record<string, unknown> | unknown[];
     let actualKey: string | number;
-    
+
     if (isIndexFinal) {
       if (!Array.isArray(target)) {
         return { success: false, message: `Se esperaba un array para índice ${finalKey}` };
@@ -418,7 +428,10 @@ export async function assetUpdateField(
       finalTarget = target as unknown[];
       actualKey = parseInt(finalKey, 10);
       if (actualKey >= finalTarget.length) {
-        return { success: false, message: `Índice ${actualKey} fuera de rango. Hay ${finalTarget.length} elementos.` };
+        return {
+          success: false,
+          message: `Índice ${actualKey} fuera de rango. Hay ${finalTarget.length} elementos.`,
+        };
       }
     } else {
       finalTarget = target as Record<string, unknown>;
@@ -433,10 +446,12 @@ export async function assetUpdateField(
         (finalTarget as Record<string | number, unknown>)[actualKey] = newValue;
         break;
       case 'increment':
-        (finalTarget as Record<string | number, unknown>)[actualKey] = (Number(currentValue) || 0) + Number(newValue);
+        (finalTarget as Record<string | number, unknown>)[actualKey] =
+          (Number(currentValue) || 0) + Number(newValue);
         break;
       case 'decrement':
-        (finalTarget as Record<string | number, unknown>)[actualKey] = (Number(currentValue) || 0) - Number(newValue);
+        (finalTarget as Record<string | number, unknown>)[actualKey] =
+          (Number(currentValue) || 0) - Number(newValue);
         break;
     }
 

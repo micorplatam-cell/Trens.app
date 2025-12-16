@@ -26,13 +26,7 @@ import Animated, {
   Easing,
   SharedValue,
 } from 'react-native-reanimated';
-import {
-  Bot,
-  Send,
-  Mic,
-  Sparkles,
-  ChevronDown,
-} from 'lucide-react-native';
+import { Bot, Send, Mic, Sparkles, ChevronDown } from 'lucide-react-native';
 import { useAxis } from '../../context/AxisContext';
 import type { AxisToolResult } from '../../types/axis';
 
@@ -97,9 +91,7 @@ const AxisFAB: React.FC<{
   const glowStyle = useAnimatedStyle(() => ({
     shadowOpacity: interpolate(breathe.value, [0, 1], [0.3, 0.8]),
     shadowRadius: interpolate(breathe.value, [0, 1], [8, 20]),
-    transform: [
-      { scale: interpolate(breathe.value, [0, 1], [1, 1.05]) },
-    ],
+    transform: [{ scale: interpolate(breathe.value, [0, 1], [1, 1.05]) }],
   }));
 
   const borderStyle = useAnimatedStyle(() => ({
@@ -148,13 +140,9 @@ const AxisFAB: React.FC<{
           borderStyle,
         ]}
       />
-      
+
       {/* Icon */}
-      {isProcessing ? (
-        <Sparkles size={28} color="#DC2626" />
-      ) : (
-        <Bot size={28} color="#DC2626" />
-      )}
+      {isProcessing ? <Sparkles size={28} color="#DC2626" /> : <Bot size={28} color="#DC2626" />}
     </AnimatedTouchable>
   );
 };
@@ -166,14 +154,10 @@ const MessageBubble: React.FC<{ message: ChatMessage }> = ({ message }) => {
   const isUser = message.role === 'user';
 
   return (
-    <View
-      className={`max-w-[85%] mb-3 ${isUser ? 'self-end' : 'self-start'}`}
-    >
+    <View className={`max-w-[85%] mb-3 ${isUser ? 'self-end' : 'self-start'}`}>
       {/* Label */}
       <Text
-        className={`text-xs font-mono mb-1 ${
-          isUser ? 'text-zinc-500 text-right' : 'text-red-500'
-        }`}
+        className={`text-xs font-mono mb-1 ${isUser ? 'text-zinc-500 text-right' : 'text-red-500'}`}
       >
         {isUser ? 'TÚ' : 'AXIS'}
       </Text>
@@ -195,9 +179,7 @@ const MessageBubble: React.FC<{ message: ChatMessage }> = ({ message }) => {
           {message.results.map((result, idx) => (
             <Text
               key={idx}
-              className={`text-sm font-mono ${
-                result.success ? 'text-green-500' : 'text-red-400'
-              }`}
+              className={`text-sm font-mono ${result.success ? 'text-green-500' : 'text-red-400'}`}
             >
               {result.message}
             </Text>
@@ -220,10 +202,7 @@ const ThinkingIndicator: React.FC = () => {
     const animateDot = (dotValue: SharedValue<number>, delay: number) => {
       setTimeout(() => {
         dotValue.value = withRepeat(
-          withSequence(
-            withTiming(1, { duration: 300 }),
-            withTiming(0, { duration: 300 })
-          ),
+          withSequence(withTiming(1, { duration: 300 }), withTiming(0, { duration: 300 })),
           -1,
           false
         );
@@ -246,13 +225,22 @@ const ThinkingIndicator: React.FC = () => {
       <Text className="text-xs font-mono mb-1 text-red-500">AXIS</Text>
       <View className="px-4 py-3 rounded-2xl bg-red-600/20 border border-red-600/30 rounded-tl-sm flex-row items-center">
         <Animated.View
-          style={[{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#DC2626', marginRight: 4 }, dotStyle(dot1)]}
+          style={[
+            { width: 8, height: 8, borderRadius: 4, backgroundColor: '#DC2626', marginRight: 4 },
+            dotStyle(dot1),
+          ]}
         />
         <Animated.View
-          style={[{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#DC2626', marginRight: 4 }, dotStyle(dot2)]}
+          style={[
+            { width: 8, height: 8, borderRadius: 4, backgroundColor: '#DC2626', marginRight: 4 },
+            dotStyle(dot2),
+          ]}
         />
         <Animated.View
-          style={[{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#DC2626' }, dotStyle(dot3)]}
+          style={[
+            { width: 8, height: 8, borderRadius: 4, backgroundColor: '#DC2626' },
+            dotStyle(dot3),
+          ]}
         />
       </View>
     </View>
@@ -269,7 +257,8 @@ export const AxisOverlay: React.FC = () => {
     {
       id: 'welcome',
       role: 'axis',
-      content: '¿Qué necesitas? Puedo modificar tu rutina, ajustar calorías, o ejecutar comandos. Solo dime.',
+      content:
+        '¿Qué necesitas? Puedo modificar tu rutina, ajustar calorías, o ejecutar comandos. Solo dime.',
       timestamp: new Date(),
     },
   ]);
@@ -322,9 +311,10 @@ export const AxisOverlay: React.FC = () => {
     const axisMessage: ChatMessage = {
       id: (Date.now() + 1).toString(),
       role: 'axis',
-      content: results.length > 0 && results[0].success
-        ? '✅ Listo. ¿Algo más?'
-        : results[0]?.message || 'Procesado.',
+      content:
+        results.length > 0 && results[0].success
+          ? '✅ Listo. ¿Algo más?'
+          : results[0]?.message || 'Procesado.',
       timestamp: new Date(),
       results: results.length > 1 ? results : undefined,
     };
@@ -356,12 +346,7 @@ export const AxisOverlay: React.FC = () => {
       <AxisFAB onPress={handleOpen} isProcessing={isProcessing} />
 
       {/* Chat Panel Modal */}
-      <Modal
-        visible={isOpen}
-        transparent
-        animationType="none"
-        onRequestClose={handleClose}
-      >
+      <Modal visible={isOpen} transparent animationType="none" onRequestClose={handleClose}>
         <View className="flex-1 justify-end">
           {/* Backdrop - Semi-transparent dark overlay */}
           <TouchableOpacity
@@ -452,9 +437,7 @@ export const AxisOverlay: React.FC = () => {
                   onPress={handleSend}
                   disabled={!inputText.trim() || isProcessing}
                   className={`w-11 h-11 rounded-full items-center justify-center ${
-                    inputText.trim() && !isProcessing
-                      ? 'bg-red-600'
-                      : 'bg-zinc-800'
+                    inputText.trim() && !isProcessing ? 'bg-red-600' : 'bg-zinc-800'
                   }`}
                 >
                   <Send

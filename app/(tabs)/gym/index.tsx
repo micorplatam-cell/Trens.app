@@ -472,7 +472,12 @@ export default function GymScreen() {
     console.warn('🔄 refreshTrigger cambió a:', refreshTrigger);
     if (user && refreshTrigger > 0) {
       const previousIndex = activeExerciseIndex;
-      console.warn('🔄 AXIS modificó datos, recargando ejercicios del día:', selectedDayIndex, 'manteniendo índice:', previousIndex);
+      console.warn(
+        '🔄 AXIS modificó datos, recargando ejercicios del día:',
+        selectedDayIndex,
+        'manteniendo índice:',
+        previousIndex
+      );
       loadExercises(selectedDayIndex).then(() => {
         // Después de cargar, hacer scroll al mismo índice (o al último si el índice ya no existe)
         setTimeout(() => {
@@ -2632,7 +2637,10 @@ export default function GymScreen() {
               videos: item.videos,
               isMain: true,
             },
-            ...(item.alternatives || []).map((alt: ExerciseAlternative) => ({ ...alt, isMain: false })),
+            ...(item.alternatives || []).map((alt: ExerciseAlternative) => ({
+              ...alt,
+              isMain: false,
+            })),
           ];
 
           const activeAltIndex = activeAlternatives[index] || 0;
