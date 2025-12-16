@@ -43,6 +43,7 @@ import Animated, {
   runOnJS,
 } from 'react-native-reanimated';
 import Slider from '@react-native-community/slider';
+import { useAxis } from '../../../context/AxisContext';
 
 // ============================================================================
 // HELPERS
@@ -215,6 +216,7 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 export default function GymScreen() {
   const { user } = useAuth();
   const isFocused = useIsFocused(); // Detecta si esta pantalla está activa
+  const { setActiveAsset, setScreenContext, refreshTrigger } = useAxis();
   const [viewMode, setViewMode] = useState<ViewMode>('LOADING');
   const [exercises, setExercises] = useState<Exercise[]>([]); // Ejercicios del día actual
   const [allUserExercises, setAllUserExercises] = useState<{ name: string; image_url: string }[]>(
@@ -291,6 +293,31 @@ export default function GymScreen() {
 
   // Auto-repair flag para evitar loops infinitos
   const autoRepairDone = useRef(false);
+
+  // Ref del FlatList para scroll programático
+  const exerciseListRef = useRef<FlatList>(null);
+
+  // -------------------------------------------------------------------------
+  // SYNC ACTIVE EXERCISE WITH AXIS CONTEXT
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    // Sincronizar módulo actual con AXIS
+    if (isFocused) {
+      setScreenContext({
+        module: 'gym',
+        viewMode: viewMode,
+        currentExerciseIndex: activeExerciseIndex,
+      });
+    }
+  }, [isFocused, viewMode, activeExerciseIndex, setScreenContext]);
+
+  useEffect(() => {
+    // Sincronizar ejercicio activo con AXIS
+    const currentExercise = exercises[activeExerciseIndex];
+    if (currentExercise && isFocused) {
+      setActiveAsset(currentExercise.id);
+    }
+  }, [activeExerciseIndex, exercises, isFocused, setActiveAsset]);
 
   // Modal drag state
   const translateYHistorial = useSharedValue(0);
@@ -439,6 +466,27 @@ export default function GymScreen() {
       loadExercises(selectedDayIndex);
     }
   }, [selectedDayIndex, user]);
+
+  // Recargar ejercicios cuando AXIS modifica datos (mantener posición)
+  useEffect(() => {
+    console.warn('🔄 refreshTrigger cambió a:', refreshTrigger);
+    if (user && refreshTrigger > 0) {
+      const previousIndex = activeExerciseIndex;
+      console.warn('🔄 AXIS modificó datos, recargando ejercicios del día:', selectedDayIndex, 'manteniendo índice:', previousIndex);
+      loadExercises(selectedDayIndex).then(() => {
+        // Después de cargar, hacer scroll al mismo índice (o al último si el índice ya no existe)
+        setTimeout(() => {
+          if (exerciseListRef.current && previousIndex >= 0) {
+            exerciseListRef.current.scrollToIndex({
+              index: previousIndex,
+              animated: false,
+            });
+            console.warn('🔄 Scroll restaurado a índice:', previousIndex);
+          }
+        }, 100);
+      });
+    }
+  }, [refreshTrigger]);
 
   const loadExercises = async (dayIndex: number | null = null) => {
     if (!user) {
@@ -2553,9 +2601,15 @@ export default function GymScreen() {
 
       {/* VERTICAL SCROLL (ESTILO TIKTOK) */}
       <FlatList
+        ref={exerciseListRef}
         data={exercises}
         keyExtractor={(item) => item.id}
         pagingEnabled
+        getItemLayout={(_, index) => ({
+          length: SCREEN_HEIGHT,
+          offset: SCREEN_HEIGHT * index,
+          index,
+        })}
         showsVerticalScrollIndicator={false}
         viewabilityConfig={viewabilityConfig.current}
         onViewableItemsChanged={({ viewableItems }) => {
@@ -2578,7 +2632,7 @@ export default function GymScreen() {
               videos: item.videos,
               isMain: true,
             },
-            ...(item.alternatives || []).map((alt) => ({ ...alt, isMain: false })),
+            ...(item.alternatives || []).map((alt: ExerciseAlternative) => ({ ...alt, isMain: false })),
           ];
 
           const activeAltIndex = activeAlternatives[index] || 0;

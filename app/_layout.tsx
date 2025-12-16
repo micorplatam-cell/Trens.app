@@ -5,9 +5,13 @@ import { View } from 'react-native';
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
+import { AxisProvider } from '../context/AxisContext';
+import { AxisOverlay } from '../components/axis/AxisOverlay';
 import '../global.css';
 
-// 1. AuthProvider
+// ============================================================================
+// 1. AUTH PROVIDER
+// ============================================================================
 interface AuthContextType {
   session: Session | null;
   user: User | null;
@@ -44,7 +48,9 @@ const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   );
 };
 
-// 2. SportProvider (Placeholder)
+// ============================================================================
+// 2. SPORT PROVIDER (Placeholder - Conectar con lógica real)
+// ============================================================================
 const SportContext = createContext({});
 
 export const useSport = () => useContext(SportContext);
@@ -53,13 +59,18 @@ const SportProvider = ({ children }: { children: React.ReactNode }) => {
   return <SportContext.Provider value={{}}>{children}</SportContext.Provider>;
 };
 
-// 3. AxisProvider (IA Placeholder)
-const AxisContext = createContext({});
+// ============================================================================
+// 3. AXIS PROVIDER - Importado desde context/AxisContext.tsx
+// Re-exportamos useAxis para acceso global
+// ============================================================================
+export { useAxis } from '../context/AxisContext';
 
-export const useAxis = () => useContext(AxisContext);
-
-const AxisProvider = ({ children }: { children: React.ReactNode }) => {
-  return <AxisContext.Provider value={{}}>{children}</AxisContext.Provider>;
+// ============================================================================
+// 4. AXIS WRAPPER - Conecta AxisProvider con userId del Auth
+// ============================================================================
+const AxisWrapper = ({ children }: { children: React.ReactNode }) => {
+  const { user } = useAuth();
+  return <AxisProvider userId={user?.id ?? null}>{children}</AxisProvider>;
 };
 
 export default function RootLayout() {
@@ -67,12 +78,14 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <AuthProvider>
         <SportProvider>
-          <AxisProvider>
+          <AxisWrapper>
             <View className="flex-1 bg-savage-black">
               <Slot />
               <StatusBar style="light" />
+              {/* AXIS Overlay - Flota sobre todas las pantallas */}
+              <AxisOverlay />
             </View>
-          </AxisProvider>
+          </AxisWrapper>
         </SportProvider>
       </AuthProvider>
     </GestureHandlerRootView>
