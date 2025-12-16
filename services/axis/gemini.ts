@@ -106,15 +106,35 @@ CONTEXTO ACTUAL:
 - Nivel del usuario: ${context.userLevel}
 - Día de entrenamiento: ${context.currentTrainingDay + 1}
 
-${context.activeAsset ? `
+${context.activeAsset ? (() => {
+  const series = context.activeAsset.liquidData?.custom_series as Array<{id: string; reps: number; weight: number; type: string}> | undefined || [];
+  const seriesCount = series.length;
+  const lastIndex = seriesCount > 0 ? seriesCount - 1 : 0;
+  
+  return `
 🎯 EJERCICIO ACTUALMENTE EN PANTALLA:
 - Nombre EXACTO: "${context.activeAsset.name}"
 - Tipo: ${context.activeAsset.type}
-- Datos: ${JSON.stringify(context.activeAsset.liquidData, null, 2)}
+- Total de series: ${seriesCount}
+- Índices válidos: 0 a ${lastIndex} (la "primera" es índice 0, la "última" es índice ${lastIndex})
+
+📊 SERIES CONFIGURADAS:
+${series.map((s, i) => `  Serie ${i + 1} (índice ${i}): ${s.reps} reps × ${s.weight}kg - Tipo: ${s.type}`).join('\n')}
+
+📊 PARA RESPONDER PREGUNTAS:
+- "Primera serie" = índice 0 = ${series[0]?.reps || 0} reps × ${series[0]?.weight || 0}kg
+- "Última serie" = índice ${lastIndex} = ${series[lastIndex]?.reps || 0} reps × ${series[lastIndex]?.weight || 0}kg
+
+📊 PARA MODIFICAR SERIES (usa ASSET_UPDATE_FIELD):
+- Cambiar peso de serie 1: fieldPath = "custom_series.0.weight"
+- Cambiar reps de serie 3: fieldPath = "custom_series.2.reps"
+- Cambiar peso de ÚLTIMA serie: fieldPath = "custom_series.${lastIndex}.weight"
+- ⚠️ USA PUNTOS, NO CORCHETES. Ejemplo: "custom_series.0.weight" NO "custom_series[0].weight"
 
 ⚠️ IMPORTANTE: Cuando el usuario diga "este ejercicio", "el ejercicio actual", "el que estoy viendo", "este", "reemplázalo", etc., 
 se refiere a "${context.activeAsset.name}". USA EXACTAMENTE ESE NOMBRE en los parámetros de las herramientas.
-` : 'No hay ejercicio activo en pantalla.'}
+`;
+})() : 'No hay ejercicio activo en pantalla.'}
 
 ${context.customAliases && context.customAliases.length > 0 ? `
 ALIAS DEL USUARIO:
@@ -135,12 +155,18 @@ ${context.availableExercises.join(', ')}
 
 INSTRUCCIONES CRÍTICAS:
 1. Cuando el usuario pida modificar su rutina, dieta, o cualquier dato, USA LAS HERRAMIENTAS DISPONIBLES.
-2. SIEMPRE ejecuta la herramienta apropiada, nunca solo describas lo que harías.
-3. Si el usuario pide algo que requiere múltiples acciones, ejecuta todas las herramientas necesarias.
-4. Después de ejecutar herramientas, confirma brevemente lo que hiciste.
-5. Si no puedes hacer algo, explica por qué de forma concisa.
-6. Cuando el usuario se refiera al "ejercicio actual" o "este ejercicio", USA EL NOMBRE EXACTO DEL ASSET ACTIVO.
-7. 🚨 SOLO USA EJERCICIOS DEL CATÁLOGO. Si piden uno que no existe, di "ese ejercicio no está en el catálogo, te sugiero X" (donde X es del catálogo).
+2. Cuando el usuario PREGUNTE sobre sus datos (reps, series, peso, ejercicios), RESPONDE DIRECTAMENTE usando la información del contexto.
+3. SIEMPRE ejecuta la herramienta apropiada para CAMBIOS, nunca solo describas lo que harías.
+4. Si el usuario pide algo que requiere múltiples acciones, ejecuta todas las herramientas necesarias.
+5. Después de ejecutar herramientas, confirma brevemente lo que hiciste.
+6. Si no puedes hacer algo, explica por qué de forma concisa.
+7. Cuando el usuario se refiera al "ejercicio actual" o "este ejercicio", USA EL NOMBRE EXACTO DEL ASSET ACTIVO.
+8. 🚨 SOLO USA EJERCICIOS DEL CATÁLOGO. Si piden uno que no existe, di "ese ejercicio no está en el catálogo, te sugiero X" (donde X es del catálogo).
+
+EJEMPLOS DE RESPUESTAS A PREGUNTAS:
+- "¿Cuántas series tengo?" → Cuenta custom_series y responde "Tienes 4 series configuradas"
+- "¿Cuántas reps en la primera serie?" → Mira custom_series[0].reps y responde "Tu primera serie es de 12 repeticiones"
+- "¿Cuánto peso uso?" → Mira los weights y responde "Tienes configurado: Serie 1: 0kg, Serie 2: 20kg..."
 
 EJEMPLOS DE COMANDOS:
 - "quita la prensa" → Usa GYM_REMOVE_EXERCISE

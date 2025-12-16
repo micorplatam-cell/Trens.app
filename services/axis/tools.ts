@@ -373,31 +373,70 @@ export async function assetUpdateField(
     }
 
     const typedAsset = asset as UserAsset;
-    const currentMetadata = (typedAsset.metadata || {}) as Record<string, unknown>;
+    const currentMetadata = JSON.parse(JSON.stringify(typedAsset.metadata || {})) as Record<string, unknown>;
+    
+    // Navegar al campo usando lodash-style path: "custom_series.0.weight"
     const pathParts = fieldPath.split('.');
-
-    // Navegar estructura anidada
-    let target = currentMetadata;
+    
+    // Navegar hasta el penúltimo nivel
+    let target: unknown = currentMetadata;
     for (let i = 0; i < pathParts.length - 1; i++) {
-      if (!target[pathParts[i]]) {
-        target[pathParts[i]] = {};
+      const key = pathParts[i];
+      const isIndex = /^\d+$/.test(key);
+      
+      if (isIndex) {
+        // Es un índice de array
+        const idx = parseInt(key, 10);
+        if (!Array.isArray(target)) {
+          return { success: false, message: `Se esperaba un array en "${pathParts.slice(0, i).join('.')}"` };
+        }
+        if (idx >= (target as unknown[]).length) {
+          return { success: false, message: `Índice ${idx} fuera de rango. Hay ${(target as unknown[]).length} elementos (0-${(target as unknown[]).length - 1}).` };
+        }
+        target = (target as unknown[])[idx];
+      } else {
+        // Es una key de objeto
+        const obj = target as Record<string, unknown>;
+        if (obj[key] === undefined) {
+          obj[key] = {};
+        }
+        target = obj[key];
       }
-      target = target[pathParts[i]] as Record<string, unknown>;
     }
 
+    // Aplicar cambio en el último nivel
     const finalKey = pathParts[pathParts.length - 1];
-    const currentValue = target[finalKey];
+    const isIndexFinal = /^\d+$/.test(finalKey);
+    
+    let finalTarget: Record<string, unknown> | unknown[];
+    let actualKey: string | number;
+    
+    if (isIndexFinal) {
+      if (!Array.isArray(target)) {
+        return { success: false, message: `Se esperaba un array para índice ${finalKey}` };
+      }
+      finalTarget = target as unknown[];
+      actualKey = parseInt(finalKey, 10);
+      if (actualKey >= finalTarget.length) {
+        return { success: false, message: `Índice ${actualKey} fuera de rango. Hay ${finalTarget.length} elementos.` };
+      }
+    } else {
+      finalTarget = target as Record<string, unknown>;
+      actualKey = finalKey;
+    }
+
+    const currentValue = (finalTarget as Record<string | number, unknown>)[actualKey];
 
     // Aplicar operación
     switch (operation) {
       case 'set':
-        target[finalKey] = newValue;
+        (finalTarget as Record<string | number, unknown>)[actualKey] = newValue;
         break;
       case 'increment':
-        target[finalKey] = (Number(currentValue) || 0) + Number(newValue);
+        (finalTarget as Record<string | number, unknown>)[actualKey] = (Number(currentValue) || 0) + Number(newValue);
         break;
       case 'decrement':
-        target[finalKey] = (Number(currentValue) || 0) - Number(newValue);
+        (finalTarget as Record<string | number, unknown>)[actualKey] = (Number(currentValue) || 0) - Number(newValue);
         break;
     }
 
@@ -408,14 +447,16 @@ export async function assetUpdateField(
 
     if (updateError) throw updateError;
 
+    const finalValue = (finalTarget as Record<string | number, unknown>)[actualKey];
+
     return {
       success: true,
-      message: `✅ ${typedAsset.name}: ${fieldPath} = ${String(target[finalKey])}`,
+      message: `✅ ${typedAsset.name}: ${fieldPath} = ${String(finalValue)}`,
       data: {
         assetId: typedAsset.id,
         field: fieldPath,
         oldValue: currentValue,
-        newValue: target[finalKey],
+        newValue: finalValue,
       },
       affectedRecords: 1,
     };
