@@ -307,12 +307,18 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
 
         // 3. Llamar a Gemini con Function Calling (con historial de conversación)
         const geminiContext = buildGeminiContext();
+        console.warn('🤖 Llamando a Gemini...');
+        console.warn('📝 Contexto activeAsset:', geminiContext.activeAsset?.name || 'NINGUNO');
+        
         const geminiResponse = await callGemini(
           userText,
           geminiContext,
           GEMINI_API_KEY,
           conversationHistory
         );
+
+        console.warn('🤖 Gemini respondió:', geminiResponse.message);
+        console.warn('🔧 Tool calls:', geminiResponse.toolCalls.length);
 
         // Variable para almacenar la respuesta final
         let finalResponseText = geminiResponse.message;
@@ -380,6 +386,7 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
         ];
       } catch (e) {
         console.error('AXIS executeCommand error:', e);
+        console.warn('❌ Error completo:', JSON.stringify(e, null, 2));
         // Fallback a parseo básico si Gemini falla
         console.warn('⚠️ Gemini falló, usando parseo básico');
         const results = await parseAndExecuteBasic(userText);
