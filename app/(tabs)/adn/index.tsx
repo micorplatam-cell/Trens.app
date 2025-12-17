@@ -8,6 +8,7 @@ import {
   RefreshControl,
   ActivityIndicator,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Grid, Lock, Plus, Play, Eye, EyeOff, Edit2 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { supabase } from '../../../lib/supabase';
@@ -243,12 +244,11 @@ export default function AdnScreen() {
         {/* HEADER (PÚBLICO) */}
         <View className="relative pt-16 pb-20 px-6 items-center">
           {/* Degradado radial de fondo */}
-          <View
-            className="absolute inset-0 bg-[#1a1a1a] opacity-30"
-            style={{
-              backgroundColor: 'transparent',
-              backgroundImage: 'radial-gradient(circle at top, #1a1a1a 0%, #000000 70%)',
-            }}
+          <LinearGradient
+            colors={['#1a1a1a', '#000000']}
+            start={{ x: 0.5, y: 0 }}
+            end={{ x: 0.5, y: 1 }}
+            className="absolute inset-0 opacity-30"
           />
 
           {/* Avatar */}
