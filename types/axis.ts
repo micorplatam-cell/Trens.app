@@ -16,6 +16,10 @@ export type AxisToolName =
   | 'ASSET_UPDATE_FIELD'
   | 'ASSET_READ'
   | 'ASSET_GET_SCHEMA'
+  | 'ASSET_REMOVE_SERIES'
+  | 'ASSET_ADD_SERIES'
+  | 'ASSET_REPLACE_SERIES'
+  | 'ASSET_SET_SERIES'
   // Diet Tools
   | 'DIET_UPDATE_MEAL'
   | 'DIET_ADD_CALORIES'
@@ -69,6 +73,7 @@ export interface ScreenContext {
   module: ScreenModule;
   viewMode: string | null;
   currentExerciseIndex: number | null;
+  currentTrainingDay?: number; // Día de entrenamiento seleccionado (0-indexed)
 }
 
 export interface ActiveAsset {
@@ -77,6 +82,8 @@ export interface ActiveAsset {
   name: string;
   liquidData: Record<string, unknown>; // JSONB dinámico
   trainingDays?: number[];
+  isAlternative?: boolean; // true si es una alternativa, no el ejercicio principal
+  parentExerciseName?: string; // nombre del ejercicio principal si es alternativa
 }
 
 export interface UserProfile {
@@ -115,6 +122,7 @@ export interface AxisContextState {
   activeAsset: ActiveAsset | null;
   sportMode: SportMode;
   userProfile: UserProfile | null;
+  availableExercises: string[];
 
   // Aliases
   aliases: UserAlias[];
@@ -126,7 +134,7 @@ export interface AxisContextState {
 
   // Context updates
   setScreenContext: (ctx: ScreenContext) => void;
-  setActiveAsset: (assetId: string | null) => Promise<void>;
+  setActiveAsset: (assetId: string | null, alternativeInfo?: { isAlternative: boolean; parentExerciseName: string }) => Promise<void>;
   setSportMode: (mode: SportMode) => void;
 
   // Alias management

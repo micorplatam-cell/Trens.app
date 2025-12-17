@@ -18,6 +18,7 @@ import { callGemini, continueAfterToolExecution } from '../services/axis/gemini'
 import type {
   AxisContextState,
   AxisToolResult,
+  AxisToolCall,
   ScreenContext,
   ActiveAsset,
   SportMode,
@@ -37,6 +38,7 @@ const defaultScreenContext: ScreenContext = {
   module: 'nucleo',
   viewMode: null,
   currentExerciseIndex: null,
+  currentTrainingDay: 0,
 };
 
 const defaultUserProfile: UserProfile = {
@@ -134,9 +136,41 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
   );
 
   // Executor Hook
-  const { executeTool, executeToolChain, getToolDefinitions, isExecuting } = useAxisExecutor({
+  const {
+    executeTool: executeToolRaw,
+    executeToolChain: executeToolChainRaw,
+    getToolDefinitions,
+    isExecuting,
+  } = useAxisExecutor({
     userId,
+    currentTrainingDay: screenContext.currentTrainingDay ?? 0, // Pasar día actual de la pantalla
   });
+
+  // Wrapper para executeTool que incrementa refreshTrigger si exitoso
+  const executeTool = useCallback(
+    async (toolCall: AxisToolCall): Promise<AxisToolResult> => {
+      const result = await executeToolRaw(toolCall);
+      if (result.success) {
+        console.warn('🔄 executeTool exitoso, incrementando refreshTrigger');
+        setRefreshTrigger((prev) => prev + 1);
+      }
+      return result;
+    },
+    [executeToolRaw]
+  );
+
+  // Wrapper para executeToolChain que incrementa refreshTrigger si alguno exitoso
+  const executeToolChain = useCallback(
+    async (toolCalls: AxisToolCall[]): Promise<AxisToolResult[]> => {
+      const results = await executeToolChainRaw(toolCalls);
+      if (results.some((r) => r.success)) {
+        console.warn('🔄 executeToolChain exitoso, incrementando refreshTrigger');
+        setRefreshTrigger((prev) => prev + 1);
+      }
+      return results;
+    },
+    [executeToolChainRaw]
+  );
 
   // -------------------------------------------------------------------------
   // CONTEXT UPDATES
@@ -144,9 +178,14 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
 
   /**
    * Carga un asset activo desde Supabase
+   * @param assetId - ID del asset
+   * @param alternativeInfo - Info si es una alternativa
    */
   const setActiveAsset = useCallback(
-    async (assetId: string | null) => {
+    async (
+      assetId: string | null,
+      alternativeInfo?: { isAlternative: boolean; parentExerciseName: string }
+    ) => {
       if (!assetId || !userId) {
         setActiveAssetState(null);
         return;
@@ -171,6 +210,8 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
           name: data.name as string,
           liquidData: (data.metadata || {}) as Record<string, unknown>,
           trainingDays: data.training_days as number[] | undefined,
+          isAlternative: alternativeInfo?.isAlternative || false,
+          parentExerciseName: alternativeInfo?.parentExerciseName,
         });
       } catch (e) {
         console.error('Error loading active asset:', e);
@@ -253,6 +294,8 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
             name: activeAsset.name,
             type: activeAsset.type,
             liquidData: activeAsset.liquidData,
+            isAlternative: activeAsset.isAlternative || false,
+            parentExerciseName: activeAsset.parentExerciseName,
           }
         : null,
       customAliases: aliases.map((a) => ({
@@ -309,7 +352,7 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
         const geminiContext = buildGeminiContext();
         console.warn('🤖 Llamando a Gemini...');
         console.warn('📝 Contexto activeAsset:', geminiContext.activeAsset?.name || 'NINGUNO');
-        
+
         const geminiResponse = await callGemini(
           userText,
           geminiContext,
@@ -385,10 +428,17 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
           },
         ];
       } catch (e) {
-        console.error('AXIS executeCommand error:', e);
-        console.warn('❌ Error completo:', JSON.stringify(e, null, 2));
+        // Solo log de warning, no error (el fallback manejará esto)
+        const errorName = (e as Error)?.name || 'Unknown';
+        const isTimeout = errorName === 'AbortError';
+
+        if (isTimeout) {
+          console.warn('⏱️ Gemini timeout, usando parseo básico...');
+        } else {
+          console.warn('⚠️ Gemini falló:', (e as Error)?.message || 'Error desconocido');
+        }
+
         // Fallback a parseo básico si Gemini falla
-        console.warn('⚠️ Gemini falló, usando parseo básico');
         const results = await parseAndExecuteBasic(userText);
         // Trigger refresh si alguna operación fue exitosa
         if (results.some((r) => r.success)) {
@@ -427,8 +477,136 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
       return name.trim();
     };
 
-    // Patrón: "quita/elimina X"
-    if (lower.includes('quita') || lower.includes('elimina')) {
+    // Helper: Convertir ordinales a números
+    const ordinalToNumber = (text: string): number | null => {
+      const ordinals: Record<string, number> = {
+        primera: 0,
+        first: 0,
+        '1ra': 0,
+        '1ª': 0,
+        segunda: 1,
+        second: 1,
+        '2da': 1,
+        '2ª': 1,
+        tercera: 2,
+        third: 2,
+        '3ra': 2,
+        '3ª': 2,
+        cuarta: 3,
+        fourth: 3,
+        '4ta': 3,
+        '4ª': 3,
+        quinta: 4,
+        fifth: 4,
+        '5ta': 4,
+        '5ª': 4,
+        sexta: 5,
+        sixth: 5,
+        '6ta': 5,
+        '6ª': 5,
+        séptima: 6,
+        septima: 6,
+        seventh: 6,
+        '7ma': 6,
+        '7ª': 6,
+        octava: 7,
+        eighth: 7,
+        '8va': 7,
+        '8ª': 7,
+        novena: 8,
+        ninth: 8,
+        '9na': 8,
+        '9ª': 8,
+        décima: 9,
+        decima: 9,
+        tenth: 9,
+        '10ma': 9,
+        '10ª': 9,
+      };
+      for (const [ordinal, idx] of Object.entries(ordinals)) {
+        if (text.includes(ordinal)) return idx;
+      }
+      return null;
+    };
+
+    // ⚠️ IMPORTANTE: Patrones de SERIES deben ir ANTES de patrones de EJERCICIOS
+
+    // Patrón: "quita/elimina la última/primera/segunda serie"
+    if ((lower.includes('quita') || lower.includes('elimina')) && lower.includes('serie')) {
+      let seriesIndex: 'last' | 'first' | number = 'last';
+
+      // Primero buscar ordinales
+      const ordinalIdx = ordinalToNumber(lower);
+      if (ordinalIdx !== null) {
+        seriesIndex = ordinalIdx;
+      } else if (lower.includes('última') || lower.includes('ultima') || lower.includes('last')) {
+        seriesIndex = 'last';
+      } else {
+        // Buscar número específico "serie 3"
+        const numMatch = lower.match(/serie\s*(\d+)/);
+        if (numMatch) {
+          seriesIndex = parseInt(numMatch[1], 10) - 1; // Convertir a 0-indexed
+        }
+      }
+
+      if (activeAsset) {
+        const result = await executeTool({
+          tool: 'ASSET_REMOVE_SERIES',
+          parameters: {
+            assetName: activeAsset.name,
+            seriesIndex: seriesIndex,
+          },
+        });
+        return [result];
+      }
+    }
+
+    // Patrón: "agrega/añade una serie"
+    if ((lower.includes('agrega') || lower.includes('añade')) && lower.includes('serie')) {
+      // Extraer reps si se especifican (soporta: "10 reps", "1 repetición", "12 repeticiones")
+      let reps = 10;
+      const repsMatch = lower.match(/(\d+)\s*(?:reps?|repetici[oó]n(?:es)?)/);
+      if (repsMatch) {
+        reps = parseInt(repsMatch[1], 10);
+      }
+
+      // Extraer peso si se especifica
+      let weight = 0;
+      const weightMatch = lower.match(/(\d+)\s*(?:kg|kilos?)/);
+      if (weightMatch) {
+        weight = parseInt(weightMatch[1], 10);
+      }
+
+      // Extraer tipo
+      let seriesType: 'WARMUP' | 'APPROACH' | 'EFFECTIVE' | 'FAILURE' = 'EFFECTIVE';
+      if (lower.includes('calentamiento') || lower.includes('warmup')) {
+        seriesType = 'WARMUP';
+      } else if (lower.includes('fallo') || lower.includes('failure')) {
+        seriesType = 'FAILURE';
+      } else if (
+        lower.includes('aproximación') ||
+        lower.includes('approach') ||
+        lower.includes('aproximacion')
+      ) {
+        seriesType = 'APPROACH';
+      }
+
+      if (activeAsset) {
+        const result = await executeTool({
+          tool: 'ASSET_ADD_SERIES',
+          parameters: {
+            assetName: activeAsset.name,
+            reps,
+            weight,
+            seriesType,
+          },
+        });
+        return [result];
+      }
+    }
+
+    // Patrón: "quita/elimina X" (EJERCICIO - solo si NO menciona "serie")
+    if ((lower.includes('quita') || lower.includes('elimina')) && !lower.includes('serie')) {
       const match = text.match(/(?:quita|elimina)\s+(?:la\s+)?(.+)/i);
       if (match) {
         const exerciseName = resolveExerciseName(match[1]);
@@ -481,15 +659,17 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
       }
     }
 
-    // Patrón: "agrega/añade X"
-    if (lower.includes('agrega') || lower.includes('añade')) {
+    // Patrón: "agrega/añade X" (ejercicio - solo si NO menciona "serie")
+    if ((lower.includes('agrega') || lower.includes('añade')) && !lower.includes('serie')) {
       const match = text.match(/(?:agrega|añade)\s+(.+)/i);
       if (match) {
+        // Usar el día del contexto de pantalla (UI) si está disponible
+        const currentDay = screenContext.currentTrainingDay ?? userProfile.currentTrainingDay;
         const result = await executeTool({
           tool: 'GYM_ADD_EXERCISE',
           parameters: {
             exerciseName: match[1].trim(),
-            trainingDay: userProfile.currentTrainingDay,
+            trainingDay: currentDay,
           },
         });
         return [result];
@@ -542,6 +722,9 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
    * Genera el System Prompt con contexto actual
    */
   const getSystemPrompt = useCallback((): string => {
+    // Usar el día del contexto de pantalla (UI) si está disponible, sino el del perfil
+    const currentDay = screenContext.currentTrainingDay ?? userProfile.currentTrainingDay;
+    
     return `Eres AXIS, el asistente de IA de TRENS (High-Performance Fitness App).
 
 CONTEXTO ACTUAL:
@@ -549,7 +732,9 @@ CONTEXTO ACTUAL:
 - Vista: ${screenContext.viewMode || 'principal'}
 - Deporte: ${sportMode || 'No definido'}
 - Nivel del usuario: ${userProfile.level}
-- Día de entrenamiento: ${userProfile.currentTrainingDay + 1}
+- Día de entrenamiento actual: ${currentDay + 1} (índice: ${currentDay})
+
+IMPORTANTE: Cuando el usuario pida modificar series de un ejercicio, usa trainingDay: ${currentDay}
 
 ${
   activeAsset
@@ -595,6 +780,7 @@ IMPORTANTE: Puedes ejecutar múltiples herramientas si la solicitud lo requiere.
       activeAsset,
       sportMode,
       userProfile,
+      availableExercises,
 
       // Aliases
       aliases,
@@ -632,6 +818,7 @@ IMPORTANTE: Puedes ejecutar múltiples herramientas si la solicitud lo requiere.
       activeAsset,
       sportMode,
       userProfile,
+      availableExercises,
       aliases,
       executeCommand,
       executeTool,

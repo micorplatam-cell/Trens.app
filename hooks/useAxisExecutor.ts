@@ -11,6 +11,10 @@ import {
   assetUpdateField,
   assetRead,
   assetGetSchema,
+  assetRemoveSeries,
+  assetAddSeries,
+  assetReplaceSeries,
+  assetSetSeries,
   dietAddCalories,
   logWorkoutSet,
   TOOL_DEFINITIONS,
@@ -19,13 +23,15 @@ import type { AxisToolCall, AxisToolResult, ToolDefinition } from '../types/axis
 
 interface UseAxisExecutorProps {
   userId: string | null;
+  currentTrainingDay?: number; // Día de entrenamiento desde el contexto de pantalla
 }
 
-export const useAxisExecutor = ({ userId }: UseAxisExecutorProps = { userId: null }) => {
+export const useAxisExecutor = ({ userId, currentTrainingDay = 0 }: UseAxisExecutorProps = { userId: null, currentTrainingDay: 0 }) => {
   const [isExecuting, setIsExecuting] = useState(false);
 
   /**
    * Ejecuta una herramienta específica
+   * IMPORTANTE: currentTrainingDay del contexto sobrescribe el de Gemini para evitar errores
    */
   const executeTool = useCallback(
     async (toolCall: AxisToolCall): Promise<AxisToolResult> => {
@@ -113,6 +119,92 @@ export const useAxisExecutor = ({ userId }: UseAxisExecutorProps = { userId: nul
             );
             break;
 
+          case 'ASSET_REMOVE_SERIES':
+            result = await assetRemoveSeries(
+              userId,
+              p.assetName as string,
+              p.seriesIndex === 'last' || p.seriesIndex === 'first' 
+                ? p.seriesIndex 
+                : parseInt(String(p.seriesIndex), 10),
+              currentTrainingDay // Usar día del contexto de pantalla
+            );
+            break;
+
+          case 'ASSET_ADD_SERIES':
+            // position puede ser number, 'end', 'start', o undefined
+            let addPosition: 'end' | 'start' | number = 'end';
+            if (typeof p.position === 'number') {
+              addPosition = p.position;
+            } else if (p.position === 'start') {
+              addPosition = 'start';
+            }
+            result = await assetAddSeries(
+              userId,
+              p.assetName as string,
+              (p.reps as number) || 10,
+              (p.weight as number) || 0,
+              (p.seriesType as 'WARMUP' | 'APPROACH' | 'EFFECTIVE' | 'FAILURE') || 'EFFECTIVE',
+              addPosition,
+              currentTrainingDay // Usar día del contexto de pantalla
+            );
+            break;
+
+          case 'ASSET_REPLACE_SERIES':
+            // seriesIndex puede ser 'last', 'first', o un número
+            let replaceIdx: 'last' | 'first' | number = 'last';
+            if (p.seriesIndex === 'first') {
+              replaceIdx = 'first';
+            } else if (p.seriesIndex === 'last') {
+              replaceIdx = 'last';
+            } else if (typeof p.seriesIndex === 'number') {
+              replaceIdx = p.seriesIndex;
+            } else if (typeof p.seriesIndex === 'string' && !isNaN(parseInt(p.seriesIndex))) {
+              replaceIdx = parseInt(p.seriesIndex);
+            }
+            result = await assetReplaceSeries(
+              userId,
+              p.assetName as string,
+              replaceIdx,
+              (p.reps as number) || 10,
+              (p.weight as number) || 0,
+              (p.seriesType as 'WARMUP' | 'APPROACH' | 'EFFECTIVE' | 'FAILURE') || 'EFFECTIVE',
+              currentTrainingDay // Usar día del contexto de pantalla
+            );
+            break;
+
+          case 'ASSET_SET_SERIES':
+            // Recibe un array de series (puede venir como string JSON o como array)
+            let seriesArray = p.series;
+            if (typeof seriesArray === 'string') {
+              try {
+                seriesArray = JSON.parse(seriesArray);
+              } catch {
+                result = { success: false, message: 'Error parseando series JSON' };
+                break;
+              }
+            }
+            // Convertir al formato esperado, agregando id si no existe
+            const formattedSeries = (seriesArray as Array<{
+              id?: string;
+              reps: number;
+              weight: number;
+              type: 'WARMUP' | 'APPROACH' | 'EFFECTIVE' | 'FAILURE';
+              note?: string;
+            }>).map((s, i) => ({
+              id: s.id || String(Date.now() + i),
+              reps: s.reps,
+              weight: s.weight,
+              type: s.type,
+              note: s.note,
+            }));
+            result = await assetSetSeries(
+              userId,
+              p.assetName as string,
+              formattedSeries,
+              currentTrainingDay // Usar día del contexto de pantalla
+            );
+            break;
+
           case 'GET_USER_CONTEXT':
             // Este se maneja desde el contexto, no aquí
             result = { success: true, message: 'Contexto obtenido desde AxisContext.' };
@@ -132,7 +224,7 @@ export const useAxisExecutor = ({ userId }: UseAxisExecutorProps = { userId: nul
       console.warn(`🤖 AXIS Resultado:`, result);
       return result;
     },
-    [userId]
+    [userId, currentTrainingDay] // Agregar currentTrainingDay a las dependencias
   );
 
   /**

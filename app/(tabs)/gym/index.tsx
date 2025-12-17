@@ -301,23 +301,43 @@ export default function GymScreen() {
   // SYNC ACTIVE EXERCISE WITH AXIS CONTEXT
   // -------------------------------------------------------------------------
   useEffect(() => {
-    // Sincronizar módulo actual con AXIS
+    // Sincronizar módulo actual con AXIS (incluyendo día de entrenamiento)
     if (isFocused) {
       setScreenContext({
         module: 'gym',
         viewMode: viewMode,
         currentExerciseIndex: activeExerciseIndex,
+        currentTrainingDay: selectedDayIndex,
       });
     }
-  }, [isFocused, viewMode, activeExerciseIndex, setScreenContext]);
+  }, [isFocused, viewMode, activeExerciseIndex, selectedDayIndex, setScreenContext]);
 
   useEffect(() => {
-    // Sincronizar ejercicio activo con AXIS
+    // Sincronizar ejercicio activo con AXIS (considerando alternativas)
     const currentExercise = exercises[activeExerciseIndex];
     if (currentExercise && isFocused) {
-      setActiveAsset(currentExercise.id);
+      const altIndex = activeAlternatives[activeExerciseIndex] || 0;
+
+      // Si altIndex > 0, estamos en una alternativa
+      if (
+        altIndex > 0 &&
+        currentExercise.alternatives &&
+        currentExercise.alternatives[altIndex - 1]
+      ) {
+        // Usar el ID de la alternativa, marcando que ES alternativa
+        const alternativeId = currentExercise.alternatives[altIndex - 1].id;
+        const alternativeName = currentExercise.alternatives[altIndex - 1].name;
+        console.log('🔄 AXIS: Cambiando a alternativa:', alternativeName);
+        setActiveAsset(alternativeId, {
+          isAlternative: true,
+          parentExerciseName: currentExercise.name,
+        });
+      } else {
+        // Usar el ejercicio principal (no es alternativa)
+        setActiveAsset(currentExercise.id);
+      }
     }
-  }, [activeExerciseIndex, exercises, isFocused, setActiveAsset]);
+  }, [activeExerciseIndex, exercises, isFocused, setActiveAsset, activeAlternatives]);
 
   // Modal drag state
   const translateYHistorial = useSharedValue(0);
@@ -609,14 +629,23 @@ export default function GymScreen() {
         }
 
         const mappedExercises: Exercise[] = filteredData.map((item, index) => {
-          // Buscar alternativas vinculadas a este ejercicio
-          const alternativeRelations =
-            alternativesData?.filter((rel: any) => rel.main_exercise_id === item.id) || [];
+          try {
+            // Buscar alternativas vinculadas a este ejercicio
+            const alternativeRelations =
+              alternativesData?.filter((rel: any) => rel.main_exercise_id === item.id) || [];
 
-          // Cargar estructura personalizada si existe (ANTES de mapear alternativas)
-          const customSeriesData: SeriesConfig[] = item.metadata?.custom_series || [];
-          const seriesForState: Series[] =
-            customSeriesData.length > 0
+            // Cargar estructura personalizada del DÍA ACTUAL
+            // Nueva estructura: series_by_day[day] | Fallback: custom_series (legacy)
+            const seriesByDay = item.metadata?.series_by_day as
+              | Record<string, SeriesConfig[]>
+              | undefined;
+            const customSeriesData: SeriesConfig[] =
+              seriesByDay?.[String(targetDayIndex)] || // Primero buscar en series_by_day para el día actual
+              (item.metadata?.custom_series as SeriesConfig[] | undefined) || // Fallback legacy
+              [];
+
+            const seriesForState: Series[] =
+              customSeriesData.length > 0
               ? customSeriesData.map((s: SeriesConfig) => ({
                   id: s.id,
                   type:
@@ -633,7 +662,7 @@ export default function GymScreen() {
                 }))
               : generateDefaultSeries(item.metadata?.sets || '4x10');
 
-          // Mapear alternativas CON las series del ejercicio principal
+          // Mapear alternativas CON las series del ejercicio principal (del día actual)
           const alternatives: ExerciseAlternative[] = alternativeRelations.map((rel: any) => {
             const asset = alternativeAssets?.find((a: any) => a.id === rel.alternative_exercise_id);
 
@@ -657,11 +686,37 @@ export default function GymScreen() {
             videos: generateMockVideos(item.id, index),
             alternatives,
           };
+        } catch (mapError) {
+          console.error('💥 ERROR mapeando ejercicio:', item.name, mapError);
+          // Retornar un ejercicio válido mínimo para no romper el array
+          return {
+            id: item.id || `error-${index}`,
+            name: item.name || 'ERROR',
+            sets: '0x0',
+            image_url: '',
+            order: index,
+            series: [],
+            training_days: [0],
+            videos: [],
+            alternatives: [],
+          };
+        }
         });
+        console.log(
+          '✅ SETEANDO EJERCICIOS:',
+          mappedExercises.length,
+          'ejercicios para día',
+          targetDayIndex
+        );
+        console.log(
+          '   Nombres:',
+          mappedExercises.map((e) => e.name)
+        );
         setExercises(mappedExercises);
 
         // Solo cambiar a FOCUS si no estamos ya en algún modo
         if (viewMode === 'LOADING') {
+          console.log('🔀 Cambiando viewMode a FOCUS');
           setViewMode('FOCUS');
         }
       } else {
@@ -1216,11 +1271,33 @@ export default function GymScreen() {
         // Agregar el nuevo día al array
         const updatedDays = [...currentDays, selectedDayIndex].sort();
 
+        // Obtener metadata actual para copiar series al nuevo día
+        const currentMetadata = existingExercise.metadata || {};
+        const seriesByDay = (currentMetadata.series_by_day as Record<string, any[]>) || {};
+        
+        // Si el usuario configuró series personalizadas, usarlas para el nuevo día
+        // Si no, usar las series del primer día existente o las series legacy
+        if (customSeries && customSeries.length > 0) {
+          seriesByDay[String(selectedDayIndex)] = customSeries;
+        } else {
+          // Copiar series del primer día configurado o usar custom_series legacy
+          const firstDaySeries = seriesByDay[String(currentDays[0])] || 
+                                 (currentMetadata.custom_series as any[]) || 
+                                 [];
+          if (firstDaySeries.length > 0) {
+            seriesByDay[String(selectedDayIndex)] = [...firstDaySeries];
+          }
+        }
+
         const result = await supabase
           .from('user_assets')
           .update({
             training_days: updatedDays,
             updated_at: new Date().toISOString(),
+            metadata: {
+              ...currentMetadata,
+              series_by_day: seriesByDay,
+            },
           })
           .eq('id', existingExercise.id)
           .select()
@@ -1241,6 +1318,11 @@ export default function GymScreen() {
 
         if (existingDeleted) {
           // Reactivar ejercicio eliminado (mantiene asset_url personalizado)
+          const seriesByDay: Record<string, any[]> = {};
+          if (customSeries) {
+            seriesByDay[String(selectedDayIndex)] = customSeries;
+          }
+
           const result = await supabase
             .from('user_assets')
             .update({
@@ -1255,7 +1337,8 @@ export default function GymScreen() {
                 rest: template.default_metadata.rest,
                 category: template.category,
                 difficulty: template.difficulty,
-                custom_series: customSeries || null,
+                series_by_day: customSeries ? seriesByDay : {},
+                custom_series: customSeries || null, // Legacy compatibility
               },
             })
             .eq('id', existingDeleted.id)
@@ -1266,6 +1349,11 @@ export default function GymScreen() {
           error = result.error;
         } else {
           // Crear NUEVO ejercicio con imagen por defecto
+          const seriesByDay: Record<string, any[]> = {};
+          if (customSeries) {
+            seriesByDay[String(selectedDayIndex)] = customSeries;
+          }
+
           const result = await supabase
             .from('user_assets')
             .insert({
@@ -1281,7 +1369,8 @@ export default function GymScreen() {
                 rest: template.default_metadata.rest,
                 category: template.category,
                 difficulty: template.difficulty,
-                custom_series: customSeries || null,
+                series_by_day: customSeries ? seriesByDay : {},
+                custom_series: customSeries || null, // Legacy compatibility
               },
               order: exercises.length,
             })
@@ -1677,15 +1766,29 @@ export default function GymScreen() {
               const existingExercise = exercises.find((ex) => ex.id === selectedTemplate.id);
 
               if (existingExercise) {
-                // Actualizar ejercicio existente
+                // Actualizar ejercicio existente - solo el día actual
                 try {
+                  // Obtener metadata actual para preservar series de otros días
+                  const { data: currentAsset } = await supabase
+                    .from('user_assets')
+                    .select('metadata')
+                    .eq('id', selectedTemplate.id)
+                    .single();
+
+                  const currentMetadata = currentAsset?.metadata || {};
+                  const seriesByDay =
+                    (currentMetadata.series_by_day as Record<string, any[]>) || {};
+                  seriesByDay[String(selectedDayIndex)] = seriesConfig;
+
                   const { error } = await supabase
                     .from('user_assets')
                     .update({
                       metadata: {
                         ...selectedTemplate.default_metadata,
+                        ...currentMetadata,
                         sets: `${seriesConfig.length}x${seriesConfig[0]?.reps || 10}`,
-                        custom_series: seriesConfig,
+                        series_by_day: seriesByDay,
+                        // NO sobrescribir custom_series - solo series_by_day
                       },
                     })
                     .eq('id', selectedTemplate.id);
@@ -1894,8 +1997,14 @@ export default function GymScreen() {
                     default_metadata: data.metadata || {},
                   };
 
-                  // Cargar series existentes
-                  const existingSeries: SeriesConfig[] = data.metadata?.custom_series || [];
+                  // Cargar series existentes del DÍA ACTUAL
+                  const seriesByDay = data.metadata?.series_by_day as
+                    | Record<string, SeriesConfig[]>
+                    | undefined;
+                  const existingSeries: SeriesConfig[] =
+                    seriesByDay?.[String(selectedDayIndex)] || // Primero series_by_day del día actual
+                    (data.metadata?.custom_series as SeriesConfig[] | undefined) || // Fallback legacy
+                    [];
                   setSeriesConfig(existingSeries);
                   setSelectedTemplate(template);
                   setSeriesConfigModalVisible(true);

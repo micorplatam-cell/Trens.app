@@ -32,6 +32,77 @@ interface AssetTemplate {
   difficulty?: string;
 }
 
+interface SeriesConfig {
+  id: string;
+  reps: number;
+  weight: number;
+  type: 'WARMUP' | 'APPROACH' | 'EFFECTIVE' | 'FAILURE';
+  note?: string;
+}
+
+// ============================================================================
+// HELPERS: Series por día
+// ============================================================================
+
+/**
+ * Obtiene las series de un ejercicio para un día específico.
+ * Maneja migración automática de custom_series legacy a series_by_day.
+ */
+function getSeriesForDay(
+  metadata: Record<string, unknown>,
+  trainingDay: number
+): SeriesConfig[] {
+  // Nueva estructura: series_by_day
+  const seriesByDay = metadata.series_by_day as Record<string, SeriesConfig[]> | undefined;
+  if (seriesByDay && seriesByDay[String(trainingDay)]) {
+    return seriesByDay[String(trainingDay)];
+  }
+  
+  // Fallback: estructura legacy custom_series (mismas series para todos los días)
+  const legacySeries = metadata.custom_series as SeriesConfig[] | undefined;
+  if (legacySeries && legacySeries.length > 0) {
+    return legacySeries;
+  }
+  
+  // Default vacío
+  return [];
+}
+
+/**
+ * Establece las series de un ejercicio para un día específico.
+ * Solo actualiza series_by_day - NO sobrescribir custom_series para evitar contaminación entre días.
+ */
+function setSeriesForDay(
+  metadata: Record<string, unknown>,
+  trainingDay: number,
+  series: SeriesConfig[]
+): Record<string, unknown> {
+  // Inicializar series_by_day si no existe
+  if (!metadata.series_by_day) {
+    metadata.series_by_day = {};
+  }
+  
+  const seriesByDay = metadata.series_by_day as Record<string, SeriesConfig[]>;
+  seriesByDay[String(trainingDay)] = series;
+  
+  // NO actualizar custom_series - cada día tiene sus propias series
+  // custom_series solo se mantiene como fallback de migración para datos antiguos
+  
+  return metadata;
+}
+
+/**
+ * Series por defecto para un ejercicio nuevo
+ */
+function getDefaultSeries(): SeriesConfig[] {
+  return [
+    { id: '1', reps: 12, type: 'WARMUP', weight: 0 },
+    { id: '2', reps: 10, type: 'EFFECTIVE', weight: 0 },
+    { id: '3', reps: 10, type: 'EFFECTIVE', weight: 0 },
+    { id: '4', reps: 10, type: 'EFFECTIVE', weight: 0 },
+  ];
+}
+
 // ============================================================================
 // GYM TOOL: Agregar Ejercicio
 // ============================================================================
@@ -95,12 +166,12 @@ export async function gymAddExercise(
     }
 
     // Crear nuevo ejercicio
-    const defaultSeries = customSeries || [
-      { id: '1', reps: 12, type: 'WARMUP', weight: 0 },
-      { id: '2', reps: 10, type: 'EFFECTIVE', weight: 0 },
-      { id: '3', reps: 10, type: 'EFFECTIVE', weight: 0 },
-      { id: '4', reps: 10, type: 'EFFECTIVE', weight: 0 },
-    ];
+    const defaultSeries = customSeries || getDefaultSeries();
+    
+    // Crear estructura series_by_day con las series para este día
+    const seriesByDay: Record<string, SeriesConfig[]> = {
+      [String(trainingDay)]: defaultSeries as SeriesConfig[],
+    };
 
     const { data, error } = await supabase
       .from('user_assets')
@@ -112,7 +183,8 @@ export async function gymAddExercise(
         training_days: [trainingDay],
         metadata: {
           ...typedTemplate.default_metadata,
-          custom_series: defaultSeries,
+          series_by_day: seriesByDay,
+          custom_series: defaultSeries, // Compatibilidad legacy
           category: typedTemplate.category,
           difficulty: typedTemplate.difficulty,
         },
@@ -227,29 +299,131 @@ export async function gymReplaceExercise(
   newExerciseName: string,
   trainingDay?: number
 ): Promise<AxisToolResult> {
-  // Primero eliminar
-  const removeResult = await gymRemoveExercise(
-    userId,
-    oldExerciseName,
-    trainingDay,
-    trainingDay === undefined
-  );
-  if (!removeResult.success) return removeResult;
+  try {
+    // 1. Buscar el ejercicio original para obtener su día y orden
+    const { data: oldExercise, error: findError } = await supabase
+      .from('user_assets')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('asset_type', 'gym_exercise')
+      .ilike('name', `%${oldExerciseName}%`)
+      .is('deleted_at', null)
+      .limit(1)
+      .single();
 
-  // Luego agregar
-  const addResult = await gymAddExercise(userId, newExerciseName, trainingDay ?? 0);
-  if (!addResult.success) {
+    if (findError || !oldExercise) {
+      return {
+        success: false,
+        message: `No encontré "${oldExerciseName}" en tu rutina.`,
+      };
+    }
+
+    const typedOldExercise = oldExercise as UserAsset;
+    const oldTrainingDays = typedOldExercise.training_days || [];
+    const oldOrder = typedOldExercise.order ?? 0;
+
+    // Determinar el día correcto
+    const targetDay =
+      trainingDay !== undefined && oldTrainingDays.includes(trainingDay)
+        ? trainingDay
+        : oldTrainingDays[0] ?? 0;
+
+    console.log(
+      `🔄 Reemplazando ${typedOldExercise.name} → ${newExerciseName} en día ${targetDay}, orden ${oldOrder}`
+    );
+
+    // 2. Buscar template del nuevo ejercicio
+    const { data: template, error: templateError } = await supabase
+      .from('asset_templates')
+      .select('*')
+      .eq('asset_type', 'gym_exercise')
+      .ilike('name', `%${newExerciseName}%`)
+      .limit(1)
+      .single();
+
+    if (templateError || !template) {
+      return {
+        success: false,
+        message: `No encontré el ejercicio "${newExerciseName}" en el catálogo.`,
+      };
+    }
+
+    const typedTemplate = template as AssetTemplate;
+
+    // 3. Verificar si el nuevo ejercicio ya existe en la DB del usuario
+    const { data: existingNew } = await supabase
+      .from('user_assets')
+      .select('id, training_days, order')
+      .eq('user_id', userId)
+      .eq('name', typedTemplate.name)
+      .is('deleted_at', null)
+      .maybeSingle();
+
+    // 4. Eliminar el ejercicio viejo
+    if (oldTrainingDays.length === 1) {
+      // Soft delete completo
+      await supabase
+        .from('user_assets')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('id', typedOldExercise.id);
+    } else {
+      // Solo quitar del día específico
+      const updatedDays = oldTrainingDays.filter((d) => d !== targetDay);
+      await supabase
+        .from('user_assets')
+        .update({ training_days: updatedDays })
+        .eq('id', typedOldExercise.id);
+    }
+
+    // 5. Agregar o actualizar el nuevo ejercicio
+    if (existingNew) {
+      // El ejercicio ya existe, solo agregamos el día y actualizamos el orden
+      const existingAsset = existingNew as UserAsset;
+      const currentDays = existingAsset.training_days || [];
+      const updatedDays = [...new Set([...currentDays, targetDay])];
+
+      await supabase
+        .from('user_assets')
+        .update({
+          training_days: updatedDays,
+          order: oldOrder, // Preservar el orden del ejercicio reemplazado
+        })
+        .eq('id', existingAsset.id);
+    } else {
+      // Crear nuevo ejercicio con el orden del viejo
+      const defaultSeries = getDefaultSeries();
+      
+      // Crear estructura series_by_day
+      const seriesByDay: Record<string, SeriesConfig[]> = {
+        [String(targetDay)]: defaultSeries,
+      };
+
+      await supabase.from('user_assets').insert({
+        user_id: userId,
+        asset_type: 'gym_exercise',
+        name: typedTemplate.name,
+        asset_url: typedTemplate.image_url,
+        training_days: [targetDay],
+        order: oldOrder, // Preservar el orden
+        metadata: {
+          ...typedTemplate.default_metadata,
+          series_by_day: seriesByDay,
+          custom_series: defaultSeries, // Compatibilidad legacy
+          category: typedTemplate.category,
+          difficulty: typedTemplate.difficulty,
+        },
+      });
+    }
+
     return {
-      success: false,
-      message: `Quité ${oldExerciseName} pero no pude agregar ${newExerciseName}: ${addResult.message}`,
+      success: true,
+      message: `✅ Cambiado: ${typedOldExercise.name} → ${typedTemplate.name} (día ${targetDay + 1})`,
+      affectedRecords: 2,
     };
+  } catch (error) {
+    console.error('gymReplaceExercise error:', error);
+    return { success: false, message: 'Error al reemplazar ejercicio.' };
   }
-
-  return {
-    success: true,
-    message: `✅ Cambiado: ${oldExerciseName} → ${newExerciseName}`,
-    affectedRecords: 2,
-  };
 }
 
 // ============================================================================
@@ -478,6 +652,348 @@ export async function assetUpdateField(
   } catch (error) {
     console.error('assetUpdateField error:', error);
     return { success: false, message: 'Error actualizando campo.' };
+  }
+}
+
+// ============================================================================
+// ASSET TOOL: Quitar Serie de un Ejercicio
+// ============================================================================
+export async function assetRemoveSeries(
+  userId: string,
+  assetName: string,
+  seriesIndex: number | 'last' | 'first',
+  trainingDay: number = 0
+): Promise<AxisToolResult> {
+  try {
+    // Buscar el asset
+    const { data: asset, error: assetError } = await supabase
+      .from('user_assets')
+      .select('id, name, metadata, training_days')
+      .eq('user_id', userId)
+      .ilike('name', `%${assetName}%`)
+      .is('deleted_at', null)
+      .limit(1)
+      .maybeSingle();
+
+    if (assetError || !asset) {
+      return { success: false, message: `No encontré el ejercicio "${assetName}".` };
+    }
+
+    const typedAsset = asset as UserAsset;
+    const currentMetadata = JSON.parse(JSON.stringify(typedAsset.metadata || {})) as Record<
+      string,
+      unknown
+    >;
+    
+    // Obtener series del día específico
+    const customSeries = getSeriesForDay(currentMetadata, trainingDay);
+
+    if (customSeries.length === 0) {
+      return { success: false, message: `${typedAsset.name} no tiene series para quitar en día ${trainingDay + 1}.` };
+    }
+
+    if (customSeries.length === 1) {
+      return { success: false, message: `${typedAsset.name} solo tiene 1 serie en día ${trainingDay + 1}. No puedo dejarla sin series.` };
+    }
+
+    // Determinar índice a eliminar
+    let indexToRemove: number;
+    if (seriesIndex === 'last') {
+      indexToRemove = customSeries.length - 1;
+    } else if (seriesIndex === 'first') {
+      indexToRemove = 0;
+    } else {
+      indexToRemove = seriesIndex;
+    }
+
+    if (indexToRemove < 0 || indexToRemove >= customSeries.length) {
+      return { 
+        success: false, 
+        message: `Índice ${indexToRemove} fuera de rango. Hay ${customSeries.length} series (0-${customSeries.length - 1}).` 
+      };
+    }
+
+    // Eliminar la serie
+    const removedSeries = customSeries[indexToRemove];
+    customSeries.splice(indexToRemove, 1);
+    
+    // Guardar en estructura por día
+    setSeriesForDay(currentMetadata, trainingDay, customSeries);
+
+    const { error: updateError } = await supabase
+      .from('user_assets')
+      .update({ metadata: currentMetadata })
+      .eq('id', typedAsset.id);
+
+    if (updateError) throw updateError;
+
+    return {
+      success: true,
+      message: `✅ ${typedAsset.name}: Serie ${indexToRemove + 1} eliminada. Quedan ${customSeries.length} series.`,
+      data: {
+        assetId: typedAsset.id,
+        removedSeries,
+        remainingSeries: customSeries.length,
+      },
+      affectedRecords: 1,
+    };
+  } catch (error) {
+    console.error('assetRemoveSeries error:', error);
+    return { success: false, message: 'Error quitando serie.' };
+  }
+}
+
+// ============================================================================
+// ASSET TOOL: Agregar Serie a un Ejercicio
+// ============================================================================
+export async function assetAddSeries(
+  userId: string,
+  assetName: string,
+  reps: number = 10,
+  weight: number = 0,
+  seriesType: 'WARMUP' | 'APPROACH' | 'EFFECTIVE' | 'FAILURE' = 'EFFECTIVE',
+  position: 'end' | 'start' | number = 'end',
+  trainingDay: number = 0
+): Promise<AxisToolResult> {
+  try {
+    // Buscar el asset
+    const { data: asset, error: assetError } = await supabase
+      .from('user_assets')
+      .select('id, name, metadata, training_days')
+      .eq('user_id', userId)
+      .ilike('name', `%${assetName}%`)
+      .is('deleted_at', null)
+      .limit(1)
+      .maybeSingle();
+
+    if (assetError || !asset) {
+      return { success: false, message: `No encontré el ejercicio "${assetName}".` };
+    }
+
+    const typedAsset = asset as UserAsset;
+    const currentMetadata = JSON.parse(JSON.stringify(typedAsset.metadata || {})) as Record<
+      string,
+      unknown
+    >;
+    
+    // Obtener series del día específico
+    const customSeries = getSeriesForDay(currentMetadata, trainingDay);
+
+    // Crear nueva serie
+    const newSeries: SeriesConfig = {
+      id: String(Date.now()),
+      reps,
+      weight,
+      type: seriesType,
+      note: '',
+    };
+
+    // Agregar según posición
+    if (typeof position === 'number') {
+      // Insertar en posición específica (0-based index)
+      const insertIndex = Math.max(0, Math.min(position, customSeries.length));
+      customSeries.splice(insertIndex, 0, newSeries);
+    } else if (position === 'start') {
+      customSeries.unshift(newSeries);
+    } else {
+      customSeries.push(newSeries);
+    }
+
+    // Guardar en estructura por día
+    setSeriesForDay(currentMetadata, trainingDay, customSeries);
+
+    const { error: updateError } = await supabase
+      .from('user_assets')
+      .update({ metadata: currentMetadata })
+      .eq('id', typedAsset.id);
+
+    if (updateError) throw updateError;
+
+    return {
+      success: true,
+      message: `✅ ${typedAsset.name} (día ${trainingDay + 1}): Nueva serie añadida (${reps} reps × ${weight}kg, tipo: ${seriesType}). Total: ${customSeries.length} series.`,
+      data: {
+        assetId: typedAsset.id,
+        newSeries,
+        totalSeries: customSeries.length,
+      },
+      affectedRecords: 1,
+    };
+  } catch (error) {
+    console.error('assetAddSeries error:', error);
+    return { success: false, message: 'Error agregando serie.' };
+  }
+}
+
+// ============================================================================
+// ASSET TOOL: Reemplazar Serie de un Ejercicio
+// ============================================================================
+export async function assetReplaceSeries(
+  userId: string,
+  assetName: string,
+  seriesIndex: 'last' | 'first' | number,
+  reps: number = 10,
+  weight: number = 0,
+  seriesType: 'WARMUP' | 'APPROACH' | 'EFFECTIVE' | 'FAILURE' = 'EFFECTIVE',
+  trainingDay: number = 0
+): Promise<AxisToolResult> {
+  try {
+    // Buscar el asset
+    const { data: asset, error: assetError } = await supabase
+      .from('user_assets')
+      .select('id, name, metadata, training_days')
+      .eq('user_id', userId)
+      .ilike('name', `%${assetName}%`)
+      .is('deleted_at', null)
+      .limit(1)
+      .maybeSingle();
+
+    if (assetError || !asset) {
+      return { success: false, message: `No encontré el ejercicio "${assetName}".` };
+    }
+
+    const typedAsset = asset as UserAsset;
+    const currentMetadata = JSON.parse(JSON.stringify(typedAsset.metadata || {})) as Record<
+      string,
+      unknown
+    >;
+    
+    // Obtener series del día específico
+    const customSeries = getSeriesForDay(currentMetadata, trainingDay);
+
+    if (customSeries.length === 0) {
+      return { success: false, message: `${typedAsset.name} no tiene series para reemplazar en día ${trainingDay + 1}.` };
+    }
+
+    // Determinar índice a reemplazar
+    let indexToReplace: number;
+    if (seriesIndex === 'last') {
+      indexToReplace = customSeries.length - 1;
+    } else if (seriesIndex === 'first') {
+      indexToReplace = 0;
+    } else {
+      indexToReplace = seriesIndex;
+    }
+
+    if (indexToReplace < 0 || indexToReplace >= customSeries.length) {
+      return { 
+        success: false, 
+        message: `Índice ${indexToReplace} fuera de rango. Hay ${customSeries.length} series (0-${customSeries.length - 1}).` 
+      };
+    }
+
+    // Guardar la serie anterior y crear la nueva
+    const oldSeries = { ...customSeries[indexToReplace] };
+    const newSeries: SeriesConfig = {
+      id: String(Date.now()),
+      reps,
+      weight,
+      type: seriesType,
+      note: '',
+    };
+
+    // Reemplazar la serie
+    customSeries[indexToReplace] = newSeries;
+    
+    // Guardar en estructura por día
+    setSeriesForDay(currentMetadata, trainingDay, customSeries);
+
+    const { error: updateError } = await supabase
+      .from('user_assets')
+      .update({ metadata: currentMetadata })
+      .eq('id', typedAsset.id);
+
+    if (updateError) throw updateError;
+
+    return {
+      success: true,
+      message: `✅ ${typedAsset.name} (día ${trainingDay + 1}): Serie ${indexToReplace + 1} reemplazada. Antes: ${oldSeries.reps} reps × ${oldSeries.weight}kg (${oldSeries.type}). Ahora: ${reps} reps × ${weight}kg (${seriesType}).`,
+      data: {
+        assetId: typedAsset.id,
+        oldSeries,
+        newSeries,
+        seriesIndex: indexToReplace,
+      },
+      affectedRecords: 1,
+    };
+  } catch (error) {
+    console.error('assetReplaceSeries error:', error);
+    return { success: false, message: 'Error reemplazando serie.' };
+  }
+}
+
+// ============================================================================
+// ASSET TOOL: Establecer Todas las Series (Reemplaza todas)
+// ============================================================================
+
+export async function assetSetSeries(
+  userId: string,
+  assetName: string,
+  series: SeriesConfig[],
+  trainingDay: number = 0
+): Promise<AxisToolResult> {
+  try {
+    if (!series || series.length === 0) {
+      return { success: false, message: 'Debes proporcionar al menos una serie.' };
+    }
+
+    // Buscar el asset
+    const { data: asset, error: assetError } = await supabase
+      .from('user_assets')
+      .select('id, name, metadata, training_days')
+      .eq('user_id', userId)
+      .ilike('name', `%${assetName}%`)
+      .is('deleted_at', null)
+      .limit(1)
+      .maybeSingle();
+
+    if (assetError || !asset) {
+      return { success: false, message: `No encontré el ejercicio "${assetName}".` };
+    }
+
+    const typedAsset = asset as UserAsset;
+    const currentMetadata = JSON.parse(JSON.stringify(typedAsset.metadata || {})) as Record<
+      string,
+      unknown
+    >;
+    
+    // Crear nuevas series con IDs únicos
+    const newSeries: SeriesConfig[] = series.map((s, index) => ({
+      id: String(Date.now() + index),
+      reps: s.reps,
+      weight: s.weight,
+      type: s.type,
+      note: s.note || '',
+    }));
+
+    // Guardar en estructura por día
+    setSeriesForDay(currentMetadata, trainingDay, newSeries);
+
+    const { error: updateError } = await supabase
+      .from('user_assets')
+      .update({ metadata: currentMetadata })
+      .eq('id', typedAsset.id);
+
+    if (updateError) throw updateError;
+
+    // Construir resumen de series
+    const seriesSummary = newSeries.map((s, i) => 
+      `${i + 1}. ${s.reps} reps × ${s.weight}kg (${s.type})`
+    ).join('\n');
+
+    return {
+      success: true,
+      message: `✅ ${typedAsset.name} (día ${trainingDay + 1}): ${newSeries.length} series configuradas:\n${seriesSummary}`,
+      data: {
+        assetId: typedAsset.id,
+        series: newSeries,
+        totalSeries: newSeries.length,
+      },
+      affectedRecords: 1,
+    };
+  } catch (error) {
+    console.error('assetSetSeries error:', error);
+    return { success: false, message: 'Error configurando series.' };
   }
 }
 
@@ -731,5 +1247,129 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       },
     },
     requiredParams: ['mealName', 'caloriesChange'],
+  },
+  {
+    name: 'ASSET_REMOVE_SERIES',
+    description:
+      'Quita una serie de un ejercicio del día actual. Usa cuando diga "quita la última serie", "elimina la primera serie", "quita la serie 3".',
+    parameters: {
+      assetName: {
+        type: 'string',
+        description: 'Nombre del ejercicio',
+        required: true,
+      },
+      seriesIndex: {
+        type: 'string',
+        description: 'Índice de la serie a quitar: "last" para última, "first" para primera, o un número (0-based)',
+        required: true,
+      },
+      trainingDay: {
+        type: 'number',
+        description: 'Día de entrenamiento (0-based). SIEMPRE usa el día actual del contexto.',
+        required: true,
+      },
+    },
+    requiredParams: ['assetName', 'seriesIndex', 'trainingDay'],
+  },
+  {
+    name: 'ASSET_ADD_SERIES',
+    description:
+      'Agrega una nueva serie a un ejercicio del día actual. Usa cuando diga "agrega una serie", "añade una serie de 10 reps".',
+    parameters: {
+      assetName: {
+        type: 'string',
+        description: 'Nombre del ejercicio',
+        required: true,
+      },
+      reps: {
+        type: 'number',
+        description: 'Número de repeticiones (default: 10)',
+        required: false,
+      },
+      weight: {
+        type: 'number',
+        description: 'Peso en kg (default: 0)',
+        required: false,
+      },
+      seriesType: {
+        type: 'string',
+        description: 'Tipo de serie',
+        enum: ['WARMUP', 'APPROACH', 'EFFECTIVE', 'FAILURE'],
+        default: 'EFFECTIVE',
+      },
+      position: {
+        type: 'number',
+        description: 'Posición donde insertar (0=primera, 1=segunda, etc). Si no se especifica, se agrega al final.',
+        required: false,
+      },
+      trainingDay: {
+        type: 'number',
+        description: 'Día de entrenamiento (0-based). SIEMPRE usa el día actual del contexto.',
+        required: true,
+      },
+    },
+    requiredParams: ['assetName', 'trainingDay'],
+  },
+  {
+    name: 'ASSET_REPLACE_SERIES',
+    description:
+      'Reemplaza una serie existente por una nueva en el día actual. Usa cuando diga "reemplaza la serie X por...", "cambia la última serie a...".',
+    parameters: {
+      assetName: {
+        type: 'string',
+        description: 'Nombre del ejercicio',
+        required: true,
+      },
+      seriesIndex: {
+        type: 'string',
+        description: 'Índice de la serie a reemplazar: "last" para última, "first" para primera, o un número (0-based)',
+        required: true,
+      },
+      reps: {
+        type: 'number',
+        description: 'Número de repeticiones para la nueva serie',
+        required: true,
+      },
+      weight: {
+        type: 'number',
+        description: 'Peso en kg para la nueva serie',
+        required: true,
+      },
+      seriesType: {
+        type: 'string',
+        description: 'Tipo de la nueva serie',
+        enum: ['WARMUP', 'APPROACH', 'EFFECTIVE', 'FAILURE'],
+        required: true,
+      },
+      trainingDay: {
+        type: 'number',
+        description: 'Día de entrenamiento (0-based). SIEMPRE usa el día actual del contexto.',
+        required: true,
+      },
+    },
+    requiredParams: ['assetName', 'seriesIndex', 'reps', 'weight', 'seriesType', 'trainingDay'],
+  },
+  {
+    name: 'ASSET_SET_SERIES',
+    description:
+      'Configura TODAS las series de un ejercicio del día actual, reemplazando las existentes. Usa cuando el usuario pida "configura mis series", "pon las series que recomiendas", "borra todas y pon nuevas", "resetea las series".',
+    parameters: {
+      assetName: {
+        type: 'string',
+        description: 'Nombre del ejercicio',
+        required: true,
+      },
+      series: {
+        type: 'string',
+        description: 'JSON string con array de series. Cada serie: {reps:number, weight:number, type:"WARMUP"|"APPROACH"|"EFFECTIVE"|"FAILURE"}. Ejemplo: [{"reps":12,"weight":20,"type":"WARMUP"},{"reps":10,"weight":40,"type":"APPROACH"},{"reps":8,"weight":60,"type":"EFFECTIVE"},{"reps":6,"weight":70,"type":"FAILURE"}]',
+        required: true,
+      },
+      trainingDay: {
+        type: 'number',
+        description: 'Día de entrenamiento (0-based). SIEMPRE usa el día actual del contexto.',
+        required: true,
+      },
+    },
+    requiredParams: ['assetName', 'series', 'trainingDay'],
   },
 ];
