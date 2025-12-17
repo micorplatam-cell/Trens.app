@@ -20,6 +20,12 @@ export type AxisToolName =
   | 'ASSET_ADD_SERIES'
   | 'ASSET_REPLACE_SERIES'
   | 'ASSET_SET_SERIES'
+  // ADN Tools
+  | 'ADN_GET_PROFILE'
+  | 'ADN_GET_RECORDS'
+  | 'ADN_UPDATE_PROFILE'
+  | 'ADN_ADD_MEASUREMENT'
+  | 'ADN_REMOVE_MEASUREMENT'
   // Diet Tools
   | 'DIET_UPDATE_MEAL'
   | 'DIET_ADD_CALORIES'
@@ -146,7 +152,7 @@ export interface AxisContextState {
   executeAlias: (trigger: string) => Promise<AxisToolResult[] | null>;
 
   // Conversation management
-  clearConversation: () => void;
+  clearConversation: () => Promise<void>;
 
   // Data refresh trigger (incrementa cuando AXIS modifica datos)
   refreshTrigger: number;

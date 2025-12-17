@@ -17,6 +17,11 @@ import {
   assetSetSeries,
   dietAddCalories,
   logWorkoutSet,
+  adnGetProfile,
+  adnGetRecords,
+  adnUpdateProfile,
+  adnAddMeasurement,
+  adnRemoveMeasurement,
   TOOL_DEFINITIONS,
 } from '../services/axis/tools';
 import type { AxisToolCall, AxisToolResult, ToolDefinition } from '../types/axis';
@@ -212,6 +217,36 @@ export const useAxisExecutor = (
           case 'GET_USER_CONTEXT':
             // Este se maneja desde el contexto, no aquí
             result = { success: true, message: 'Contexto obtenido desde AxisContext.' };
+            break;
+
+          // ADN TOOLS
+          case 'ADN_GET_PROFILE':
+            result = await adnGetProfile(userId);
+            break;
+
+          case 'ADN_GET_RECORDS':
+            result = await adnGetRecords(userId);
+            break;
+
+          case 'ADN_UPDATE_PROFILE':
+            result = await adnUpdateProfile(
+              userId,
+              p.field as 'goal' | 'weight' | 'height' | 'injuries' | 'allergies' | 'display_name',
+              p.value as string
+            );
+            break;
+
+          case 'ADN_ADD_MEASUREMENT':
+            result = await adnAddMeasurement(
+              userId,
+              p.name as string,
+              p.value as string,
+              (p.isDominant as boolean) || false
+            );
+            break;
+
+          case 'ADN_REMOVE_MEASUREMENT':
+            result = await adnRemoveMeasurement(userId, p.measurementName as string);
             break;
 
           default:

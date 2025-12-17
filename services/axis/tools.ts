@@ -1115,6 +1115,232 @@ export async function logWorkoutSet(
 }
 
 // ============================================================================
+// ADN TOOLS: Acceso al perfil y datos biométricos
+// ============================================================================
+
+/**
+ * Obtiene el perfil completo del atleta (TRENS ID + medidas corporales)
+ */
+export async function adnGetProfile(userId: string): Promise<AxisToolResult> {
+  try {
+    // Obtener perfil
+    const { data: profile, error: profileError } = await supabase
+      .from('user_profiles')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
+
+    if (profileError || !profile) {
+      return {
+        success: false,
+        message: 'No se encontró el perfil del atleta.',
+      };
+    }
+
+    // Obtener medidas corporales
+    const { data: measurements, error: measurementsError } = await supabase
+      .from('body_measurements')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true });
+
+    if (measurementsError) {
+      return {
+        success: false,
+        message: 'Error al obtener medidas corporales.',
+      };
+    }
+
+    const dominantMuscle = measurements?.find((m) => m.is_dominant);
+
+    const profileSummary = `
+📋 PERFIL ATLETA:
+• Objetivo: ${profile.goal}
+• Peso: ${profile.weight}
+• Altura: ${profile.height}
+• Lesiones: ${profile.injuries}
+• Alergias: ${profile.allergies}
+
+💪 MEDIDAS CORPORALES:
+${measurements && measurements.length > 0 ? measurements.map((m) => `• ${m.name}: ${m.value} ${m.is_dominant ? '👑' : ''}`).join('\n') : '• Sin medidas registradas'}
+
+${dominantMuscle ? `\n🏆 MÚSCULO DOMINANTE: ${dominantMuscle.name} (${dominantMuscle.value})` : ''}
+    `.trim();
+
+    return {
+      success: true,
+      message: profileSummary,
+      data: {
+        profile,
+        measurements: measurements || [],
+        dominantMuscle,
+      },
+    };
+  } catch (error) {
+    console.error('adnGetProfile error:', error);
+    return {
+      success: false,
+      message: 'Error al obtener perfil del atleta.',
+    };
+  }
+}
+
+/**
+ * Obtiene los récords personales del atleta
+ */
+export async function adnGetRecords(userId: string): Promise<AxisToolResult> {
+  try {
+    const { data: records, error } = await supabase
+      .from('personal_records')
+      .select('*')
+      .eq('user_id', userId)
+      .order('weight', { ascending: false });
+
+    if (error) {
+      return {
+        success: false,
+        message: 'Error al obtener récords personales.',
+      };
+    }
+
+    if (!records || records.length === 0) {
+      return {
+        success: true,
+        message: '🏋️ Aún no tienes récords registrados. ¡Es hora de romper algunos!',
+        data: { records: [] },
+      };
+    }
+
+    const recordsSummary = `
+🏆 TUS RÉCORDS PERSONALES:
+${records.map((r) => `${r.exercise_icon} ${r.exercise_name}: ${r.weight}kg x ${r.reps === 1 ? '1RM' : `${r.reps} reps`}`).join('\n')}
+    `.trim();
+
+    return {
+      success: true,
+      message: recordsSummary,
+      data: { records },
+    };
+  } catch (error) {
+    console.error('adnGetRecords error:', error);
+    return {
+      success: false,
+      message: 'Error al obtener récords personales.',
+    };
+  }
+}
+
+/**
+ * Actualiza un campo específico del perfil del atleta
+ */
+export async function adnUpdateProfile(
+  userId: string,
+  field: 'goal' | 'weight' | 'height' | 'injuries' | 'allergies' | 'display_name',
+  value: string
+): Promise<AxisToolResult> {
+  try {
+    const fieldLabels: Record<string, string> = {
+      goal: 'Objetivo',
+      weight: 'Peso',
+      height: 'Altura',
+      injuries: 'Lesiones',
+      allergies: 'Alergias',
+      display_name: 'Nombre',
+    };
+
+    const { error } = await supabase
+      .from('user_profiles')
+      .update({ [field]: value })
+      .eq('user_id', userId);
+
+    if (error) throw error;
+
+    return {
+      success: true,
+      message: `✅ ${fieldLabels[field]} actualizado a: ${value}`,
+      affectedRecords: 1,
+    };
+  } catch (error) {
+    console.error('adnUpdateProfile error:', error);
+    return {
+      success: false,
+      message: 'Error al actualizar perfil.',
+    };
+  }
+}
+
+/**
+ * Agrega una medida corporal
+ */
+export async function adnAddMeasurement(
+  userId: string,
+  name: string,
+  value: string,
+  isDominant: boolean = false
+): Promise<AxisToolResult> {
+  try {
+    const { error } = await supabase.from('body_measurements').insert({
+      user_id: userId,
+      name: name.toUpperCase(),
+      value,
+      is_dominant: isDominant,
+    });
+
+    if (error) throw error;
+
+    return {
+      success: true,
+      message: `✅ Medida agregada: ${name.toUpperCase()} = ${value}${isDominant ? ' 👑' : ''}`,
+      affectedRecords: 1,
+    };
+  } catch (error) {
+    console.error('adnAddMeasurement error:', error);
+    return {
+      success: false,
+      message: 'Error al agregar medida.',
+    };
+  }
+}
+
+/**
+ * Elimina una medida corporal
+ */
+export async function adnRemoveMeasurement(
+  userId: string,
+  measurementName: string
+): Promise<AxisToolResult> {
+  try {
+    const { data, error } = await supabase
+      .from('body_measurements')
+      .delete()
+      .eq('user_id', userId)
+      .ilike('name', `%${measurementName}%`)
+      .select();
+
+    if (error) throw error;
+
+    if (!data || data.length === 0) {
+      return {
+        success: false,
+        message: `No encontré la medida "${measurementName}".`,
+      };
+    }
+
+    return {
+      success: true,
+      message: `✅ Medida "${data[0].name}" eliminada.`,
+      affectedRecords: 1,
+    };
+  } catch (error) {
+    console.error('adnRemoveMeasurement error:', error);
+    return {
+      success: false,
+      message: 'Error al eliminar medida.',
+    };
+  }
+}
+
+// ============================================================================
 // TOOL DEFINITIONS - Exportables para el LLM (Function Calling)
 // ============================================================================
 export const TOOL_DEFINITIONS: ToolDefinition[] = [
@@ -1381,5 +1607,74 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       },
     },
     requiredParams: ['assetName', 'series', 'trainingDay'],
+  },
+  {
+    name: 'ADN_GET_PROFILE',
+    description:
+      'Obtiene el perfil completo del atleta (TRENS ID): objetivo, peso, altura, lesiones, alergias, medidas corporales. Usa cuando necesites conocer datos biométricos, lesiones, o personalizar recomendaciones.',
+    parameters: {},
+    requiredParams: [],
+  },
+  {
+    name: 'ADN_GET_RECORDS',
+    description:
+      'Obtiene los récords personales del atleta (máximo 3). Muestra ejercicio, peso y reps. Usa cuando el usuario pregunte por sus PRs, récords, o máximos.',
+    parameters: {},
+    requiredParams: [],
+  },
+  {
+    name: 'ADN_UPDATE_PROFILE',
+    description:
+      'Actualiza un campo del perfil del atleta. Usa cuando diga "mi objetivo es...", "peso X kilos", "tengo lesión en...", "soy alérgico a...", "mi nombre es...".',
+    parameters: {
+      field: {
+        type: 'string',
+        description: 'Campo a actualizar',
+        enum: ['goal', 'weight', 'height', 'injuries', 'allergies', 'display_name'],
+        required: true,
+      },
+      value: {
+        type: 'string',
+        description: 'Nuevo valor para el campo',
+        required: true,
+      },
+    },
+    requiredParams: ['field', 'value'],
+  },
+  {
+    name: 'ADN_ADD_MEASUREMENT',
+    description:
+      'Agrega una medida corporal al perfil. Usa cuando diga "mi brazo mide X", "agrega medida de pecho", "mi pierna es de X cm".',
+    parameters: {
+      name: {
+        type: 'string',
+        description: 'Nombre de la zona corporal (ej: "Brazo", "Pecho", "Pierna", "Cintura")',
+        required: true,
+      },
+      value: {
+        type: 'string',
+        description: 'Valor de la medida (ej: "45cm", "110cm")',
+        required: true,
+      },
+      isDominant: {
+        type: 'boolean',
+        description: 'Si es el músculo dominante/más desarrollado del atleta',
+        required: false,
+      },
+    },
+    requiredParams: ['name', 'value'],
+  },
+  {
+    name: 'ADN_REMOVE_MEASUREMENT',
+    description:
+      'Elimina una medida corporal del perfil. Usa cuando diga "quita la medida de...", "elimina mi medida de brazo".',
+    parameters: {
+      measurementName: {
+        type: 'string',
+        description: 'Nombre de la medida a eliminar',
+        required: true,
+      },
+    },
+    requiredParams: ['measurementName'],
   },
 ];

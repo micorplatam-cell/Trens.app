@@ -10,6 +10,7 @@ import React, {
   useCallback,
   useMemo,
   useEffect,
+  useRef,
   ReactNode,
 } from 'react';
 import { useAxisExecutor } from '../hooks/useAxisExecutor';
@@ -107,6 +108,15 @@ interface ChatMessage {
   parts: Array<{ text: string }>;
 }
 
+// Tipo para mensajes de la base de datos
+interface DBChatMessage {
+  id: string;
+  user_id: string;
+  role: 'user' | 'model';
+  content: string;
+  created_at: string;
+}
+
 export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
   // -------------------------------------------------------------------------
   // STATE
@@ -114,8 +124,11 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [lastAction, setLastAction] = useState<string | null>(null);
 
-  // Conversation History - Para que AXIS recuerde el contexto del chat
+  // Conversation History - Para que AXIS recuerde el contexto del chat (máximo 24h)
   const [conversationHistory, setConversationHistory] = useState<ChatMessage[]>([]);
+
+  // Flag para indicar si ya se cargó/verificó el historial
+  const historyInitialized = useRef(false);
 
   // Refresh Trigger - Se incrementa cuando AXIS modifica datos para que las pantallas recarguen
   const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -171,6 +184,128 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
     },
     [executeToolChainRaw]
   );
+
+  // -------------------------------------------------------------------------
+  // CHAT MEMORY MANAGEMENT - Sistema de 24 horas con Supabase
+  // -------------------------------------------------------------------------
+
+  /**
+   * Cargar historial desde Supabase y limpiar mensajes antiguos (medianoche)
+   */
+  useEffect(() => {
+    const initializeChatHistory = async () => {
+      if (historyInitialized.current || !userId) return;
+      historyInitialized.current = true;
+
+      try {
+        // Primero, limpiar mensajes anteriores a medianoche usando la función de DB
+        const { data: cleanedCount, error: cleanError } = await supabase.rpc(
+          'clean_old_axis_messages',
+          { p_user_id: userId }
+        );
+
+        if (cleanError) {
+          console.warn('⚠️ AXIS: Error limpiando mensajes antiguos:', cleanError.message);
+        } else if (cleanedCount && cleanedCount > 0) {
+          console.warn(`🧹 AXIS: Limpiados ${cleanedCount} mensajes de días anteriores`);
+        }
+
+        // Cargar mensajes del día de hoy
+        const { data: messages, error } = await supabase
+          .from('axis_chat_messages')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: true });
+
+        if (error) {
+          console.warn('⚠️ AXIS: Error cargando historial:', error.message);
+          return;
+        }
+
+        if (messages && messages.length > 0) {
+          // Convertir de DB format a Gemini format
+          const history: ChatMessage[] = messages.map((msg: DBChatMessage) => ({
+            role: msg.role,
+            parts: [{ text: msg.content }],
+          }));
+          console.warn(`🧠 AXIS: Cargando ${history.length} mensajes del historial`);
+          setConversationHistory(history);
+        }
+      } catch (error) {
+        console.warn('⚠️ AXIS: Error inicializando historial:', error);
+      }
+    };
+
+    initializeChatHistory();
+  }, [userId]);
+
+  /**
+   * Guardar un mensaje en Supabase
+   */
+  const saveMessageToSupabase = useCallback(
+    async (role: 'user' | 'model', content: string) => {
+      console.warn('💾 AXIS: Intentando guardar mensaje:', {
+        role,
+        userId,
+        contentLength: content.length,
+      });
+
+      if (!userId) {
+        console.warn('❌ AXIS: No se puede guardar - userId es null');
+        return;
+      }
+
+      try {
+        const { data, error } = await supabase
+          .from('axis_chat_messages')
+          .insert({
+            user_id: userId,
+            role,
+            content,
+          })
+          .select();
+
+        if (error) {
+          console.warn(
+            '⚠️ AXIS: Error guardando mensaje:',
+            error.message,
+            error.details,
+            error.hint
+          );
+        } else {
+          console.warn('✅ AXIS: Mensaje guardado exitosamente:', data);
+        }
+      } catch (error) {
+        console.warn('⚠️ AXIS: Error guardando mensaje:', error);
+      }
+    },
+    [userId]
+  );
+
+  /**
+   * Verificar medianoche periódicamente (cada minuto)
+   * Esto asegura que si el usuario tiene la app abierta a medianoche, se limpie
+   */
+  useEffect(() => {
+    if (!userId) return;
+
+    const checkMidnight = async () => {
+      // Llamar a la función de limpieza de DB
+      const { data: cleanedCount, error } = await supabase.rpc('clean_old_axis_messages', {
+        p_user_id: userId,
+      });
+
+      if (!error && cleanedCount && cleanedCount > 0) {
+        console.warn(`🧹 AXIS: ¡Medianoche! Limpiados ${cleanedCount} mensajes automáticamente`);
+        setConversationHistory([]);
+      }
+    };
+
+    // Verificar cada minuto (60000 ms)
+    const interval = setInterval(checkMidnight, 60000);
+
+    return () => clearInterval(interval);
+  }, [userId]);
 
   // -------------------------------------------------------------------------
   // CONTEXT UPDATES
@@ -312,10 +447,24 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
 
   /**
    * Limpia el historial de conversación (para nuevo chat)
+   * Elimina todos los mensajes del usuario en Supabase
    */
-  const clearConversation = useCallback(() => {
+  const clearConversation = useCallback(async () => {
     setConversationHistory([]);
-  }, []);
+    if (!userId) return;
+
+    try {
+      const { error } = await supabase.from('axis_chat_messages').delete().eq('user_id', userId);
+
+      if (error) {
+        console.warn('⚠️ AXIS: Error limpiando historial:', error.message);
+      } else {
+        console.warn('🧹 AXIS: Historial del chat limpiado manualmente');
+      }
+    } catch (error) {
+      console.warn('⚠️ AXIS: Error limpiando historial:', error);
+    }
+  }, [userId]);
 
   /**
    * Procesa un comando de texto del usuario usando Gemini AI
@@ -331,13 +480,16 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
         // 1. Verificar si es un alias
         const aliasResults = await executeAlias(userText);
         if (aliasResults) {
-          // Agregar al historial
+          // Agregar al historial y guardar en DB
           const aliasMessage = aliasResults.map((r) => r.message).join(' ');
           setConversationHistory((prev) => [
             ...prev,
             { role: 'user', parts: [{ text: userText }] },
             { role: 'model', parts: [{ text: aliasMessage }] },
           ]);
+          // Guardar en Supabase
+          await saveMessageToSupabase('user', userText);
+          await saveMessageToSupabase('model', aliasMessage);
           return aliasResults;
         }
 
@@ -395,12 +547,14 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
             finalResponseText = finalMessage;
           }
 
-          // Actualizar historial de conversación
+          // Actualizar historial de conversación y guardar en DB
           setConversationHistory((prev) => [
             ...prev,
             { role: 'user', parts: [{ text: userText }] },
             { role: 'model', parts: [{ text: finalResponseText || 'Listo.' }] },
           ]);
+          await saveMessageToSupabase('user', userText);
+          await saveMessageToSupabase('model', finalResponseText || 'Listo.');
 
           // Trigger refresh si alguna operación fue exitosa
           if (results.some((r) => r.success)) {
@@ -420,6 +574,8 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
           { role: 'user', parts: [{ text: userText }] },
           { role: 'model', parts: [{ text: geminiResponse.message }] },
         ]);
+        await saveMessageToSupabase('user', userText);
+        await saveMessageToSupabase('model', geminiResponse.message);
 
         return [
           {
@@ -449,7 +605,7 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
         setIsProcessing(false);
       }
     },
-    [executeAlias, buildGeminiContext, executeTool, conversationHistory]
+    [executeAlias, buildGeminiContext, executeTool, conversationHistory, saveMessageToSupabase]
   );
 
   /**

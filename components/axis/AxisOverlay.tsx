@@ -34,6 +34,7 @@ import { Bot, Send, Mic, MicOff, Sparkles, ChevronDown, Check, X } from 'lucide-
 import { useAxis } from '../../context/AxisContext';
 import { useVoiceInput } from '../../hooks/useVoiceInput';
 import { callGemini } from '../../services/axis/gemini';
+import { supabase } from '../../lib/supabase';
 import type { AxisToolResult, AxisToolCall } from '../../types/axis';
 
 // ============================================================================
@@ -49,12 +50,31 @@ interface ChatMessage {
   pendingToolCalls?: AxisToolCall[];
 }
 
+// Tipo para mensajes de la base de datos
+interface DBUIMessage {
+  id: string;
+  user_id: string;
+  role: 'user' | 'model';
+  content: string;
+  created_at: string;
+}
+
 // ============================================================================
 // CONSTANTS
 // ============================================================================
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const PANEL_HEIGHT = SCREEN_HEIGHT * 0.55;
 const LONG_PRESS_DURATION = 400; // ms para activar long press
+
+// ============================================================================
+// HELPERS
+// ============================================================================
+const getDefaultWelcomeMessage = (): ChatMessage => ({
+  id: 'welcome',
+  role: 'axis',
+  content: '¿Qué necesitas? Mantén presionado 🎤 para comandos con confirmación.',
+  timestamp: new Date(),
+});
 
 // ============================================================================
 // ANIMATED COMPONENTS
@@ -394,14 +414,9 @@ export const AxisOverlay: React.FC = () => {
     text: string;
     toolCalls: AxisToolCall[];
   } | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: 'welcome',
-      role: 'axis',
-      content: '¿Qué necesitas? Mantén presionado 🎤 para comandos con confirmación.',
-      timestamp: new Date(),
-    },
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>([getDefaultWelcomeMessage()]);
+  const [userId, setUserId] = useState<string | null>(null);
+  const messagesInitialized = useRef(false);
 
   const flatListRef = useRef<FlatList>(null);
   const {
@@ -413,6 +428,7 @@ export const AxisOverlay: React.FC = () => {
     activeAsset,
     userProfile,
     availableExercises,
+    clearConversation,
   } = useAxis();
 
   // Voice input hook
@@ -423,6 +439,90 @@ export const AxisOverlay: React.FC = () => {
     stopRecording,
     error: voiceError,
   } = useVoiceInput();
+
+  // -------------------------------------------------------------------------
+  // OBTENER USER ID
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    const getUser = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      setUserId(user?.id || null);
+    };
+    getUser();
+  }, []);
+
+  // -------------------------------------------------------------------------
+  // CHAT UI MEMORY - Sistema de 24 horas con Supabase
+  // -------------------------------------------------------------------------
+
+  /**
+   * Cargar mensajes de UI desde Supabase (sincronizado con el historial de contexto)
+   */
+  useEffect(() => {
+    const initializeUIMessages = async () => {
+      if (messagesInitialized.current || !userId) return;
+      messagesInitialized.current = true;
+
+      try {
+        // La limpieza de medianoche ya se hace en AxisContext con clean_old_axis_messages
+        // Aquí solo cargamos los mensajes del día
+        const { data: dbMessages, error } = await supabase
+          .from('axis_chat_messages')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: true });
+
+        if (error) {
+          console.warn('⚠️ AXIS UI: Error cargando mensajes:', error.message);
+          return;
+        }
+
+        if (dbMessages && dbMessages.length > 0) {
+          // Convertir de DB format a UI format
+          const uiMessages: ChatMessage[] = dbMessages.map((msg: DBUIMessage) => ({
+            id: msg.id,
+            role: msg.role === 'model' ? 'axis' : 'user',
+            content: msg.content,
+            timestamp: new Date(msg.created_at),
+          }));
+
+          // Agregar mensaje de bienvenida al inicio si no hay mensajes
+          const allMessages = [getDefaultWelcomeMessage(), ...uiMessages];
+          console.warn(`💬 AXIS UI: Cargando ${uiMessages.length} mensajes desde Supabase`);
+          setMessages(allMessages);
+        }
+      } catch (error) {
+        console.warn('⚠️ AXIS UI: Error inicializando mensajes:', error);
+      }
+    };
+
+    initializeUIMessages();
+  }, [userId]);
+
+  /**
+   * Verificar medianoche periódicamente (cada minuto)
+   * La limpieza real se hace en AxisContext, aquí solo refrescamos la UI
+   */
+  useEffect(() => {
+    if (!userId) return;
+
+    const checkMidnight = async () => {
+      // Llamar a la función de limpieza de DB
+      const { data: cleanedCount, error } = await supabase.rpc('clean_old_axis_messages', {
+        p_user_id: userId,
+      });
+
+      if (!error && cleanedCount && cleanedCount > 0) {
+        console.warn(`🧹 AXIS UI: ¡Medianoche! Limpiados ${cleanedCount} mensajes`);
+        setMessages([getDefaultWelcomeMessage()]);
+      }
+    };
+
+    const interval = setInterval(checkMidnight, 60000);
+    return () => clearInterval(interval);
+  }, [userId]);
 
   // Panel slide animation
   const panelY = useSharedValue(PANEL_HEIGHT);
@@ -622,47 +722,111 @@ export const AxisOverlay: React.FC = () => {
         const result = await callGemini(transcription, geminiContext, GEMINI_API_KEY, []);
 
         if (result.toolCalls && result.toolCalls.length > 0) {
-          // Hay acciones por ejecutar - pedir confirmación
-          const actionDescription = result.toolCalls
-            .map((tc) => {
-              switch (tc.tool) {
-                case 'GYM_REPLACE_EXERCISE':
-                  return `Reemplazar ${tc.parameters.oldExerciseName} por ${tc.parameters.newExerciseName}`;
-                case 'GYM_ADD_EXERCISE':
-                  return `Agregar ${tc.parameters.exerciseName}`;
-                case 'GYM_REMOVE_EXERCISE':
-                  return `Quitar ${tc.parameters.exerciseName}`;
-                case 'ASSET_ADD_SERIES':
-                  return `Agregar serie de ${tc.parameters.reps || 10} reps × ${tc.parameters.weight || 0}kg`;
-                case 'ASSET_REMOVE_SERIES':
-                  return `Quitar serie`;
-                case 'ASSET_REPLACE_SERIES':
-                  return `Reemplazar serie por ${tc.parameters.reps || 10} reps × ${tc.parameters.weight || 0}kg`;
-                case 'ASSET_UPDATE_FIELD':
-                  return `Modificar ${tc.parameters.fieldPath}`;
-                default:
-                  return tc.tool;
+          // Separar herramientas de lectura (ejecutar directo) de escritura (pedir confirmación)
+          const readOnlyTools = [
+            'GYM_LIST_EXERCISES',
+            'ASSET_READ',
+            'ASSET_GET_SCHEMA',
+            'ADN_GET_PROFILE',
+            'ADN_GET_RECORDS',
+            'GET_USER_CONTEXT',
+          ];
+
+          const writeToolCalls = result.toolCalls.filter((tc) => !readOnlyTools.includes(tc.tool));
+          const readToolCalls = result.toolCalls.filter((tc) => readOnlyTools.includes(tc.tool));
+
+          // Ejecutar herramientas de lectura directamente y capturar resultados
+          let readResults: string[] = [];
+          if (readToolCalls.length > 0) {
+            console.log('✅ Ejecutando herramientas de lectura sin confirmación...');
+            for (const tc of readToolCalls) {
+              const toolResult = await executeTool(tc);
+              if (toolResult.success && toolResult.message) {
+                readResults.push(toolResult.message);
               }
-            })
-            .join('\n• ');
+            }
+          }
 
-          const confirmMessage: ChatMessage = {
-            id: `confirm-${Date.now()}`,
-            role: 'axis',
-            content: `⚠️ ¿Ejecutar?\n\n• ${actionDescription}`,
-            timestamp: new Date(),
-            pendingConfirmation: true,
-            pendingToolCalls: result.toolCalls,
-          };
+          // Si hay herramientas de escritura, pedir confirmación
+          if (writeToolCalls.length > 0) {
+            const actionDescription = writeToolCalls
+              .map((tc) => {
+                switch (tc.tool) {
+                  case 'GYM_REPLACE_EXERCISE':
+                    return `Reemplazar ${tc.parameters.oldExerciseName} por ${tc.parameters.newExerciseName}`;
+                  case 'GYM_ADD_EXERCISE':
+                    return `Agregar ${tc.parameters.exerciseName}`;
+                  case 'GYM_REMOVE_EXERCISE':
+                    return `Quitar ${tc.parameters.exerciseName}`;
+                  case 'ASSET_ADD_SERIES':
+                    return `Agregar serie de ${tc.parameters.reps || 10} reps × ${tc.parameters.weight || 0}kg`;
+                  case 'ASSET_REMOVE_SERIES':
+                    return `Quitar serie`;
+                  case 'ASSET_REPLACE_SERIES':
+                    return `Reemplazar serie por ${tc.parameters.reps || 10} reps × ${tc.parameters.weight || 0}kg`;
+                  case 'ASSET_UPDATE_FIELD':
+                    return `Modificar ${tc.parameters.fieldPath}`;
+                  case 'ASSET_SET_SERIES':
+                    return `Configurar todas las series`;
+                  // ADN Tools
+                  case 'ADN_UPDATE_PROFILE':
+                    return `Actualizar ${tc.parameters.field}: ${tc.parameters.value}`;
+                  case 'ADN_ADD_MEASUREMENT':
+                    return `Agregar medida: ${tc.parameters.name} = ${tc.parameters.value}`;
+                  case 'ADN_REMOVE_MEASUREMENT':
+                    return `Eliminar medida: ${tc.parameters.measurementName}`;
+                  default:
+                    return tc.tool;
+                }
+              })
+              .join('\n• ');
 
-          setMessages((prev) => [...prev, confirmMessage]);
-          setPendingExecution({
-            text: transcription,
-            toolCalls: result.toolCalls,
-          });
+            const confirmMessage: ChatMessage = {
+              id: `confirm-${Date.now()}`,
+              role: 'axis',
+              content: `⚠️ ¿Ejecutar?\n\n• ${actionDescription}`,
+              timestamp: new Date(),
+              pendingConfirmation: true,
+              pendingToolCalls: writeToolCalls,
+            };
 
-          // Vibración de alerta
-          await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+            setMessages((prev) => [...prev, confirmMessage]);
+            setPendingExecution({
+              text: transcription,
+              toolCalls: writeToolCalls,
+            });
+
+            // Vibración de alerta
+            await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+          } else if (readResults.length > 0) {
+            // Solo había herramientas de lectura - pasar resultado a Gemini para respuesta natural
+            const toolResultContext = readResults.join('\n\n');
+
+            // Segunda llamada a Gemini para que formule respuesta concisa
+            const naturalResponse = await callGemini(
+              `El usuario preguntó: "${transcription}"\n\nDatos obtenidos:\n${toolResultContext}\n\nResponde de forma BREVE y DIRECTA solo lo que preguntó. No repitas toda la información, solo lo relevante a su pregunta.`,
+              geminiContext,
+              GEMINI_API_KEY,
+              [] // Sin historial para respuesta limpia
+            );
+
+            const axisMessage: ChatMessage = {
+              id: `axis-${Date.now()}`,
+              role: 'axis',
+              content: naturalResponse.message || toolResultContext,
+              timestamp: new Date(),
+            };
+            setMessages((prev) => [...prev, axisMessage]);
+          } else {
+            // Mostrar respuesta de Gemini si no hubo resultados de herramientas
+            const axisMessage: ChatMessage = {
+              id: `axis-${Date.now()}`,
+              role: 'axis',
+              content: result.message || 'Información obtenida.',
+              timestamp: new Date(),
+            };
+            setMessages((prev) => [...prev, axisMessage]);
+          }
         } else {
           // Es solo una pregunta, mostrar respuesta directamente
           const axisMessage: ChatMessage = {

@@ -1,7 +1,8 @@
 import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Dumbbell, Bike, Waves, ChevronRight } from 'lucide-react-native';
+import { Dumbbell, Bike, Waves, ChevronRight, LogOut } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
+import { supabase } from '../../../lib/supabase';
 
 const SPORTS = [
   { id: 'gym', name: 'GYM', icon: Dumbbell, description: 'FUERZA & HIPERTROFIA' },
@@ -76,12 +77,17 @@ export default function NucleoScreen() {
           );
         })}
 
-        {/* Dev Link */}
+        {/* Logout Button */}
         <TouchableOpacity
-          onPress={() => router.push('/(auth)/login')}
-          className="mt-10 mb-20 items-center"
+          onPress={async () => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+            await supabase.auth.signOut();
+            router.replace('/');
+          }}
+          className="mt-10 mb-20 flex-row items-center justify-center py-3 px-6 bg-zinc-900 rounded-xl border border-zinc-800"
         >
-          <Text className="text-zinc-700 text-sm">← Volver al Login (Dev)</Text>
+          <LogOut color="#DC2626" size={18} />
+          <Text className="text-savage-red text-sm font-bold ml-2">CERRAR SESIÓN</Text>
         </TouchableOpacity>
       </ScrollView>
     </View>

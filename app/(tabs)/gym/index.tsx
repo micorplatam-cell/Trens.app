@@ -522,13 +522,15 @@ export default function GymScreen() {
 
     try {
       // Cargar TODOS los ejercicios del usuario y filtrar en cliente
+      // Ordenar por 'order' y luego por 'created_at' para consistencia
       const { data, error } = await supabase
         .from('user_assets')
         .select('*')
         .eq('user_id', user.id)
         .eq('asset_type', 'gym_exercise')
         .is('deleted_at', null) // Solo ejercicios activos
-        .order('order', { ascending: true });
+        .order('order', { ascending: true, nullsFirst: false })
+        .order('created_at', { ascending: true });
 
       if (error) throw error;
 

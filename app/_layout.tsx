@@ -67,10 +67,23 @@ export { useAxis } from '../context/AxisContext';
 
 // ============================================================================
 // 4. AXIS WRAPPER - Conecta AxisProvider con userId del Auth
+// Solo renderiza AxisProvider y AxisOverlay cuando hay usuario autenticado
 // ============================================================================
 const AxisWrapper = ({ children }: { children: React.ReactNode }) => {
-  const { user } = useAuth();
-  return <AxisProvider userId={user?.id ?? null}>{children}</AxisProvider>;
+  const { user, loading } = useAuth();
+
+  // Si está cargando o no hay usuario, no montar AxisProvider
+  if (loading || !user) {
+    return <>{children}</>;
+  }
+
+  return (
+    <AxisProvider userId={user.id}>
+      {children}
+      {/* AXIS Overlay - Solo visible cuando hay usuario autenticado */}
+      <AxisOverlay />
+    </AxisProvider>
+  );
 };
 
 export default function RootLayout() {
@@ -82,8 +95,6 @@ export default function RootLayout() {
             <View className="flex-1 bg-savage-black">
               <Slot />
               <StatusBar style="light" />
-              {/* AXIS Overlay - Flota sobre todas las pantallas */}
-              <AxisOverlay />
             </View>
           </AxisWrapper>
         </SportProvider>
