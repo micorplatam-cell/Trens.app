@@ -26,7 +26,9 @@ interface UseAxisExecutorProps {
   currentTrainingDay?: number; // Día de entrenamiento desde el contexto de pantalla
 }
 
-export const useAxisExecutor = ({ userId, currentTrainingDay = 0 }: UseAxisExecutorProps = { userId: null, currentTrainingDay: 0 }) => {
+export const useAxisExecutor = (
+  { userId, currentTrainingDay = 0 }: UseAxisExecutorProps = { userId: null, currentTrainingDay: 0 }
+) => {
   const [isExecuting, setIsExecuting] = useState(false);
 
   /**
@@ -123,8 +125,8 @@ export const useAxisExecutor = ({ userId, currentTrainingDay = 0 }: UseAxisExecu
             result = await assetRemoveSeries(
               userId,
               p.assetName as string,
-              p.seriesIndex === 'last' || p.seriesIndex === 'first' 
-                ? p.seriesIndex 
+              p.seriesIndex === 'last' || p.seriesIndex === 'first'
+                ? p.seriesIndex
                 : parseInt(String(p.seriesIndex), 10),
               currentTrainingDay // Usar día del contexto de pantalla
             );
@@ -184,13 +186,15 @@ export const useAxisExecutor = ({ userId, currentTrainingDay = 0 }: UseAxisExecu
               }
             }
             // Convertir al formato esperado, agregando id si no existe
-            const formattedSeries = (seriesArray as Array<{
-              id?: string;
-              reps: number;
-              weight: number;
-              type: 'WARMUP' | 'APPROACH' | 'EFFECTIVE' | 'FAILURE';
-              note?: string;
-            }>).map((s, i) => ({
+            const formattedSeries = (
+              seriesArray as Array<{
+                id?: string;
+                reps: number;
+                weight: number;
+                type: 'WARMUP' | 'APPROACH' | 'EFFECTIVE' | 'FAILURE';
+                note?: string;
+              }>
+            ).map((s, i) => ({
               id: s.id || String(Date.now() + i),
               reps: s.reps,
               weight: s.weight,

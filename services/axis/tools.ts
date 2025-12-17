@@ -48,22 +48,19 @@ interface SeriesConfig {
  * Obtiene las series de un ejercicio para un día específico.
  * Maneja migración automática de custom_series legacy a series_by_day.
  */
-function getSeriesForDay(
-  metadata: Record<string, unknown>,
-  trainingDay: number
-): SeriesConfig[] {
+function getSeriesForDay(metadata: Record<string, unknown>, trainingDay: number): SeriesConfig[] {
   // Nueva estructura: series_by_day
   const seriesByDay = metadata.series_by_day as Record<string, SeriesConfig[]> | undefined;
   if (seriesByDay && seriesByDay[String(trainingDay)]) {
     return seriesByDay[String(trainingDay)];
   }
-  
+
   // Fallback: estructura legacy custom_series (mismas series para todos los días)
   const legacySeries = metadata.custom_series as SeriesConfig[] | undefined;
   if (legacySeries && legacySeries.length > 0) {
     return legacySeries;
   }
-  
+
   // Default vacío
   return [];
 }
@@ -81,13 +78,13 @@ function setSeriesForDay(
   if (!metadata.series_by_day) {
     metadata.series_by_day = {};
   }
-  
+
   const seriesByDay = metadata.series_by_day as Record<string, SeriesConfig[]>;
   seriesByDay[String(trainingDay)] = series;
-  
+
   // NO actualizar custom_series - cada día tiene sus propias series
   // custom_series solo se mantiene como fallback de migración para datos antiguos
-  
+
   return metadata;
 }
 
@@ -167,7 +164,7 @@ export async function gymAddExercise(
 
     // Crear nuevo ejercicio
     const defaultSeries = customSeries || getDefaultSeries();
-    
+
     // Crear estructura series_by_day con las series para este día
     const seriesByDay: Record<string, SeriesConfig[]> = {
       [String(trainingDay)]: defaultSeries as SeriesConfig[],
@@ -326,7 +323,7 @@ export async function gymReplaceExercise(
     const targetDay =
       trainingDay !== undefined && oldTrainingDays.includes(trainingDay)
         ? trainingDay
-        : oldTrainingDays[0] ?? 0;
+        : (oldTrainingDays[0] ?? 0);
 
     console.log(
       `🔄 Reemplazando ${typedOldExercise.name} → ${newExerciseName} en día ${targetDay}, orden ${oldOrder}`
@@ -392,7 +389,7 @@ export async function gymReplaceExercise(
     } else {
       // Crear nuevo ejercicio con el orden del viejo
       const defaultSeries = getDefaultSeries();
-      
+
       // Crear estructura series_by_day
       const seriesByDay: Record<string, SeriesConfig[]> = {
         [String(targetDay)]: defaultSeries,
@@ -684,16 +681,22 @@ export async function assetRemoveSeries(
       string,
       unknown
     >;
-    
+
     // Obtener series del día específico
     const customSeries = getSeriesForDay(currentMetadata, trainingDay);
 
     if (customSeries.length === 0) {
-      return { success: false, message: `${typedAsset.name} no tiene series para quitar en día ${trainingDay + 1}.` };
+      return {
+        success: false,
+        message: `${typedAsset.name} no tiene series para quitar en día ${trainingDay + 1}.`,
+      };
     }
 
     if (customSeries.length === 1) {
-      return { success: false, message: `${typedAsset.name} solo tiene 1 serie en día ${trainingDay + 1}. No puedo dejarla sin series.` };
+      return {
+        success: false,
+        message: `${typedAsset.name} solo tiene 1 serie en día ${trainingDay + 1}. No puedo dejarla sin series.`,
+      };
     }
 
     // Determinar índice a eliminar
@@ -707,16 +710,16 @@ export async function assetRemoveSeries(
     }
 
     if (indexToRemove < 0 || indexToRemove >= customSeries.length) {
-      return { 
-        success: false, 
-        message: `Índice ${indexToRemove} fuera de rango. Hay ${customSeries.length} series (0-${customSeries.length - 1}).` 
+      return {
+        success: false,
+        message: `Índice ${indexToRemove} fuera de rango. Hay ${customSeries.length} series (0-${customSeries.length - 1}).`,
       };
     }
 
     // Eliminar la serie
     const removedSeries = customSeries[indexToRemove];
     customSeries.splice(indexToRemove, 1);
-    
+
     // Guardar en estructura por día
     setSeriesForDay(currentMetadata, trainingDay, customSeries);
 
@@ -775,7 +778,7 @@ export async function assetAddSeries(
       string,
       unknown
     >;
-    
+
     // Obtener series del día específico
     const customSeries = getSeriesForDay(currentMetadata, trainingDay);
 
@@ -857,12 +860,15 @@ export async function assetReplaceSeries(
       string,
       unknown
     >;
-    
+
     // Obtener series del día específico
     const customSeries = getSeriesForDay(currentMetadata, trainingDay);
 
     if (customSeries.length === 0) {
-      return { success: false, message: `${typedAsset.name} no tiene series para reemplazar en día ${trainingDay + 1}.` };
+      return {
+        success: false,
+        message: `${typedAsset.name} no tiene series para reemplazar en día ${trainingDay + 1}.`,
+      };
     }
 
     // Determinar índice a reemplazar
@@ -876,9 +882,9 @@ export async function assetReplaceSeries(
     }
 
     if (indexToReplace < 0 || indexToReplace >= customSeries.length) {
-      return { 
-        success: false, 
-        message: `Índice ${indexToReplace} fuera de rango. Hay ${customSeries.length} series (0-${customSeries.length - 1}).` 
+      return {
+        success: false,
+        message: `Índice ${indexToReplace} fuera de rango. Hay ${customSeries.length} series (0-${customSeries.length - 1}).`,
       };
     }
 
@@ -894,7 +900,7 @@ export async function assetReplaceSeries(
 
     // Reemplazar la serie
     customSeries[indexToReplace] = newSeries;
-    
+
     // Guardar en estructura por día
     setSeriesForDay(currentMetadata, trainingDay, customSeries);
 
@@ -956,7 +962,7 @@ export async function assetSetSeries(
       string,
       unknown
     >;
-    
+
     // Crear nuevas series con IDs únicos
     const newSeries: SeriesConfig[] = series.map((s, index) => ({
       id: String(Date.now() + index),
@@ -977,9 +983,9 @@ export async function assetSetSeries(
     if (updateError) throw updateError;
 
     // Construir resumen de series
-    const seriesSummary = newSeries.map((s, i) => 
-      `${i + 1}. ${s.reps} reps × ${s.weight}kg (${s.type})`
-    ).join('\n');
+    const seriesSummary = newSeries
+      .map((s, i) => `${i + 1}. ${s.reps} reps × ${s.weight}kg (${s.type})`)
+      .join('\n');
 
     return {
       success: true,
@@ -1260,7 +1266,8 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       },
       seriesIndex: {
         type: 'string',
-        description: 'Índice de la serie a quitar: "last" para última, "first" para primera, o un número (0-based)',
+        description:
+          'Índice de la serie a quitar: "last" para última, "first" para primera, o un número (0-based)',
         required: true,
       },
       trainingDay: {
@@ -1299,7 +1306,8 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       },
       position: {
         type: 'number',
-        description: 'Posición donde insertar (0=primera, 1=segunda, etc). Si no se especifica, se agrega al final.',
+        description:
+          'Posición donde insertar (0=primera, 1=segunda, etc). Si no se especifica, se agrega al final.',
         required: false,
       },
       trainingDay: {
@@ -1322,7 +1330,8 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       },
       seriesIndex: {
         type: 'string',
-        description: 'Índice de la serie a reemplazar: "last" para última, "first" para primera, o un número (0-based)',
+        description:
+          'Índice de la serie a reemplazar: "last" para última, "first" para primera, o un número (0-based)',
         required: true,
       },
       reps: {
@@ -1361,7 +1370,8 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       },
       series: {
         type: 'string',
-        description: 'JSON string con array de series. Cada serie: {reps:number, weight:number, type:"WARMUP"|"APPROACH"|"EFFECTIVE"|"FAILURE"}. Ejemplo: [{"reps":12,"weight":20,"type":"WARMUP"},{"reps":10,"weight":40,"type":"APPROACH"},{"reps":8,"weight":60,"type":"EFFECTIVE"},{"reps":6,"weight":70,"type":"FAILURE"}]',
+        description:
+          'JSON string con array de series. Cada serie: {reps:number, weight:number, type:"WARMUP"|"APPROACH"|"EFFECTIVE"|"FAILURE"}. Ejemplo: [{"reps":12,"weight":20,"type":"WARMUP"},{"reps":10,"weight":40,"type":"APPROACH"},{"reps":8,"weight":60,"type":"EFFECTIVE"},{"reps":6,"weight":70,"type":"FAILURE"}]',
         required: true,
       },
       trainingDay: {

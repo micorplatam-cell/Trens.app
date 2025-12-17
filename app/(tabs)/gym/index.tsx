@@ -646,61 +646,63 @@ export default function GymScreen() {
 
             const seriesForState: Series[] =
               customSeriesData.length > 0
-              ? customSeriesData.map((s: SeriesConfig) => ({
-                  id: s.id,
-                  type:
-                    s.type === 'WARMUP'
-                      ? 'WARMUP'
-                      : s.type === 'APPROACH'
-                        ? 'FEEDER'
-                        : s.type === 'FAILURE'
-                          ? 'INTENSITY'
-                          : 'EFFECTIVE',
-                  reps: s.reps.toString(),
-                  note: s.note || undefined,
-                  weight: s.weight || 0,
-                }))
-              : generateDefaultSeries(item.metadata?.sets || '4x10');
+                ? customSeriesData.map((s: SeriesConfig) => ({
+                    id: s.id,
+                    type:
+                      s.type === 'WARMUP'
+                        ? 'WARMUP'
+                        : s.type === 'APPROACH'
+                          ? 'FEEDER'
+                          : s.type === 'FAILURE'
+                            ? 'INTENSITY'
+                            : 'EFFECTIVE',
+                    reps: s.reps.toString(),
+                    note: s.note || undefined,
+                    weight: s.weight || 0,
+                  }))
+                : generateDefaultSeries(item.metadata?.sets || '4x10');
 
-          // Mapear alternativas CON las series del ejercicio principal (del día actual)
-          const alternatives: ExerciseAlternative[] = alternativeRelations.map((rel: any) => {
-            const asset = alternativeAssets?.find((a: any) => a.id === rel.alternative_exercise_id);
+            // Mapear alternativas CON las series del ejercicio principal (del día actual)
+            const alternatives: ExerciseAlternative[] = alternativeRelations.map((rel: any) => {
+              const asset = alternativeAssets?.find(
+                (a: any) => a.id === rel.alternative_exercise_id
+              );
+
+              return {
+                id: asset?.id || '',
+                name: asset?.name || 'UNKNOWN',
+                image_url: asset?.asset_url || '',
+                videos: [], // Las alternativas usan la imagen/video del asset_url
+                series: seriesForState, // Usar las mismas series del ejercicio principal
+              };
+            });
 
             return {
-              id: asset?.id || '',
-              name: asset?.name || 'UNKNOWN',
-              image_url: asset?.asset_url || '',
-              videos: [], // Las alternativas usan la imagen/video del asset_url
-              series: seriesForState, // Usar las mismas series del ejercicio principal
+              id: item.id,
+              name: item.name || 'UNNAMED',
+              sets: item.metadata?.sets || '0x0',
+              image_url: item.asset_url || '',
+              order: item.order || 0,
+              series: seriesForState,
+              training_days: item.training_days || [0],
+              videos: generateMockVideos(item.id, index),
+              alternatives,
             };
-          });
-
-          return {
-            id: item.id,
-            name: item.name || 'UNNAMED',
-            sets: item.metadata?.sets || '0x0',
-            image_url: item.asset_url || '',
-            order: item.order || 0,
-            series: seriesForState,
-            training_days: item.training_days || [0],
-            videos: generateMockVideos(item.id, index),
-            alternatives,
-          };
-        } catch (mapError) {
-          console.error('💥 ERROR mapeando ejercicio:', item.name, mapError);
-          // Retornar un ejercicio válido mínimo para no romper el array
-          return {
-            id: item.id || `error-${index}`,
-            name: item.name || 'ERROR',
-            sets: '0x0',
-            image_url: '',
-            order: index,
-            series: [],
-            training_days: [0],
-            videos: [],
-            alternatives: [],
-          };
-        }
+          } catch (mapError) {
+            console.error('💥 ERROR mapeando ejercicio:', item.name, mapError);
+            // Retornar un ejercicio válido mínimo para no romper el array
+            return {
+              id: item.id || `error-${index}`,
+              name: item.name || 'ERROR',
+              sets: '0x0',
+              image_url: '',
+              order: index,
+              series: [],
+              training_days: [0],
+              videos: [],
+              alternatives: [],
+            };
+          }
         });
         console.log(
           '✅ SETEANDO EJERCICIOS:',
@@ -1274,16 +1276,15 @@ export default function GymScreen() {
         // Obtener metadata actual para copiar series al nuevo día
         const currentMetadata = existingExercise.metadata || {};
         const seriesByDay = (currentMetadata.series_by_day as Record<string, any[]>) || {};
-        
+
         // Si el usuario configuró series personalizadas, usarlas para el nuevo día
         // Si no, usar las series del primer día existente o las series legacy
         if (customSeries && customSeries.length > 0) {
           seriesByDay[String(selectedDayIndex)] = customSeries;
         } else {
           // Copiar series del primer día configurado o usar custom_series legacy
-          const firstDaySeries = seriesByDay[String(currentDays[0])] || 
-                                 (currentMetadata.custom_series as any[]) || 
-                                 [];
+          const firstDaySeries =
+            seriesByDay[String(currentDays[0])] || (currentMetadata.custom_series as any[]) || [];
           if (firstDaySeries.length > 0) {
             seriesByDay[String(selectedDayIndex)] = [...firstDaySeries];
           }

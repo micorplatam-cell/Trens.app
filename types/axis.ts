@@ -134,7 +134,10 @@ export interface AxisContextState {
 
   // Context updates
   setScreenContext: (ctx: ScreenContext) => void;
-  setActiveAsset: (assetId: string | null, alternativeInfo?: { isAlternative: boolean; parentExerciseName: string }) => Promise<void>;
+  setActiveAsset: (
+    assetId: string | null,
+    alternativeInfo?: { isAlternative: boolean; parentExerciseName: string }
+  ) => Promise<void>;
   setSportMode: (mode: SportMode) => void;
 
   // Alias management

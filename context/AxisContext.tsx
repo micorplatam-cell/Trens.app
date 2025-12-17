@@ -724,7 +724,7 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
   const getSystemPrompt = useCallback((): string => {
     // Usar el día del contexto de pantalla (UI) si está disponible, sino el del perfil
     const currentDay = screenContext.currentTrainingDay ?? userProfile.currentTrainingDay;
-    
+
     return `Eres AXIS, el asistente de IA de TRENS (High-Performance Fitness App).
 
 CONTEXTO ACTUAL:
