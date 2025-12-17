@@ -22,8 +22,18 @@ import {
   adnUpdateProfile,
   adnAddMeasurement,
   adnRemoveMeasurement,
+  // PLAN Tools
+  planAddMeal,
+  planRemoveMeal,
+  planUpdateMealTime,
+  planUpdateIngredients,
+  planGetMeals,
+  planAddSupplement,
+  planRemoveSupplement,
+  planGetStack,
   TOOL_DEFINITIONS,
 } from '../services/axis/tools';
+import { calculateMacrosWithAI, analyzeDailyNutrition } from '../services/axis/nutrition';
 import type { AxisToolCall, AxisToolResult, ToolDefinition } from '../types/axis';
 
 interface UseAxisExecutorProps {
@@ -248,6 +258,129 @@ export const useAxisExecutor = (
           case 'ADN_REMOVE_MEASUREMENT':
             result = await adnRemoveMeasurement(userId, p.measurementName as string);
             break;
+
+          // PLAN TOOLS
+          case 'PLAN_ADD_MEAL':
+            result = await planAddMeal(
+              userId,
+              p.time as string,
+              JSON.parse(p.ingredients as string)
+            );
+            break;
+
+          case 'PLAN_REMOVE_MEAL':
+            result = await planRemoveMeal(userId, {
+              mealId: p.mealId as string | undefined,
+              time: p.time as string | undefined,
+              position: p.position as string | undefined,
+            });
+            break;
+
+          case 'PLAN_UPDATE_MEAL_TIME':
+            result = await planUpdateMealTime(userId, p.newTime as string, {
+              mealId: p.mealId as string | undefined,
+              position: p.position as string | undefined,
+            });
+            break;
+
+          case 'PLAN_UPDATE_INGREDIENTS':
+            result = await planUpdateIngredients(
+              userId,
+              p.mealId as string,
+              JSON.parse(p.ingredients as string)
+            );
+            break;
+
+          case 'PLAN_CALCULATE_MACROS': {
+            // Get meals first, then calculate macros
+            const mealsResult = await planGetMeals(userId);
+            if (mealsResult.success && mealsResult.data) {
+              const meals = (
+                mealsResult.data as {
+                  meals: {
+                    time: string;
+                    meal_options: {
+                      meal_ingredients: {
+                        id: string;
+                        name: string;
+                        quantity: string;
+                        portion?: string;
+                      }[];
+                    }[];
+                  }[];
+                }
+              ).meals;
+              const allIngredients = meals.flatMap(
+                (m) => m.meal_options?.[0]?.meal_ingredients || []
+              );
+              const calculated = await calculateMacrosWithAI(allIngredients);
+              result = {
+                success: true,
+                message: `✅ Macros calculados para ${calculated.length} ingredientes.`,
+                data: { calculated },
+              };
+            } else {
+              result = { success: false, message: 'No hay comidas para calcular.' };
+            }
+            break;
+          }
+
+          case 'PLAN_GET_MEALS':
+            result = await planGetMeals(userId);
+            break;
+
+          case 'PLAN_ADD_SUPPLEMENT':
+            result = await planAddSupplement(userId, p.name as string, p.dose as string, {
+              type: p.type as 'pill' | 'powder' | 'liquid' | 'syringe' | undefined,
+              time: p.time as string | undefined,
+              isPreWorkout: p.isPreWorkout as boolean | undefined,
+              isPostWorkout: p.isPostWorkout as boolean | undefined,
+            });
+            break;
+
+          case 'PLAN_REMOVE_SUPPLEMENT':
+            result = await planRemoveSupplement(userId, p.name as string);
+            break;
+
+          case 'PLAN_GET_STACK':
+            result = await planGetStack(userId);
+            break;
+
+          case 'PLAN_ANALYZE_NUTRITION': {
+            const mealsData = await planGetMeals(userId);
+            if (mealsData.success && mealsData.data) {
+              const meals = (
+                mealsData.data as {
+                  meals: {
+                    time: string;
+                    meal_options: { meal_ingredients: { name: string; quantity: string }[] }[];
+                  }[];
+                }
+              ).meals;
+              const formattedMeals = meals.map((m) => ({
+                time: m.time,
+                ingredients: m.meal_options?.[0]?.meal_ingredients || [],
+              }));
+              const analysis = await analyzeDailyNutrition(formattedMeals);
+              result = {
+                success: true,
+                message: `📊 ANÁLISIS NUTRICIONAL:
+🔥 Calorías: ${analysis.totalCalories} kcal
+🥩 Proteína: ${analysis.totalProtein}g
+🍞 Carbos: ${analysis.totalCarbs}g
+🥑 Grasa: ${analysis.totalFat}g
+
+${analysis.analysis}
+
+💡 Recomendaciones:
+${analysis.recommendations.map((r) => `• ${r}`).join('\n')}`,
+                data: analysis,
+              };
+            } else {
+              result = { success: false, message: 'No hay datos para analizar.' };
+            }
+            break;
+          }
 
           default:
             console.warn(`Herramienta no implementada: ${toolCall.tool}`);

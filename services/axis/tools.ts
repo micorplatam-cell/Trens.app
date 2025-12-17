@@ -1341,6 +1341,424 @@ export async function adnRemoveMeasurement(
 }
 
 // ============================================================================
+// PLAN TOOLS - Nutrición y Farmacología
+// ============================================================================
+
+/**
+ * Agrega una comida al plan nutricional
+ */
+export async function planAddMeal(
+  userId: string,
+  time: string,
+  ingredients: Array<{ name: string; quantity?: string; portion?: string }>
+): Promise<AxisToolResult> {
+  try {
+    // Get or create active plan
+    let { data: plan } = await supabase
+      .from('nutrition_plans')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('is_active', true)
+      .single();
+
+    if (!plan) {
+      const { data: newPlan, error: planError } = await supabase
+        .from('nutrition_plans')
+        .insert({ user_id: userId, name: 'MI PLAN', is_active: true })
+        .select()
+        .single();
+
+      if (planError) throw planError;
+      plan = newPlan;
+    }
+
+    if (!plan) {
+      return { success: false, message: 'No se pudo obtener el plan.' };
+    }
+
+    // Create meal
+    const { data: mealData, error: mealError } = await supabase
+      .from('meals')
+      .insert({
+        plan_id: plan.id,
+        user_id: userId,
+        time: time,
+      })
+      .select()
+      .single();
+
+    if (mealError) throw mealError;
+
+    // Create meal option
+    const { data: optionData, error: optError } = await supabase
+      .from('meal_options')
+      .insert({
+        meal_id: mealData.id,
+        name: 'Opción Principal',
+        option_index: 0,
+      })
+      .select()
+      .single();
+
+    if (optError) throw optError;
+
+    // Create ingredients
+    const ingredientsToInsert = ingredients.map((ing, idx) => ({
+      option_id: optionData.id,
+      name: ing.name,
+      quantity: ing.quantity || '~100g',
+      portion: ing.portion || '',
+      sort_order: idx,
+    }));
+
+    await supabase.from('meal_ingredients').insert(ingredientsToInsert);
+
+    return {
+      success: true,
+      message: `✅ Comida agregada a las ${time} con ${ingredients.length} ingredientes.`,
+      data: { mealId: mealData.id },
+      affectedRecords: 1,
+    };
+  } catch (error) {
+    console.error('planAddMeal error:', error);
+    return { success: false, message: 'Error al agregar comida.' };
+  }
+}
+
+/**
+ * Elimina una comida del plan
+ */
+export async function planRemoveMeal(
+  userId: string,
+  options: { mealId?: string; time?: string; position?: string }
+): Promise<AxisToolResult> {
+  try {
+    let mealId = options.mealId;
+
+    if (!mealId) {
+      // Find meal by time or position
+      const { data: meals } = await supabase
+        .from('meals')
+        .select('id, time')
+        .eq('user_id', userId)
+        .order('time', { ascending: true });
+
+      if (!meals || meals.length === 0) {
+        return { success: false, message: 'No hay comidas para eliminar.' };
+      }
+
+      if (options.time) {
+        const meal = meals.find((m) => m.time.startsWith(options.time!));
+        if (meal) mealId = meal.id;
+      } else if (options.position) {
+        if (options.position === 'first') mealId = meals[0].id;
+        else if (options.position === 'last') mealId = meals[meals.length - 1].id;
+        else {
+          const idx = parseInt(options.position, 10) - 1;
+          if (meals[idx]) mealId = meals[idx].id;
+        }
+      }
+    }
+
+    if (!mealId) {
+      return { success: false, message: 'No encontré la comida especificada.' };
+    }
+
+    const { error } = await supabase.from('meals').delete().eq('id', mealId);
+
+    if (error) throw error;
+
+    return {
+      success: true,
+      message: '✅ Comida eliminada del plan.',
+      affectedRecords: 1,
+    };
+  } catch (error) {
+    console.error('planRemoveMeal error:', error);
+    return { success: false, message: 'Error al eliminar comida.' };
+  }
+}
+
+/**
+ * Actualiza la hora de una comida
+ */
+export async function planUpdateMealTime(
+  userId: string,
+  newTime: string,
+  options: { mealId?: string; position?: string }
+): Promise<AxisToolResult> {
+  try {
+    let mealId = options.mealId;
+
+    if (!mealId && options.position) {
+      const { data: meals } = await supabase
+        .from('meals')
+        .select('id')
+        .eq('user_id', userId)
+        .order('time', { ascending: true });
+
+      if (meals && meals.length > 0) {
+        if (options.position === 'first') mealId = meals[0].id;
+        else if (options.position === 'last') mealId = meals[meals.length - 1].id;
+        else {
+          const idx = parseInt(options.position, 10) - 1;
+          if (meals[idx]) mealId = meals[idx].id;
+        }
+      }
+    }
+
+    if (!mealId) {
+      return { success: false, message: 'No encontré la comida especificada.' };
+    }
+
+    const { error } = await supabase.from('meals').update({ time: newTime }).eq('id', mealId);
+
+    if (error) throw error;
+
+    return {
+      success: true,
+      message: `✅ Hora de comida actualizada a ${newTime}.`,
+      affectedRecords: 1,
+    };
+  } catch (error) {
+    console.error('planUpdateMealTime error:', error);
+    return { success: false, message: 'Error al actualizar hora.' };
+  }
+}
+
+/**
+ * Actualiza los ingredientes de una comida
+ */
+export async function planUpdateIngredients(
+  userId: string,
+  mealId: string,
+  ingredients: Array<{ name: string; quantity?: string; portion?: string }>
+): Promise<AxisToolResult> {
+  try {
+    // Get the meal's option
+    const { data: options } = await supabase
+      .from('meal_options')
+      .select('id')
+      .eq('meal_id', mealId)
+      .order('option_index', { ascending: true })
+      .limit(1);
+
+    if (!options || options.length === 0) {
+      return { success: false, message: 'No encontré opciones para esta comida.' };
+    }
+
+    const optionId = options[0].id;
+
+    // Delete existing ingredients
+    await supabase.from('meal_ingredients').delete().eq('option_id', optionId);
+
+    // Insert new ingredients
+    const ingredientsToInsert = ingredients.map((ing, idx) => ({
+      option_id: optionId,
+      name: ing.name,
+      quantity: ing.quantity || '~100g',
+      portion: ing.portion || '',
+      sort_order: idx,
+    }));
+
+    await supabase.from('meal_ingredients').insert(ingredientsToInsert);
+
+    return {
+      success: true,
+      message: `✅ Ingredientes actualizados: ${ingredients.length} ingredientes.`,
+      affectedRecords: ingredients.length,
+    };
+  } catch (error) {
+    console.error('planUpdateIngredients error:', error);
+    return { success: false, message: 'Error al actualizar ingredientes.' };
+  }
+}
+
+/**
+ * Obtiene todas las comidas del día
+ */
+export async function planGetMeals(userId: string): Promise<AxisToolResult> {
+  try {
+    const { data: meals, error } = await supabase
+      .from('meals')
+      .select(
+        `
+        id,
+        time,
+        selected_option,
+        meal_options (
+          id,
+          name,
+          meal_ingredients (
+            id,
+            name,
+            quantity,
+            portion
+          )
+        )
+      `
+      )
+      .eq('user_id', userId)
+      .order('time', { ascending: true });
+
+    if (error) throw error;
+
+    if (!meals || meals.length === 0) {
+      return {
+        success: true,
+        message: '🍽️ No tienes comidas configuradas todavía.',
+        data: { meals: [] },
+      };
+    }
+
+    // Format response
+    const formatTime = (t: string) => {
+      const [h, m] = t.split(':').map(Number);
+      const period = h >= 12 ? 'PM' : 'AM';
+      const h12 = h % 12 || 12;
+      return `${h12}:${m.toString().padStart(2, '0')} ${period}`;
+    };
+
+    const mealsSummary = meals
+      .map((m, i) => {
+        const option = (
+          m.meal_options as {
+            name: string;
+            meal_ingredients: { name: string; quantity: string }[];
+          }[]
+        )?.[0];
+        const ings =
+          option?.meal_ingredients?.map((ing) => `${ing.name} (${ing.quantity})`).join(', ') ||
+          'Sin ingredientes';
+        return `${i + 1}. ${formatTime(m.time)}: ${ings}`;
+      })
+      .join('\n');
+
+    return {
+      success: true,
+      message: `🍽️ TUS COMIDAS DE HOY:\n${mealsSummary}`,
+      data: { meals },
+    };
+  } catch (error) {
+    console.error('planGetMeals error:', error);
+    return { success: false, message: 'Error al obtener comidas.' };
+  }
+}
+
+/**
+ * Agrega un suplemento al stack
+ */
+export async function planAddSupplement(
+  userId: string,
+  name: string,
+  dose: string,
+  options?: {
+    type?: 'pill' | 'powder' | 'liquid' | 'syringe';
+    time?: string;
+    isPreWorkout?: boolean;
+    isPostWorkout?: boolean;
+  }
+): Promise<AxisToolResult> {
+  try {
+    const { error } = await supabase.from('supplement_stack').insert({
+      user_id: userId,
+      name: name.toUpperCase(),
+      dose,
+      type: options?.type || 'pill',
+      time: options?.time,
+      is_pre_workout: options?.isPreWorkout || false,
+      is_post_workout: options?.isPostWorkout || false,
+      is_active: true,
+    });
+
+    if (error) throw error;
+
+    let timing = '';
+    if (options?.isPreWorkout) timing = ' (Pre-entreno)';
+    if (options?.isPostWorkout) timing = ' (Post-entreno)';
+
+    return {
+      success: true,
+      message: `✅ ${name.toUpperCase()} (${dose}) agregado al stack${timing}.`,
+      affectedRecords: 1,
+    };
+  } catch (error) {
+    console.error('planAddSupplement error:', error);
+    return { success: false, message: 'Error al agregar suplemento.' };
+  }
+}
+
+/**
+ * Elimina un suplemento del stack
+ */
+export async function planRemoveSupplement(userId: string, name: string): Promise<AxisToolResult> {
+  try {
+    const { data, error } = await supabase
+      .from('supplement_stack')
+      .delete()
+      .eq('user_id', userId)
+      .ilike('name', `%${name}%`)
+      .select();
+
+    if (error) throw error;
+
+    if (!data || data.length === 0) {
+      return { success: false, message: `No encontré "${name}" en tu stack.` };
+    }
+
+    return {
+      success: true,
+      message: `✅ ${data[0].name} eliminado del stack.`,
+      affectedRecords: 1,
+    };
+  } catch (error) {
+    console.error('planRemoveSupplement error:', error);
+    return { success: false, message: 'Error al eliminar suplemento.' };
+  }
+}
+
+/**
+ * Obtiene el stack de suplementos
+ */
+export async function planGetStack(userId: string): Promise<AxisToolResult> {
+  try {
+    const { data: stack, error } = await supabase
+      .from('supplement_stack')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('is_active', true);
+
+    if (error) throw error;
+
+    if (!stack || stack.length === 0) {
+      return {
+        success: true,
+        message: '💊 No tienes suplementos en tu stack.',
+        data: { stack: [] },
+      };
+    }
+
+    const stackSummary = stack
+      .map((s) => {
+        let timing = '';
+        if (s.is_pre_workout) timing = ' 🏋️ PRE';
+        if (s.is_post_workout) timing = ' 💪 POST';
+        return `• ${s.name} - ${s.dose}${timing}`;
+      })
+      .join('\n');
+
+    return {
+      success: true,
+      message: `💊 TU STACK:\n${stackSummary}`,
+      data: { stack },
+    };
+  } catch (error) {
+    console.error('planGetStack error:', error);
+    return { success: false, message: 'Error al obtener stack.' };
+  }
+}
+
+// ============================================================================
 // TOOL DEFINITIONS - Exportables para el LLM (Function Calling)
 // ============================================================================
 export const TOOL_DEFINITIONS: ToolDefinition[] = [
@@ -1676,5 +2094,177 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       },
     },
     requiredParams: ['measurementName'],
+  },
+  // ============================================================================
+  // PLAN TOOLS - Nutrición y Farmacología
+  // ============================================================================
+  {
+    name: 'PLAN_ADD_MEAL',
+    description:
+      'Agrega una comida al plan nutricional. Usa cuando diga "agrega una comida a las 7", "pon desayuno", "añade almuerzo a las 2 PM".',
+    parameters: {
+      time: {
+        type: 'string',
+        description: 'Hora de la comida en formato 24h (ej: "07:00", "14:30", "20:00")',
+        required: true,
+      },
+      ingredients: {
+        type: 'string',
+        description:
+          'JSON string con array de ingredientes. Cada uno: {name: string, quantity?: string}. Ej: [{"name":"Pollo","quantity":"200g"},{"name":"Arroz","quantity":"150g"}]',
+        required: true,
+      },
+    },
+    requiredParams: ['time', 'ingredients'],
+  },
+  {
+    name: 'PLAN_REMOVE_MEAL',
+    description:
+      'Elimina una comida del plan. Usa cuando diga "quita la comida de las 7", "elimina el desayuno", "borra la última comida".',
+    parameters: {
+      mealId: {
+        type: 'string',
+        description: 'ID de la comida a eliminar',
+        required: false,
+      },
+      time: {
+        type: 'string',
+        description: 'Hora aproximada de la comida a eliminar (ej: "07:00")',
+        required: false,
+      },
+      position: {
+        type: 'string',
+        description: 'Posición de la comida: "first", "last", o número (1-based)',
+        required: false,
+      },
+    },
+    requiredParams: [],
+  },
+  {
+    name: 'PLAN_UPDATE_MEAL_TIME',
+    description:
+      'Cambia la hora de una comida. Usa cuando diga "mueve el desayuno a las 8", "cambia la hora de la comida".',
+    parameters: {
+      mealId: {
+        type: 'string',
+        description: 'ID de la comida',
+        required: false,
+      },
+      position: {
+        type: 'string',
+        description: 'Posición de la comida: "first", "last", o número (1-based)',
+        required: false,
+      },
+      newTime: {
+        type: 'string',
+        description: 'Nueva hora en formato 24h (ej: "08:00")',
+        required: true,
+      },
+    },
+    requiredParams: ['newTime'],
+  },
+  {
+    name: 'PLAN_UPDATE_INGREDIENTS',
+    description:
+      'Actualiza los ingredientes de una comida. Usa cuando diga "cambia el pollo por pescado", "agrega arroz a la comida", "quita los carbohidratos".',
+    parameters: {
+      mealId: {
+        type: 'string',
+        description: 'ID de la comida',
+        required: true,
+      },
+      ingredients: {
+        type: 'string',
+        description: 'JSON string con array de ingredientes actualizados',
+        required: true,
+      },
+    },
+    requiredParams: ['mealId', 'ingredients'],
+  },
+  {
+    name: 'PLAN_CALCULATE_MACROS',
+    description:
+      'Calcula los macros/gramos de ingredientes usando IA. Usa cuando diga "calcula los gramos", "cuántas calorías tiene", "ajusta las porciones".',
+    parameters: {
+      mealId: {
+        type: 'string',
+        description: 'ID de la comida para calcular (opcional, si no se da calcula todas)',
+        required: false,
+      },
+    },
+    requiredParams: [],
+  },
+  {
+    name: 'PLAN_GET_MEALS',
+    description:
+      'Obtiene todas las comidas del día. Usa cuando pregunte "qué tengo de comer hoy", "muéstrame mis comidas", "cuál es mi plan de hoy".',
+    parameters: {},
+    requiredParams: [],
+  },
+  {
+    name: 'PLAN_ADD_SUPPLEMENT',
+    description:
+      'Agrega un suplemento al stack. Usa cuando diga "agrega creatina", "pon proteína post entreno", "añade omega 3".',
+    parameters: {
+      name: {
+        type: 'string',
+        description: 'Nombre del suplemento (ej: "Creatina", "Proteína Whey", "Omega 3")',
+        required: true,
+      },
+      dose: {
+        type: 'string',
+        description: 'Dosis (ej: "5g", "30g", "2 cápsulas")',
+        required: true,
+      },
+      type: {
+        type: 'string',
+        description: 'Tipo de suplemento',
+        enum: ['pill', 'powder', 'liquid', 'syringe'],
+        required: false,
+      },
+      time: {
+        type: 'string',
+        description: 'Hora de toma en formato 24h',
+        required: false,
+      },
+      isPreWorkout: {
+        type: 'boolean',
+        description: 'Si se toma antes del entreno',
+        required: false,
+      },
+      isPostWorkout: {
+        type: 'boolean',
+        description: 'Si se toma después del entreno',
+        required: false,
+      },
+    },
+    requiredParams: ['name', 'dose'],
+  },
+  {
+    name: 'PLAN_REMOVE_SUPPLEMENT',
+    description:
+      'Elimina un suplemento del stack. Usa cuando diga "quita la creatina", "elimina el pre entreno".',
+    parameters: {
+      name: {
+        type: 'string',
+        description: 'Nombre del suplemento a eliminar',
+        required: true,
+      },
+    },
+    requiredParams: ['name'],
+  },
+  {
+    name: 'PLAN_GET_STACK',
+    description:
+      'Obtiene el stack de suplementos actual. Usa cuando pregunte "qué suplementos tomo", "muéstrame mi stack".',
+    parameters: {},
+    requiredParams: [],
+  },
+  {
+    name: 'PLAN_ANALYZE_NUTRITION',
+    description:
+      'Analiza la nutrición del día completo y da recomendaciones. Usa cuando diga "analiza mi dieta", "cómo está mi nutrición", "qué me falta hoy".',
+    parameters: {},
+    requiredParams: [],
   },
 ];

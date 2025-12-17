@@ -26,7 +26,18 @@ export type AxisToolName =
   | 'ADN_UPDATE_PROFILE'
   | 'ADN_ADD_MEASUREMENT'
   | 'ADN_REMOVE_MEASUREMENT'
-  // Diet Tools
+  // PLAN Tools (Nutrición y Farmacología)
+  | 'PLAN_ADD_MEAL'
+  | 'PLAN_REMOVE_MEAL'
+  | 'PLAN_UPDATE_MEAL_TIME'
+  | 'PLAN_UPDATE_INGREDIENTS'
+  | 'PLAN_CALCULATE_MACROS'
+  | 'PLAN_GET_MEALS'
+  | 'PLAN_ADD_SUPPLEMENT'
+  | 'PLAN_REMOVE_SUPPLEMENT'
+  | 'PLAN_GET_STACK'
+  | 'PLAN_ANALYZE_NUTRITION'
+  // Diet Tools (Legacy)
   | 'DIET_UPDATE_MEAL'
   | 'DIET_ADD_CALORIES'
   // Logging Tools
