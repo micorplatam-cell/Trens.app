@@ -14,6 +14,7 @@ import { StackCard } from '../../../components/plan/StackCard';
 import { WorkoutBlock } from '../../../components/plan/WorkoutBlock';
 import { AddMealModal } from '../../../components/plan/AddMealModal';
 import { EditMealModal } from '../../../components/plan/EditMealModal';
+import { TimePickerModal } from '../../../components/plan/TimePickerModal';
 import { StackManagerModal } from '../../../components/plan/StackManagerModal';
 import { supabase } from '../../../lib/supabase';
 import { useAxis } from '../../../context/AxisContext';
@@ -110,6 +111,9 @@ export default function PlanScreen() {
   const [showAddMeal, setShowAddMeal] = useState(false);
   const [showEditMeal, setShowEditMeal] = useState(false);
   const [editingMeal, setEditingMeal] = useState<Meal | null>(null);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [timePickerMealId, setTimePickerMealId] = useState<string | null>(null);
+  const [timePickerCurrentTime, setTimePickerCurrentTime] = useState('12:00');
   const [showStackManager, setShowStackManager] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -311,39 +315,29 @@ export default function PlanScreen() {
     const meal = meals.find((m) => m.id === mealId);
     if (!meal) return;
 
-    // Convertir hora 24h a 12h para mostrar
-    const [h, m] = meal.time.split(':').map((s) => parseInt(s, 10));
-    const period = h >= 12 ? 'PM' : 'AM';
-    const hour12 = h % 12 || 12;
-    const currentTime = `${hour12}:${m.toString().padStart(2, '0')} ${period}`;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setTimePickerMealId(mealId);
+    setTimePickerCurrentTime(meal.time);
+    setShowTimePicker(true);
+  };
 
-    Alert.prompt(
-      'Cambiar Hora',
-      `Hora actual: ${currentTime}\n\nIngresa nueva hora (ej: 7:30 AM, 2 PM):`,
-      async (input) => {
-        if (!input) return;
+  // Guardar nueva hora desde el modal
+  const handleSaveTime = async (newTime: string) => {
+    if (!timePickerMealId) return;
 
-        // Parsear formato flexible (7, 7:30, 7 AM, 7:30 PM, etc)
-        const parsed = parseTimeInput(input.trim());
-        if (parsed) {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-          // Update and re-sort
-          const updated = meals
-            .map((m) => (m.id === mealId ? { ...m, time: parsed } : m))
-            .sort((a, b) => a.time.localeCompare(b.time));
+    // Update and re-sort
+    const updated = meals
+      .map((m) => (m.id === timePickerMealId ? { ...m, time: newTime } : m))
+      .sort((a, b) => a.time.localeCompare(b.time));
 
-          setMeals(updated);
+    setMeals(updated);
 
-          // Persist
-          await supabase.from('meals').update({ time: parsed }).eq('id', mealId);
-        } else {
-          Alert.alert('Formato inválido', 'Usa formato como: 7 AM, 2:30 PM, 14:00');
-        }
-      },
-      'plain-text',
-      currentTime
-    );
+    // Persist
+    await supabase.from('meals').update({ time: newTime }).eq('id', timePickerMealId);
+
+    setTimePickerMealId(null);
   };
 
   // Parsear input de hora flexible a formato 24h
@@ -527,12 +521,32 @@ export default function PlanScreen() {
 
       if (optError) throw optError;
 
+      // Calcular macros con IA si está activado
+      let finalIngredients = ingredients;
+      if (useAxisAI) {
+        try {
+          const ingredientsWithIds = ingredients.map((ing, i) => ({
+            id: `temp-${i}`,
+            name: ing.name,
+            quantity: ing.quantity || '',
+            portion: ing.portion || '',
+          }));
+          const calculated = await calculateMacrosWithAI(ingredientsWithIds);
+          finalIngredients = calculated.map((ing) => ({
+            name: ing.name,
+            quantity: ing.quantity,
+            portion: ing.portion || '',
+          }));
+        } catch (aiError) {
+          console.warn('Error calculando macros con IA, usando valores por defecto:', aiError);
+        }
+      }
+
       // Create ingredients
-      const ingredientsToInsert = ingredients.map((ing, idx) => ({
+      const ingredientsToInsert = finalIngredients.map((ing, idx) => ({
         option_id: optionData.id,
         name: ing.name,
-        // Si AXIS AI está ON pero no hay cantidad, poner un placeholder útil
-        quantity: ing.quantity || (useAxisAI ? '~100 gr' : '---'),
+        quantity: ing.quantity || '~100 gr',
         portion: ing.portion || '',
         sort_order: idx,
       }));
@@ -789,6 +803,16 @@ export default function PlanScreen() {
         }}
         onSave={handleSaveIngredients}
         onCalculateMacros={handleCalculateMacros}
+      />
+
+      <TimePickerModal
+        visible={showTimePicker}
+        currentTime={timePickerCurrentTime}
+        onClose={() => {
+          setShowTimePicker(false);
+          setTimePickerMealId(null);
+        }}
+        onSave={handleSaveTime}
       />
 
       <StackManagerModal

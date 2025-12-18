@@ -16,7 +16,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
-import { X, Plus, Trash2, Sparkles } from 'lucide-react-native';
+import { X, Plus, Trash2, Zap } from 'lucide-react-native';
 
 // ============================================================================
 // TYPES
@@ -72,14 +72,37 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [isCalculating, setIsCalculating] = useState(false);
+  const [axisAI, setAxisAI] = useState(false);
 
   // Sincronizar ingredientes cuando cambia la comida
   useEffect(() => {
     if (meal && meal.options.length > 0) {
       const currentOption = meal.options[meal.selectedOption] || meal.options[0];
       setIngredients(currentOption.ingredients.map((ing) => ({ ...ing })));
+      setAxisAI(false); // Reset AXIS AI toggle
     }
   }, [meal]);
+
+  const toggleAxisAI = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const newValue = !axisAI;
+    setAxisAI(newValue);
+    
+    // Si se activa AXIS AI, calcular automáticamente
+    if (newValue && onCalculateMacros && ingredients.length > 0) {
+      setIsCalculating(true);
+      try {
+        const calculated = await onCalculateMacros(ingredients);
+        setIngredients(calculated);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } catch (error) {
+        console.error('Error calculating macros:', error);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      } finally {
+        setIsCalculating(false);
+      }
+    }
+  };
 
   const addIngredient = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -100,24 +123,6 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
     const newIngs = [...ingredients];
     newIngs[index] = { ...newIngs[index], [field]: value };
     setIngredients(newIngs);
-  };
-
-  const handleCalculateWithAI = async () => {
-    if (!onCalculateMacros) return;
-
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setIsCalculating(true);
-
-    try {
-      const calculated = await onCalculateMacros(ingredients);
-      setIngredients(calculated);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch (error) {
-      console.error('Error calculating macros:', error);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-    } finally {
-      setIsCalculating(false);
-    }
   };
 
   const handleSave = async () => {
@@ -171,26 +176,38 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
             </View>
 
             <ScrollView className="p-4" showsVerticalScrollIndicator={false}>
-              {/* AXIS AI Calculate Button */}
+              {/* AXIS AI Toggle */}
               {onCalculateMacros && (
-                <Pressable
-                  onPress={handleCalculateWithAI}
-                  disabled={isCalculating}
-                  className={`flex-row items-center justify-center gap-3 p-4 rounded-xl border mb-4 ${
-                    isCalculating
-                      ? 'bg-purple-900/20 border-purple-500/30'
-                      : 'bg-purple-900/10 border-purple-500/20 active:bg-purple-900/30'
-                  }`}
-                >
-                  {isCalculating ? (
-                    <ActivityIndicator size="small" color="#A855F7" />
-                  ) : (
-                    <Sparkles size={20} color="#A855F7" />
-                  )}
-                  <Text className="text-purple-300 font-bold">
-                    {isCalculating ? 'Calculando con AXIS...' : 'CALCULAR GRAMOS CON AI'}
-                  </Text>
-                </Pressable>
+                <View className="flex-row items-center justify-between bg-purple-900/10 p-4 rounded-xl border border-purple-500/20 mb-4">
+                  <View className="flex-row items-center gap-3">
+                    <View className="bg-purple-500 p-2 rounded-lg">
+                      {isCalculating ? (
+                        <ActivityIndicator size="small" color="#FFF" />
+                      ) : (
+                        <Zap size={16} color="#FFF" />
+                      )}
+                    </View>
+                    <View>
+                      <Text className="text-purple-300 font-bold">AXIS AI</Text>
+                      <Text className="text-purple-400/60 text-xs">
+                        {isCalculating ? 'Calculando gramos...' : 'Cálculo automático de gramos'}
+                      </Text>
+                    </View>
+                  </View>
+                  <Pressable
+                    onPress={toggleAxisAI}
+                    disabled={isCalculating}
+                    className={`w-12 h-6 rounded-full justify-center ${
+                      axisAI ? 'bg-purple-500' : 'bg-zinc-700'
+                    }`}
+                  >
+                    <View
+                      className={`w-4 h-4 bg-white rounded-full mx-1 ${
+                        axisAI ? 'self-end' : 'self-start'
+                      }`}
+                    />
+                  </Pressable>
+                </View>
               )}
 
               {/* Ingredients */}
