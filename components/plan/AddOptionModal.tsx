@@ -1,9 +1,9 @@
 // ============================================================================
-// EDIT MEAL MODAL - Modal para editar comidas existentes
-// Con integración AXIS AI para cálculo automático de macros
+// ADD OPTION MODAL - Modal para añadir un nuevo platillo a una comida
+// Genera opciones con AXIS AI o permite ingreso manual
 // ============================================================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -16,7 +16,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
-import { X, Plus, Trash2, Zap } from 'lucide-react-native';
+import { X, Plus, Trash2, Zap, Sparkles } from 'lucide-react-native';
 
 // ============================================================================
 // TYPES
@@ -28,80 +28,55 @@ interface Ingredient {
   portion?: string;
 }
 
-interface MealOption {
-  id: string;
-  name: string;
-  ingredients: Ingredient[];
-}
-
-interface Meal {
-  id: string;
-  time: string;
-  options: MealOption[];
-  selectedOption: number;
-}
-
-interface EditMealModalProps {
+interface AddOptionModalProps {
   visible: boolean;
-  meal: Meal | null;
+  mealId: string;
+  mealName: string;
+  targetMacros?: {
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+  };
   onClose: () => void;
-  onSave: (mealId: string, optionId: string, ingredients: Ingredient[]) => Promise<void>;
+  onSave: (mealId: string, optionName: string, ingredients: Ingredient[]) => Promise<void>;
   onCalculateMacros?: (ingredients: Ingredient[]) => Promise<Ingredient[]>;
+  onGenerateWithAI?: (mealId: string) => Promise<{ name: string; ingredients: Ingredient[] } | null>;
 }
-
-// ============================================================================
-// HELPER: Convertir tiempo 24h a AM/PM
-// ============================================================================
-const formatTimeToAMPM = (time24: string): string => {
-  const [h, m] = time24.split(':').map((s) => parseInt(s, 10));
-  const period = h >= 12 ? 'PM' : 'AM';
-  const hour12 = h % 12 || 12;
-  return `${hour12}:${m.toString().padStart(2, '0')} ${period}`;
-};
 
 // ============================================================================
 // COMPONENT
 // ============================================================================
-export const EditMealModal: React.FC<EditMealModalProps> = ({
+export const AddOptionModal: React.FC<AddOptionModalProps> = ({
   visible,
-  meal,
+  mealId,
+  mealName,
+  targetMacros,
   onClose,
   onSave,
   onCalculateMacros,
+  onGenerateWithAI,
 }) => {
-  const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+  const [optionName, setOptionName] = useState('');
+  const [ingredients, setIngredients] = useState<Ingredient[]>([
+    { id: `new-${Date.now()}`, name: '', quantity: '', portion: '' },
+  ]);
   const [isSaving, setIsSaving] = useState(false);
-  const [isCalculating, setIsCalculating] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
   const [axisAI, setAxisAI] = useState(true);
 
-  // Sincronizar ingredientes cuando cambia la comida
-  useEffect(() => {
-    if (meal && meal.options.length > 0) {
-      const currentOption = meal.options[meal.selectedOption] || meal.options[0];
-      setIngredients(currentOption.ingredients.map((ing) => ({ ...ing })));
-      setAxisAI(true); // AXIS AI activo por defecto
+  // Reset state when modal opens
+  React.useEffect(() => {
+    if (visible) {
+      setOptionName('');
+      setIngredients([{ id: `new-${Date.now()}`, name: '', quantity: '', portion: '' }]);
+      setAxisAI(true);
     }
-  }, [meal]);
+  }, [visible]);
 
-  const toggleAxisAI = async () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    const newValue = !axisAI;
-    setAxisAI(newValue);
-
-    // Si se activa AXIS AI, calcular automáticamente
-    if (newValue && onCalculateMacros && ingredients.length > 0) {
-      setIsCalculating(true);
-      try {
-        const calculated = await onCalculateMacros(ingredients);
-        setIngredients(calculated);
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      } catch (error) {
-        console.error('Error calculating macros:', error);
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      } finally {
-        setIsCalculating(false);
-      }
-    }
+  const toggleAxisAI = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setAxisAI(!axisAI);
   };
 
   const addIngredient = () => {
@@ -125,9 +100,29 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
     setIngredients(newIngs);
   };
 
-  const handleSave = async () => {
-    if (!meal) return;
+  // Generar platillo completo con IA
+  const handleGenerateWithAI = async () => {
+    if (!onGenerateWithAI) return;
 
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    setIsGenerating(true);
+
+    try {
+      const generated = await onGenerateWithAI(mealId);
+      if (generated) {
+        setOptionName(generated.name);
+        setIngredients(generated.ingredients);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+    } catch (error) {
+      console.error('Error generating with AI:', error);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleSave = async () => {
     const validIngredients = ingredients.filter((ing) => ing.name.trim());
     if (validIngredients.length === 0) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -142,33 +137,24 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
 
       // Si AXIS AI está activo, calcular macros antes de guardar
       if (axisAI && onCalculateMacros) {
-        setIsCalculating(true);
         try {
           finalIngredients = await onCalculateMacros(validIngredients);
-          setIngredients(finalIngredients);
         } catch (error) {
           console.error('Error calculating macros:', error);
-          // Continuar con los ingredientes originales si falla el cálculo
-        } finally {
-          setIsCalculating(false);
         }
       }
 
-      const currentOption = meal.options[meal.selectedOption] || meal.options[0];
-      await onSave(meal.id, currentOption.id, finalIngredients);
+      const name = optionName.trim() || `Opción ${Date.now().toString().slice(-4)}`;
+      await onSave(mealId, name, finalIngredients);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       onClose();
     } catch (error) {
-      console.error('Error saving meal:', error);
+      console.error('Error saving option:', error);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     } finally {
       setIsSaving(false);
     }
   };
-
-  if (!meal) return null;
-
-  const currentOption = meal.options[meal.selectedOption] || meal.options[0];
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -181,10 +167,15 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
             {/* Header */}
             <View className="flex-row justify-between items-center p-4 border-b border-white/10 bg-[#222222] rounded-t-3xl">
               <View>
-                <Text className="text-white font-bold text-lg">Editar Comida</Text>
-                <Text className="text-zinc-500 text-xs">
-                  {formatTimeToAMPM(meal.time)} • {currentOption?.name || 'Opción Principal'}
-                </Text>
+                <Text className="text-white font-bold text-lg">Añadir Platillo</Text>
+                <Text className="text-zinc-500 text-xs">{mealName}</Text>
+                {targetMacros && (
+                  <View className="flex-row gap-2 mt-1">
+                    <Text className="text-savage-red text-xs">{targetMacros.protein}P</Text>
+                    <Text className="text-yellow-500 text-xs">{targetMacros.carbs}C</Text>
+                    <Text className="text-blue-400 text-xs">{targetMacros.fat}G</Text>
+                  </View>
+                )}
               </View>
               <Pressable onPress={onClose} className="p-2">
                 <X size={20} color="#999" />
@@ -192,27 +183,57 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
             </View>
 
             <ScrollView className="p-4" showsVerticalScrollIndicator={false}>
+              {/* AI Generate Button */}
+              {onGenerateWithAI && (
+                <Pressable
+                  onPress={handleGenerateWithAI}
+                  disabled={isGenerating}
+                  className="bg-gradient-to-r from-purple-900/30 to-blue-900/30 border border-purple-500/30 p-4 rounded-xl mb-4 active:opacity-80"
+                >
+                  <View className="flex-row items-center justify-center gap-3">
+                    {isGenerating ? (
+                      <ActivityIndicator size="small" color="#A855F7" />
+                    ) : (
+                      <Sparkles size={20} color="#A855F7" />
+                    )}
+                    <Text className="text-purple-300 font-bold">
+                      {isGenerating ? 'GENERANDO PLATILLO...' : 'GENERAR CON AXIS AI'}
+                    </Text>
+                  </View>
+                  <Text className="text-purple-400/60 text-xs text-center mt-1">
+                    Crea un platillo alternativo con los mismos macros
+                  </Text>
+                </Pressable>
+              )}
+
+              {/* Option Name */}
+              <Text className="text-zinc-400 text-xs font-bold mb-2 uppercase">
+                Nombre del platillo (opcional)
+              </Text>
+              <TextInput
+                value={optionName}
+                onChangeText={setOptionName}
+                placeholder="Ej: Versión vegetariana, Con arroz..."
+                placeholderTextColor="#666"
+                className="bg-[#222222] border border-white/10 text-white p-3 rounded-xl mb-4"
+              />
+
               {/* AXIS AI Toggle */}
               {onCalculateMacros && (
                 <View className="flex-row items-center justify-between bg-purple-900/10 p-4 rounded-xl border border-purple-500/20 mb-4">
                   <View className="flex-row items-center gap-3">
                     <View className="bg-purple-500 p-2 rounded-lg">
-                      {isCalculating ? (
-                        <ActivityIndicator size="small" color="#FFF" />
-                      ) : (
-                        <Zap size={16} color="#FFF" />
-                      )}
+                      <Zap size={16} color="#FFF" />
                     </View>
                     <View>
                       <Text className="text-purple-300 font-bold">AXIS AI</Text>
                       <Text className="text-purple-400/60 text-xs">
-                        {isCalculating ? 'Calculando gramos...' : 'Cálculo automático de gramos'}
+                        Cálculo automático de gramos
                       </Text>
                     </View>
                   </View>
                   <Pressable
                     onPress={toggleAxisAI}
-                    disabled={isCalculating}
                     className={`w-12 h-6 rounded-full justify-center ${
                       axisAI ? 'bg-purple-500' : 'bg-zinc-700'
                     }`}
@@ -267,15 +288,6 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
                       />
                     </View>
                   )}
-                  {/* Mostrar valores calculados cuando AXIS AI está activo */}
-                  {axisAI && ing.quantity && (
-                    <View className="mt-2 bg-purple-500/10 p-2 rounded-lg border border-purple-500/20">
-                      <Text className="text-purple-300 text-sm">
-                        {ing.quantity}
-                        {ing.portion ? ` • ${ing.portion}` : ''}
-                      </Text>
-                    </View>
-                  )}
                 </View>
               ))}
 
@@ -295,13 +307,15 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
                 onPress={handleSave}
                 disabled={isSaving}
                 className={`w-full py-4 rounded-xl mb-8 ${
-                  isSaving ? 'bg-zinc-600' : 'bg-white active:bg-zinc-200'
+                  isSaving ? 'bg-zinc-600' : 'bg-savage-red active:bg-red-700'
                 }`}
               >
                 {isSaving ? (
-                  <ActivityIndicator size="small" color="#000" />
+                  <ActivityIndicator size="small" color="#FFF" />
                 ) : (
-                  <Text className="text-black font-bold text-center text-lg">GUARDAR CAMBIOS</Text>
+                  <Text className="text-white font-bold text-center text-lg">
+                    AÑADIR PLATILLO
+                  </Text>
                 )}
               </Pressable>
             </ScrollView>
@@ -312,4 +326,4 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
   );
 };
 
-export default EditMealModal;
+export default AddOptionModal;

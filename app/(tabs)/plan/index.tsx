@@ -16,9 +16,10 @@ import { AddMealModal } from '../../../components/plan/AddMealModal';
 import { EditMealModal } from '../../../components/plan/EditMealModal';
 import { TimePickerModal } from '../../../components/plan/TimePickerModal';
 import { StackManagerModal } from '../../../components/plan/StackManagerModal';
+import { AddOptionModal } from '../../../components/plan/AddOptionModal';
 import { supabase } from '../../../lib/supabase';
 import { useAxis } from '../../../context/AxisContext';
-import { calculateMacrosWithAI } from '../../../services/axis/nutrition';
+import { calculateMacrosWithAI, calculateUserDailyMacros, suggestMealAlternatives } from '../../../services/axis/nutrition';
 
 // ============================================================================
 // TYPES
@@ -41,6 +42,12 @@ interface Meal {
   time: string;
   options: MealOption[];
   selectedOption: number;
+  targetMacros?: {
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+  };
 }
 
 interface StackItem {
@@ -115,6 +122,10 @@ export default function PlanScreen() {
   const [timePickerMealId, setTimePickerMealId] = useState<string | null>(null);
   const [timePickerCurrentTime, setTimePickerCurrentTime] = useState('12:00');
   const [showStackManager, setShowStackManager] = useState(false);
+  const [showAddOption, setShowAddOption] = useState(false);
+  const [addOptionMealId, setAddOptionMealId] = useState<string | null>(null);
+  const [addOptionMealName, setAddOptionMealName] = useState('');
+  const [mealMacros, setMealMacros] = useState<{ calories: number; protein: number; carbs: number; fat: number } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -595,6 +606,119 @@ export default function PlanScreen() {
     }
   };
 
+  // Abrir modal para añadir opción/platillo a una comida
+  const handleAddOption = async (mealId: string) => {
+    const meal = meals.find((m) => m.id === mealId);
+    if (!meal) return;
+
+    const mealIndex = meals.findIndex((m) => m.id === mealId);
+    const mealName = getMealName(mealIndex, meals.length);
+
+    // Calcular macros por comida si no existen
+    let macros = meal.targetMacros;
+    if (!macros) {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data: profile } = await supabase
+            .from('user_profiles')
+            .select('weight, height, goal')
+            .eq('user_id', user.id)
+            .single();
+
+          if (profile) {
+            const dailyMacros = await calculateUserDailyMacros({
+              weight: profile.weight || '75 KG',
+              height: profile.height || '1.75 M',
+              goal: profile.goal || 'MANTENER',
+              mealCount: meals.length || 3,
+            });
+            macros = dailyMacros.perMeal;
+          }
+        }
+      } catch (error) {
+        console.error('Error calculating macros:', error);
+      }
+    }
+
+    setAddOptionMealId(mealId);
+    setAddOptionMealName(mealName);
+    setMealMacros(macros || null);
+    setShowAddOption(true);
+  };
+
+  // Guardar nueva opción/platillo
+  const handleSaveOption = async (
+    mealId: string,
+    optionName: string,
+    ingredients: Ingredient[]
+  ) => {
+    try {
+      // Obtener el índice de la nueva opción
+      const meal = meals.find((m) => m.id === mealId);
+      const newOptionIndex = meal ? meal.options.length : 0;
+
+      // Crear la nueva opción
+      const { data: optionData, error: optionError } = await supabase
+        .from('meal_options')
+        .insert({
+          meal_id: mealId,
+          name: optionName,
+          option_index: newOptionIndex,
+        })
+        .select()
+        .single();
+
+      if (optionError || !optionData) throw optionError;
+
+      // Insertar ingredientes
+      const ingredientsToInsert = ingredients.map((ing, idx) => ({
+        option_id: optionData.id,
+        name: ing.name,
+        quantity: ing.quantity || '~100g',
+        portion: ing.portion || '',
+        sort_order: idx,
+      }));
+
+      await supabase.from('meal_ingredients').insert(ingredientsToInsert);
+
+      // Actualizar la comida para seleccionar la nueva opción
+      await supabase
+        .from('meals')
+        .update({ selected_option: newOptionIndex })
+        .eq('id', mealId);
+
+      // Refrescar datos
+      fetchData();
+    } catch (error) {
+      console.error('Error saving option:', error);
+      Alert.alert('Error', 'No se pudo guardar el platillo');
+      throw error;
+    }
+  };
+
+  // Generar platillo alternativo con IA
+  const handleGenerateOptionWithAI = async (
+    mealId: string
+  ): Promise<{ name: string; ingredients: Ingredient[] } | null> => {
+    const meal = meals.find((m) => m.id === mealId);
+    if (!meal || meal.options.length === 0) return null;
+
+    const currentOption = meal.options[meal.selectedOption] || meal.options[0];
+    if (!currentOption.ingredients || currentOption.ingredients.length === 0) return null;
+
+    try {
+      const alternatives = await suggestMealAlternatives(currentOption.ingredients);
+      if (alternatives.length > 0) {
+        return alternatives[0];
+      }
+      return null;
+    } catch (error) {
+      console.error('Error generating with AI:', error);
+      return null;
+    }
+  };
+
   const handleMoveWorkout = async (direction: 'up' | 'down') => {
     const newIndex = direction === 'up' ? Math.max(0, workoutPosIndex - 1) : workoutPosIndex + 1;
 
@@ -743,6 +867,7 @@ export default function PlanScreen() {
                     onTimeChange={handleTimeChange}
                     onDelete={handleDeleteMeal}
                     onEdit={handleEditMeal}
+                    onAddOption={handleAddOption}
                   />
                 );
               }
@@ -821,6 +946,22 @@ export default function PlanScreen() {
         items={stackItems}
         onAddItem={handleAddStackItem}
         onRemoveItem={handleRemoveStackItem}
+      />
+
+      <AddOptionModal
+        visible={showAddOption}
+        mealId={addOptionMealId || ''}
+        mealName={addOptionMealName}
+        targetMacros={mealMacros || undefined}
+        onClose={() => {
+          setShowAddOption(false);
+          setAddOptionMealId(null);
+          setAddOptionMealName('');
+          setMealMacros(null);
+        }}
+        onSave={handleSaveOption}
+        onCalculateMacros={handleCalculateMacros}
+        onGenerateWithAI={handleGenerateOptionWithAI}
       />
     </View>
   );

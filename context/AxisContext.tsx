@@ -996,10 +996,37 @@ IMPORTANTE: Puedes ejecutar múltiples herramientas si la solicitud lo requiere.
 // ============================================================================
 // HOOK
 // ============================================================================
+// Valores por defecto cuando no hay AxisProvider (evita crashes en hot reload)
+const defaultAxisState: AxisContextState = {
+  isProcessing: false,
+  lastAction: null,
+  screenContext: defaultScreenContext,
+  activeAsset: null,
+  sportMode: null,
+  userProfile: null,
+  availableExercises: [],
+  aliases: [],
+  executeCommand: async () => [],
+  executeTool: async () => ({ success: false, message: 'AxisProvider no disponible' }),
+  executeToolChain: async () => [],
+  setScreenContext: () => {},
+  setActiveAsset: async () => {},
+  setSportMode: () => {},
+  addAlias: () => {},
+  removeAlias: () => {},
+  executeAlias: async () => null,
+  clearConversation: async () => {},
+  refreshTrigger: 0,
+  getToolDefinitions: () => [],
+  getSystemPrompt: () => '',
+};
+
 export const useAxis = (): AxisContextState => {
   const context = useContext(AxisContext);
   if (!context) {
-    throw new Error('useAxis debe usarse dentro de un AxisProvider');
+    // Retornar valores por defecto en lugar de crash (hot reload safety)
+    console.warn('useAxis: AxisProvider no disponible, usando valores por defecto');
+    return defaultAxisState;
   }
   return context;
 };
