@@ -266,6 +266,11 @@ export default function GymScreen() {
   const [videoMuted, setVideoMuted] = useState(true);
   const [isPickingFromGallery, setIsPickingFromGallery] = useState(false);
 
+  // Day Name Edit Modal State
+  const [dayNameModalVisible, setDayNameModalVisible] = useState(false);
+  const [editingDayIndex, setEditingDayIndex] = useState<number | null>(null);
+  const [editingDayName, setEditingDayName] = useState('');
+
   // Training Program State
   const [trainingProgram, setTrainingProgram] = useState<TrainingProgram>({
     frequency: 3,
@@ -278,6 +283,10 @@ export default function GymScreen() {
     currentDayIndex: 0,
   });
   const [selectedDayIndex, setSelectedDayIndex] = useState(0);
+
+  // Estado para editar nombre de rutina
+  const [editingRoutineName, setEditingRoutineName] = useState(false);
+  const [tempRoutineName, setTempRoutineName] = useState('');
 
   // Video playback control - trackea el ejercicio actualmente visible
   const [activeExerciseIndex, setActiveExerciseIndex] = useState(0);
@@ -413,9 +422,21 @@ export default function GymScreen() {
     try {
       const { data: profile } = await supabase
         .from('profiles')
-        .select('training_last_access, training_current_day')
+        .select('training_last_access, training_current_day, training_routine_names')
         .eq('id', user.id)
         .single();
+
+      // Cargar nombres de rutinas desde la base de datos
+      const routineNames = profile?.training_routine_names || {};
+      if (Object.keys(routineNames).length > 0) {
+        setTrainingProgram((prev) => ({
+          ...prev,
+          days: prev.days.map((day, idx) => ({
+            ...day,
+            muscleGroups: routineNames[String(idx)] || day.muscleGroups,
+          })),
+        }));
+      }
 
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -464,11 +485,102 @@ export default function GymScreen() {
     }
   };
 
+  // Guardar nombre de rutina en la base de datos
+  const saveRoutineName = async (dayIndex: number, newName: string) => {
+    if (!user || !newName.trim()) return;
+
+    try {
+      // Obtener nombres actuales
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('training_routine_names')
+        .eq('id', user.id)
+        .single();
+
+      const currentNames = profile?.training_routine_names || {};
+      const updatedNames = {
+        ...currentNames,
+        [String(dayIndex)]: newName.trim().toUpperCase(),
+      };
+
+      // Guardar en Supabase
+      await supabase
+        .from('profiles')
+        .update({ training_routine_names: updatedNames })
+        .eq('id', user.id);
+
+      // Actualizar estado local
+      setTrainingProgram((prev) => ({
+        ...prev,
+        days: prev.days.map((day, idx) =>
+          idx === dayIndex ? { ...day, muscleGroups: newName.trim().toUpperCase() } : day
+        ),
+      }));
+
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (error) {
+      console.error('Error saving routine name:', error);
+    }
+  };
+
   useEffect(() => {
     if (isFocused && user) {
       updateTrainingDay();
     }
   }, [isFocused, user]);
+
+  // ============================================================================
+  // SAVE DAY NAME TO SUPABASE
+  // ============================================================================
+  const saveDayName = async (dayIndex: number, newName: string) => {
+    if (!user || !newName.trim()) return;
+
+    try {
+      // Obtener nombres actuales
+      const { data: profile, error: fetchError } = await supabase
+        .from('profiles')
+        .select('training_routine_names')
+        .eq('id', user.id)
+        .single();
+
+      if (fetchError) {
+        console.error('❌ Error obteniendo nombres actuales:', fetchError);
+      }
+
+      const currentNames = profile?.training_routine_names || {};
+      const updatedNames = {
+        ...currentNames,
+        [String(dayIndex)]: newName.trim().toUpperCase(),
+      };
+
+      console.warn('💾 GYM: Guardando nombres de rutinas:', updatedNames);
+
+      // Guardar en Supabase
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ training_routine_names: updatedNames })
+        .eq('id', user.id);
+
+      if (updateError) {
+        console.error('❌ Error guardando nombres:', updateError);
+        return;
+      }
+
+      console.warn('✅ GYM: Nombres guardados correctamente');
+
+      // Actualizar estado local
+      setTrainingProgram((prev) => ({
+        ...prev,
+        days: prev.days.map((day, idx) =>
+          idx === dayIndex ? { ...day, muscleGroups: newName.trim().toUpperCase() } : day
+        ),
+      }));
+
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (error) {
+      console.error('Error saving day name:', error);
+    }
+  };
 
   // ============================================================================
   // FETCH EXERCISES FROM SUPABASE
@@ -1932,6 +2044,13 @@ export default function GymScreen() {
                     setSelectedDayIndex(index);
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                   }}
+                  onLongPress={() => {
+                    // Abrir modal para editar nombre del día
+                    setEditingDayIndex(index);
+                    setEditingDayName(day.muscleGroups);
+                    setDayNameModalVisible(true);
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                  }}
                   className={`mr-3 px-4 py-3 rounded-lg border-2 ${
                     isActive ? 'bg-savage-red border-savage-red' : 'bg-zinc-900/50 border-zinc-800'
                   }`}
@@ -1949,11 +2068,15 @@ export default function GymScreen() {
                     >
                       {day.muscleGroups}
                     </Text>
+                    <Edit3 size={12} color={isActive ? '#FFF' : '#71717A'} />
                   </View>
                 </TouchableOpacity>
               );
             })}
           </ScrollView>
+          <Text className="text-zinc-600 text-xs mt-2">
+            Mantén presionado un día para renombrarlo
+          </Text>
         </View>
 
         {/* EXERCISES LIST */}
@@ -2098,6 +2221,56 @@ export default function GymScreen() {
         {/* CATALOG MODAL */}
         {renderCatalogModal()}
         {renderSeriesConfigModal()}
+
+        {/* DAY NAME EDIT MODAL */}
+        <Modal
+          visible={dayNameModalVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setDayNameModalVisible(false)}
+        >
+          <Pressable
+            className="flex-1 bg-black/80 justify-center items-center p-6"
+            onPress={() => setDayNameModalVisible(false)}
+          >
+            <Pressable
+              className="bg-zinc-900 rounded-2xl p-6 w-full border border-zinc-800"
+              onPress={(e) => e.stopPropagation()}
+            >
+              <Text className="text-white text-xl font-bold mb-4">
+                RENOMBRAR DÍA {editingDayIndex !== null ? editingDayIndex + 1 : ''}
+              </Text>
+              <TextInput
+                value={editingDayName}
+                onChangeText={setEditingDayName}
+                placeholder="Ej: PECHO + ESPALDA"
+                placeholderTextColor="#71717A"
+                autoCapitalize="characters"
+                className="bg-black border border-zinc-700 rounded-lg px-4 py-3 text-white text-lg font-bold mb-4"
+                autoFocus
+              />
+              <View className="flex-row gap-3">
+                <TouchableOpacity
+                  onPress={() => setDayNameModalVisible(false)}
+                  className="flex-1 py-3 rounded-lg border border-zinc-700"
+                >
+                  <Text className="text-zinc-400 text-center font-bold">CANCELAR</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => {
+                    if (editingDayIndex !== null) {
+                      saveDayName(editingDayIndex, editingDayName);
+                    }
+                    setDayNameModalVisible(false);
+                  }}
+                  className="flex-1 py-3 rounded-lg bg-savage-red"
+                >
+                  <Text className="text-white text-center font-bold">GUARDAR</Text>
+                </TouchableOpacity>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
       </View>
     );
   }

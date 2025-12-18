@@ -1,6 +1,6 @@
 // ============================================================================
 // EDIT MEAL MODAL - Modal para editar comidas existentes
-// Con integración AXIS AI para cálculo automático de macros
+// Con integración AXIS AI y análisis inteligente de ingredientes
 // ============================================================================
 
 import React, { useState, useEffect } from 'react';
@@ -16,7 +16,11 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
-import { X, Plus, Trash2, Zap } from 'lucide-react-native';
+import { X, Plus, Trash2, Zap, AlertTriangle, CheckCircle } from 'lucide-react-native';
+import {
+  analyzeIngredientsSmart,
+  IngredientAnalysis,
+} from '../../services/axis/ingredientAnalyzer';
 
 // ============================================================================
 // TYPES
@@ -39,6 +43,12 @@ interface Meal {
   time: string;
   options: MealOption[];
   selectedOption: number;
+  targetMacros?: {
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+  };
 }
 
 interface EditMealModalProps {
@@ -46,11 +56,14 @@ interface EditMealModalProps {
   meal: Meal | null;
   onClose: () => void;
   onSave: (mealId: string, optionId: string, ingredients: Ingredient[]) => Promise<void>;
-  onCalculateMacros?: (ingredients: Ingredient[]) => Promise<Ingredient[]>;
+  onCalculateMacros?: (
+    ingredients: Ingredient[],
+    targetMacros?: { calories: number; protein: number; carbs: number; fat: number }
+  ) => Promise<Ingredient[]>;
 }
 
 // ============================================================================
-// HELPER: Convertir tiempo 24h a AM/PM
+// HELPER
 // ============================================================================
 const formatTimeToAMPM = (time24: string): string => {
   const [h, m] = time24.split(':').map((s) => parseInt(s, 10));
@@ -73,26 +86,58 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [isCalculating, setIsCalculating] = useState(false);
   const [axisAI, setAxisAI] = useState(true);
+  const [analysis, setAnalysis] = useState<IngredientAnalysis | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   // Sincronizar ingredientes cuando cambia la comida
   useEffect(() => {
     if (meal && meal.options.length > 0) {
       const currentOption = meal.options[meal.selectedOption] || meal.options[0];
       setIngredients(currentOption.ingredients.map((ing) => ({ ...ing })));
-      setAxisAI(true); // AXIS AI activo por defecto
+      setAxisAI(true);
+      setAnalysis(null);
     }
   }, [meal]);
+
+  // Analizar ingredientes cuando cambian - solo si AXIS AI activo
+  useEffect(() => {
+    if (!axisAI) {
+      setAnalysis(null);
+      return;
+    }
+
+    const validIngredients = ingredients.filter((ing) => ing.name.trim().length >= 3);
+    if (validIngredients.length === 0) {
+      setAnalysis(null);
+      return;
+    }
+
+    const timeoutId = setTimeout(async () => {
+      setIsAnalyzing(true);
+      try {
+        const result = await analyzeIngredientsSmart(validIngredients, {
+          targetMacros: meal?.targetMacros,
+        });
+        setAnalysis(result);
+      } catch (error) {
+        console.error('Error analyzing:', error);
+      } finally {
+        setIsAnalyzing(false);
+      }
+    }, 600);
+
+    return () => clearTimeout(timeoutId);
+  }, [ingredients, axisAI, meal?.targetMacros]);
 
   const toggleAxisAI = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const newValue = !axisAI;
     setAxisAI(newValue);
 
-    // Si se activa AXIS AI, calcular automáticamente
     if (newValue && onCalculateMacros && ingredients.length > 0) {
       setIsCalculating(true);
       try {
-        const calculated = await onCalculateMacros(ingredients);
+        const calculated = await onCalculateMacros(ingredients, meal?.targetMacros);
         setIngredients(calculated);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       } catch (error) {
@@ -140,15 +185,13 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
     try {
       let finalIngredients = validIngredients;
 
-      // Si AXIS AI está activo, calcular macros antes de guardar
       if (axisAI && onCalculateMacros) {
         setIsCalculating(true);
         try {
-          finalIngredients = await onCalculateMacros(validIngredients);
+          finalIngredients = await onCalculateMacros(validIngredients, meal?.targetMacros);
           setIngredients(finalIngredients);
         } catch (error) {
           console.error('Error calculating macros:', error);
-          // Continuar con los ingredientes originales si falla el cálculo
         } finally {
           setIsCalculating(false);
         }
@@ -185,6 +228,22 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
                 <Text className="text-zinc-500 text-xs">
                   {formatTimeToAMPM(meal.time)} • {currentOption?.name || 'Opción Principal'}
                 </Text>
+                {meal.targetMacros && (
+                  <View className="flex-row gap-2 mt-1">
+                    <Text className="text-savage-red text-xs font-mono">
+                      {meal.targetMacros.protein}P
+                    </Text>
+                    <Text className="text-yellow-500 text-xs font-mono">
+                      {meal.targetMacros.carbs}C
+                    </Text>
+                    <Text className="text-blue-400 text-xs font-mono">
+                      {meal.targetMacros.fat}G
+                    </Text>
+                    <Text className="text-zinc-500 text-xs font-mono">
+                      {meal.targetMacros.calories} kcal
+                    </Text>
+                  </View>
+                )}
               </View>
               <Pressable onPress={onClose} className="p-2">
                 <X size={20} color="#999" />
@@ -226,6 +285,97 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
                 </View>
               )}
 
+              {/* Analysis Alert - Solo visible si AXIS AI está activo */}
+              {axisAI && analysis && (
+                <View
+                  className={`p-4 rounded-xl mb-4 border ${
+                    analysis.isBalanced
+                      ? 'bg-green-900/20 border-green-500/30'
+                      : analysis.hasUnhealthyOnly
+                        ? 'bg-red-900/20 border-red-500/30'
+                        : 'bg-yellow-900/20 border-yellow-500/30'
+                  }`}
+                >
+                  <View className="flex-row items-center gap-2 mb-2">
+                    {isAnalyzing ? (
+                      <ActivityIndicator size="small" color="#A855F7" />
+                    ) : analysis.isBalanced ? (
+                      <CheckCircle size={18} color="#22C55E" />
+                    ) : (
+                      <AlertTriangle
+                        size={18}
+                        color={analysis.hasUnhealthyOnly ? '#EF4444' : '#EAB308'}
+                      />
+                    )}
+                    <Text
+                      className={`font-bold ${
+                        analysis.isBalanced
+                          ? 'text-green-400'
+                          : analysis.hasUnhealthyOnly
+                            ? 'text-red-400'
+                            : 'text-yellow-400'
+                      }`}
+                    >
+                      {isAnalyzing
+                        ? 'Analizando...'
+                        : analysis.isBalanced
+                          ? '✓ Comida balanceada'
+                          : analysis.hasUnhealthyOnly
+                            ? '✗ Revisar ingredientes'
+                            : '! Falta balance'}
+                    </Text>
+                  </View>
+
+                  {/* Target macros message */}
+                  {analysis.macroFitMessage && (
+                    <Text className="text-purple-400 text-xs font-mono mb-2">
+                      🎯 {analysis.macroFitMessage}
+                    </Text>
+                  )}
+
+                  {analysis.warnings.map((warning, idx) => (
+                    <Text key={`w-${idx}`} className="text-red-400/80 text-xs mb-1">
+                      {warning}
+                    </Text>
+                  ))}
+
+                  {analysis.suggestions.map((suggestion, idx) => (
+                    <Text key={`s-${idx}`} className="text-yellow-400/80 text-xs mb-1">
+                      → {suggestion}
+                    </Text>
+                  ))}
+
+                  {!analysis.isBalanced && (
+                    <View className="flex-row gap-3 mt-2 pt-2 border-t border-white/10">
+                      <View className="flex-row items-center gap-1">
+                        <View
+                          className={`w-2 h-2 rounded-full ${
+                            analysis.hasProtein ? 'bg-green-500' : 'bg-red-500'
+                          }`}
+                        />
+                        <Text className="text-zinc-400 text-xs">Proteína</Text>
+                      </View>
+                      <View className="flex-row items-center gap-1">
+                        <View
+                          className={`w-2 h-2 rounded-full ${
+                            analysis.hasCarbs ? 'bg-green-500' : 'bg-yellow-500'
+                          }`}
+                        />
+                        <Text className="text-zinc-400 text-xs">Carbos</Text>
+                      </View>
+                      <View className="flex-row items-center gap-1">
+                        <View
+                          className={`w-2 h-2 rounded-full ${
+                            analysis.hasFat ? 'bg-green-500' : 'bg-zinc-500'
+                          }`}
+                        />
+                        <Text className="text-zinc-400 text-xs">Grasas</Text>
+                      </View>
+                    </View>
+                  )}
+                </View>
+              )}
+
               {/* Ingredients */}
               <Text className="text-zinc-400 text-xs font-bold mb-2 uppercase">Ingredientes</Text>
               {ingredients.map((ing, i) => (
@@ -248,7 +398,6 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
                     placeholderTextColor="#666"
                     className="bg-transparent border-b border-zinc-700 text-white py-2 mb-2"
                   />
-                  {/* Solo mostrar campos manuales cuando AXIS AI está desactivado */}
                   {!axisAI && (
                     <View className="flex-row gap-2 mt-2">
                       <TextInput
@@ -267,7 +416,6 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
                       />
                     </View>
                   )}
-                  {/* Mostrar valores calculados cuando AXIS AI está activo */}
                   {axisAI && ing.quantity && (
                     <View className="mt-2 bg-purple-500/10 p-2 rounded-lg border border-purple-500/20">
                       <Text className="text-purple-300 text-sm">
@@ -279,7 +427,6 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
                 </View>
               ))}
 
-              {/* Add Ingredient Button */}
               <Pressable
                 onPress={addIngredient}
                 className="w-full py-3 border border-dashed border-zinc-600 rounded-xl mb-6 active:border-white active:bg-white/5"
@@ -290,7 +437,6 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
                 </View>
               </Pressable>
 
-              {/* Save Button */}
               <Pressable
                 onPress={handleSave}
                 disabled={isSaving}

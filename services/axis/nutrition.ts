@@ -362,7 +362,524 @@ export async function calculateUserDailyMacros(profile: UserMacroProfile): Promi
 // CALCULATE MACROS WITH AI + USER CONTEXT
 // Versión mejorada que usa los macros del usuario para calcular porciones
 // ============================================================================
+
+// Base de datos nutricional local (por 100g) con info de porciones
+const NUTRITION_DB: Record<
+  string,
+  {
+    protein: number;
+    carbs: number;
+    fat: number;
+    calories: number;
+    portionSize: number; // gramos por porción típica
+    portionName: string; // nombre de la porción
+  }
+> = {
+  // Proteínas
+  pechuga: {
+    protein: 31,
+    carbs: 0,
+    fat: 3.6,
+    calories: 165,
+    portionSize: 150,
+    portionName: 'pechuga',
+  },
+  pollo: { protein: 27, carbs: 0, fat: 14, calories: 239, portionSize: 150, portionName: 'pieza' },
+  carne: { protein: 26, carbs: 0, fat: 15, calories: 250, portionSize: 150, portionName: 'bistec' },
+  res: { protein: 26, carbs: 0, fat: 15, calories: 250, portionSize: 150, portionName: 'bistec' },
+  bistec: {
+    protein: 26,
+    carbs: 0,
+    fat: 15,
+    calories: 250,
+    portionSize: 150,
+    portionName: 'bistec',
+  },
+  lomo: { protein: 26, carbs: 0, fat: 8, calories: 180, portionSize: 150, portionName: 'filete' },
+  cerdo: {
+    protein: 25,
+    carbs: 0,
+    fat: 20,
+    calories: 280,
+    portionSize: 150,
+    portionName: 'chuleta',
+  },
+  pescado: {
+    protein: 22,
+    carbs: 0,
+    fat: 5,
+    calories: 130,
+    portionSize: 150,
+    portionName: 'filete',
+  },
+  salmon: {
+    protein: 20,
+    carbs: 0,
+    fat: 13,
+    calories: 208,
+    portionSize: 150,
+    portionName: 'filete',
+  },
+  atun: { protein: 30, carbs: 0, fat: 1, calories: 130, portionSize: 100, portionName: 'lata' },
+  tilapia: {
+    protein: 26,
+    carbs: 0,
+    fat: 3,
+    calories: 128,
+    portionSize: 150,
+    portionName: 'filete',
+  },
+  pavo: {
+    protein: 29,
+    carbs: 0,
+    fat: 1,
+    calories: 135,
+    portionSize: 150,
+    portionName: 'porción',
+  },
+  pavita: {
+    protein: 29,
+    carbs: 0,
+    fat: 1,
+    calories: 135,
+    portionSize: 150,
+    portionName: 'porción',
+  },
+  molida: {
+    protein: 26,
+    carbs: 0,
+    fat: 15,
+    calories: 250,
+    portionSize: 150,
+    portionName: 'porción',
+  },
+  cordero: {
+    protein: 25,
+    carbs: 0,
+    fat: 21,
+    calories: 294,
+    portionSize: 150,
+    portionName: 'porción',
+  },
+  camarones: {
+    protein: 24,
+    carbs: 0,
+    fat: 0.3,
+    calories: 99,
+    portionSize: 100,
+    portionName: 'porción',
+  },
+  langostinos: {
+    protein: 24,
+    carbs: 0,
+    fat: 0.3,
+    calories: 99,
+    portionSize: 100,
+    portionName: 'porción',
+  },
+  huevo: { protein: 13, carbs: 1, fat: 11, calories: 155, portionSize: 50, portionName: 'huevo' },
+  huevos: { protein: 13, carbs: 1, fat: 11, calories: 155, portionSize: 50, portionName: 'huevo' },
+  clara: { protein: 11, carbs: 1, fat: 0, calories: 52, portionSize: 33, portionName: 'clara' },
+  claras: { protein: 11, carbs: 1, fat: 0, calories: 52, portionSize: 33, portionName: 'clara' },
+  // Carbohidratos
+  arroz: {
+    protein: 2.7,
+    carbs: 28,
+    fat: 0.3,
+    calories: 130,
+    portionSize: 150,
+    portionName: 'taza',
+  },
+  papa: {
+    protein: 2,
+    carbs: 17,
+    fat: 0.1,
+    calories: 77,
+    portionSize: 150,
+    portionName: 'papa mediana',
+  },
+  papas: {
+    protein: 2,
+    carbs: 17,
+    fat: 0.1,
+    calories: 77,
+    portionSize: 150,
+    portionName: 'papa mediana',
+  },
+  camote: {
+    protein: 1.6,
+    carbs: 20,
+    fat: 0.1,
+    calories: 86,
+    portionSize: 150,
+    portionName: 'camote mediano',
+  },
+  batata: {
+    protein: 1.6,
+    carbs: 20,
+    fat: 0.1,
+    calories: 86,
+    portionSize: 150,
+    portionName: 'batata mediana',
+  },
+  yuca: {
+    protein: 1.4,
+    carbs: 38,
+    fat: 0.3,
+    calories: 160,
+    portionSize: 150,
+    portionName: 'trozo',
+  },
+  avena: { protein: 13, carbs: 66, fat: 7, calories: 389, portionSize: 40, portionName: 'taza' },
+  quinoa: {
+    protein: 4.4,
+    carbs: 21,
+    fat: 1.9,
+    calories: 120,
+    portionSize: 150,
+    portionName: 'taza',
+  },
+  pasta: { protein: 5, carbs: 25, fat: 1, calories: 131, portionSize: 150, portionName: 'plato' },
+  fideos: { protein: 5, carbs: 25, fat: 1, calories: 131, portionSize: 150, portionName: 'plato' },
+  tallarines: {
+    protein: 5,
+    carbs: 25,
+    fat: 1,
+    calories: 131,
+    portionSize: 150,
+    portionName: 'plato',
+  },
+  espagueti: {
+    protein: 5,
+    carbs: 25,
+    fat: 1,
+    calories: 131,
+    portionSize: 150,
+    portionName: 'plato',
+  },
+  macarrones: {
+    protein: 5,
+    carbs: 25,
+    fat: 1,
+    calories: 131,
+    portionSize: 150,
+    portionName: 'plato',
+  },
+  cuscus: {
+    protein: 3.8,
+    carbs: 23,
+    fat: 0.2,
+    calories: 112,
+    portionSize: 150,
+    portionName: 'taza',
+  },
+  platano: {
+    protein: 1.3,
+    carbs: 23,
+    fat: 0.4,
+    calories: 89,
+    portionSize: 120,
+    portionName: 'plátano',
+  },
+  choclo: {
+    protein: 3.2,
+    carbs: 19,
+    fat: 1.2,
+    calories: 86,
+    portionSize: 150,
+    portionName: 'mazorca',
+  },
+  pan: { protein: 9, carbs: 49, fat: 3, calories: 265, portionSize: 30, portionName: 'rebanada' },
+  // Grasas
+  palta: { protein: 2, carbs: 9, fat: 15, calories: 160, portionSize: 80, portionName: 'palta' },
+  aguacate: {
+    protein: 2,
+    carbs: 9,
+    fat: 15,
+    calories: 160,
+    portionSize: 80,
+    portionName: 'aguacate',
+  },
+  aceite: {
+    protein: 0,
+    carbs: 0,
+    fat: 100,
+    calories: 884,
+    portionSize: 14,
+    portionName: 'cucharada',
+  },
+  mantequilla: {
+    protein: 0.9,
+    carbs: 0.1,
+    fat: 81,
+    calories: 717,
+    portionSize: 14,
+    portionName: 'cucharada',
+  },
+  almendras: {
+    protein: 21,
+    carbs: 22,
+    fat: 49,
+    calories: 579,
+    portionSize: 30,
+    portionName: 'puñado',
+  },
+  mani: { protein: 26, carbs: 16, fat: 49, calories: 567, portionSize: 30, portionName: 'puñado' },
+  nueces: {
+    protein: 15,
+    carbs: 14,
+    fat: 65,
+    calories: 654,
+    portionSize: 30,
+    portionName: 'puñado',
+  },
+  // Vegetales
+  brocoli: {
+    protein: 2.8,
+    carbs: 7,
+    fat: 0.4,
+    calories: 34,
+    portionSize: 100,
+    portionName: 'taza',
+  },
+  espinaca: {
+    protein: 2.9,
+    carbs: 3.6,
+    fat: 0.4,
+    calories: 23,
+    portionSize: 100,
+    portionName: 'taza',
+  },
+  tomate: {
+    protein: 0.9,
+    carbs: 3.9,
+    fat: 0.2,
+    calories: 18,
+    portionSize: 120,
+    portionName: 'tomate',
+  },
+  lechuga: {
+    protein: 1.4,
+    carbs: 2.9,
+    fat: 0.2,
+    calories: 15,
+    portionSize: 100,
+    portionName: 'taza',
+  },
+};
+
+// Buscar nutrientes de un ingrediente en la base de datos local
+function findNutritionData(ingredientName: string): {
+  protein: number;
+  carbs: number;
+  fat: number;
+  calories: number;
+  portionSize: number;
+  portionName: string;
+} | null {
+  const nameLower = ingredientName.toLowerCase().trim();
+  for (const [key, value] of Object.entries(NUTRITION_DB)) {
+    if (nameLower.includes(key) || key.includes(nameLower)) {
+      return value;
+    }
+  }
+  return null;
+}
+
+// Calcular gramos necesarios para alcanzar un macro específico
+function calculateGramsForMacro(targetMacro: number, macroPer100g: number): number {
+  if (macroPer100g <= 0) return 0;
+  return Math.round((targetMacro / macroPer100g) * 100);
+}
+
+// Calcular porción descriptiva basada en gramos y tipo de alimento
+function calculatePortionDescription(
+  grams: number,
+  portionSize: number,
+  portionName: string
+): string {
+  const portions = grams / portionSize;
+
+  if (portions <= 0.3) {
+    return `~¼ ${portionName}`;
+  } else if (portions <= 0.6) {
+    return `~½ ${portionName}`;
+  } else if (portions <= 0.85) {
+    return `~¾ ${portionName}`;
+  } else if (portions <= 1.15) {
+    return `~1 ${portionName}`;
+  } else if (portions <= 1.35) {
+    return `~1¼ ${portionName}s`;
+  } else if (portions <= 1.6) {
+    return `~1½ ${portionName}s`;
+  } else if (portions <= 1.85) {
+    return `~1¾ ${portionName}s`;
+  } else if (portions <= 2.15) {
+    return `~2 ${portionName}s`;
+  } else if (portions <= 2.6) {
+    return `~2½ ${portionName}s`;
+  } else if (portions <= 3.15) {
+    return `~3 ${portionName}s`;
+  } else {
+    return `~${Math.round(portions)} ${portionName}s`;
+  }
+}
+
 export async function calculateMealWithUserMacros(
+  ingredients: Ingredient[],
+  mealMacros: { calories: number; protein: number; carbs: number; fat: number }
+): Promise<CalculatedIngredient[]> {
+  console.warn(
+    `🧮 Calculando para objetivo: ${mealMacros.protein}P ${mealMacros.carbs}C ${mealMacros.fat}G`
+  );
+
+  // Primero intentar cálculo local
+  const localResults = calculateLocally(ingredients, mealMacros);
+
+  // Si todos los ingredientes están en la base de datos, usar cálculo local
+  if (localResults.allFound) {
+    console.warn('✅ Cálculo local exitoso');
+    return localResults.ingredients;
+  }
+
+  // Si hay ingredientes desconocidos, usar IA
+  console.warn('🤖 Usando IA para ingredientes desconocidos');
+  return calculateWithAI(ingredients, mealMacros);
+}
+
+// Cálculo local matemático preciso
+function calculateLocally(
+  ingredients: Ingredient[],
+  mealMacros: { calories: number; protein: number; carbs: number; fat: number }
+): { allFound: boolean; ingredients: CalculatedIngredient[] } {
+  const results: CalculatedIngredient[] = [];
+  let allFound = true;
+
+  // Clasificar ingredientes por tipo de macro principal
+  const proteinSources: { ing: Ingredient; data: (typeof NUTRITION_DB)[string] }[] = [];
+  const carbSources: { ing: Ingredient; data: (typeof NUTRITION_DB)[string] }[] = [];
+  const fatSources: { ing: Ingredient; data: (typeof NUTRITION_DB)[string] }[] = [];
+
+  for (const ing of ingredients) {
+    const data = findNutritionData(ing.name);
+    if (!data) {
+      allFound = false;
+      results.push({ ...ing, quantity: ing.quantity || '~100g' });
+      continue;
+    }
+
+    // Clasificar por macro dominante
+    if (data.protein > data.carbs && data.protein > data.fat) {
+      proteinSources.push({ ing, data });
+    } else if (data.carbs > data.protein && data.carbs > data.fat) {
+      carbSources.push({ ing, data });
+    } else if (data.fat > data.protein && data.fat > data.carbs) {
+      fatSources.push({ ing, data });
+    } else {
+      proteinSources.push({ ing, data }); // Default a proteína
+    }
+  }
+
+  if (!allFound) {
+    return { allFound: false, ingredients: results };
+  }
+
+  // Calcular gramos para cada tipo
+  let remainingProtein = mealMacros.protein;
+  let remainingCarbs = mealMacros.carbs;
+  let remainingFat = mealMacros.fat;
+
+  // Distribuir proteína
+  if (proteinSources.length > 0) {
+    const proteinPerSource = remainingProtein / proteinSources.length;
+    for (const { ing, data } of proteinSources) {
+      const grams = calculateGramsForMacro(proteinPerSource, data.protein);
+      const actualProtein = Math.round((grams / 100) * data.protein);
+      const actualCarbs = Math.round((grams / 100) * data.carbs);
+      const actualFat = Math.round((grams / 100) * data.fat);
+      const actualCalories = Math.round((grams / 100) * data.calories);
+
+      remainingCarbs -= actualCarbs;
+      remainingFat -= actualFat;
+
+      results.push({
+        ...ing,
+        quantity: `${grams}g`,
+        portion: calculatePortionDescription(grams, data.portionSize, data.portionName),
+        nutritionInfo: {
+          protein: actualProtein,
+          carbs: actualCarbs,
+          fat: actualFat,
+          calories: actualCalories,
+          suggestedGrams: grams,
+        },
+      });
+
+      console.warn(`   → ${ing.name}: ${grams}g (${actualProtein}P ${actualCarbs}C ${actualFat}G)`);
+    }
+  }
+
+  // Distribuir carbohidratos
+  if (carbSources.length > 0) {
+    const carbsPerSource = Math.max(0, remainingCarbs) / carbSources.length;
+    for (const { ing, data } of carbSources) {
+      const grams = calculateGramsForMacro(carbsPerSource, data.carbs);
+      const actualProtein = Math.round((grams / 100) * data.protein);
+      const actualCarbs = Math.round((grams / 100) * data.carbs);
+      const actualFat = Math.round((grams / 100) * data.fat);
+      const actualCalories = Math.round((grams / 100) * data.calories);
+
+      remainingFat -= actualFat;
+
+      results.push({
+        ...ing,
+        quantity: `${grams}g`,
+        portion: calculatePortionDescription(grams, data.portionSize, data.portionName),
+        nutritionInfo: {
+          protein: actualProtein,
+          carbs: actualCarbs,
+          fat: actualFat,
+          calories: actualCalories,
+          suggestedGrams: grams,
+        },
+      });
+
+      console.warn(`   → ${ing.name}: ${grams}g (${actualProtein}P ${actualCarbs}C ${actualFat}G)`);
+    }
+  }
+
+  // Distribuir grasas
+  if (fatSources.length > 0) {
+    const fatPerSource = Math.max(0, remainingFat) / fatSources.length;
+    for (const { ing, data } of fatSources) {
+      const grams = calculateGramsForMacro(fatPerSource, data.fat);
+      const actualProtein = Math.round((grams / 100) * data.protein);
+      const actualCarbs = Math.round((grams / 100) * data.carbs);
+      const actualFat = Math.round((grams / 100) * data.fat);
+      const actualCalories = Math.round((grams / 100) * data.calories);
+
+      results.push({
+        ...ing,
+        quantity: `${grams}g`,
+        portion: calculatePortionDescription(grams, data.portionSize, data.portionName),
+        nutritionInfo: {
+          protein: actualProtein,
+          carbs: actualCarbs,
+          fat: actualFat,
+          calories: actualCalories,
+          suggestedGrams: grams,
+        },
+      });
+
+      console.warn(`   → ${ing.name}: ${grams}g (${actualProtein}P ${actualCarbs}C ${actualFat}G)`);
+    }
+  }
+
+  return { allFound, ingredients: results };
+}
+
+// Fallback a IA para ingredientes desconocidos
+async function calculateWithAI(
   ingredients: Ingredient[],
   mealMacros: { calories: number; protein: number; carbs: number; fat: number }
 ): Promise<CalculatedIngredient[]> {
@@ -374,50 +891,31 @@ export async function calculateMealWithUserMacros(
   }
 
   try {
-    const prompt = `Eres AXIS, nutricionista deportivo de élite. Calcula los gramos EXACTOS para que esta comida cumpla estos macros objetivo:
+    const prompt = `Eres AXIS, nutricionista deportivo. Calcula gramos EXACTOS para CUMPLIR estos macros.
 
-MACROS OBJETIVO PARA ESTA COMIDA:
-- Calorías: ${mealMacros.calories} kcal
-- Proteína: ${mealMacros.protein}g
-- Carbohidratos: ${mealMacros.carbs}g
-- Grasas: ${mealMacros.fat}g
+MACROS OBJETIVO (OBLIGATORIO):
+• Proteína: ${mealMacros.protein}g
+• Carbohidratos: ${mealMacros.carbs}g  
+• Grasas: ${mealMacros.fat}g
+• Calorías: ${mealMacros.calories} kcal
 
-INGREDIENTES A CALCULAR:
+INGREDIENTES:
 ${ingredients.map((i, idx) => `${idx + 1}. ${i.name}`).join('\n')}
 
-INSTRUCCIONES:
-1. Ajusta los gramos de cada ingrediente para alcanzar los macros objetivo
-2. Prioriza la proteína (±5g de margen)
-3. Ajusta carbohidratos y grasas proporcionalmente
-4. Da porciones aproximadas útiles (ej: "~1 pechuga", "~2 tazas")
+REGLAS:
+1. La suma DEBE dar exactamente los macros objetivo
+2. Si falta fuente de grasa, AUMENTA los otros ingredientes para compensar calorías
+3. Usa valores reales: pechuga=31g proteína/100g, arroz=28g carbos/100g
 
 Responde SOLO JSON:
-{
-  "ingredients": [
-    {
-      "name": "nombre",
-      "suggestedGrams": 150,
-      "portion": "~1 pechuga mediana",
-      "calories": 250,
-      "protein": 35,
-      "carbs": 0,
-      "fat": 5
-    }
-  ],
-  "totalMeal": {
-    "calories": ${mealMacros.calories},
-    "protein": ${mealMacros.protein},
-    "carbs": ${mealMacros.carbs},
-    "fat": ${mealMacros.fat}
-  }
-}`;
+{"ingredients": [{"name": "...", "suggestedGrams": 250, "protein": 78, "carbs": 0, "fat": 9}]}`;
 
     const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 1024 },
+        generationConfig: { temperature: 0.0, maxOutputTokens: 1024 },
       }),
     });
 
@@ -432,31 +930,117 @@ Responde SOLO JSON:
     const parsed = JSON.parse(jsonMatch[0]);
     const calculatedIngredients = parsed.ingredients || [];
 
+    console.warn('📊 Resultado IA:', JSON.stringify(calculatedIngredients));
+
     return ingredients.map((ing, index) => {
       const calculated = calculatedIngredients[index];
       if (calculated) {
+        const grams = Math.round(calculated.suggestedGrams || 100);
+        // Intentar encontrar datos locales para calcular porción
+        const localData = findNutritionData(ing.name);
+        let portion: string;
+
+        if (localData) {
+          // Si existe en DB local, usar su porción
+          portion = calculatePortionDescription(
+            grams,
+            localData.portionSize,
+            localData.portionName
+          );
+        } else {
+          // Estimar porción genérica basada en macros dominantes
+          const isProtein = (calculated.protein || 0) > (calculated.carbs || 0);
+          const isCarb = (calculated.carbs || 0) > (calculated.protein || 0);
+          const isFat = (calculated.fat || 0) > 10;
+
+          if (isProtein) {
+            // Proteína: porción típica 150g
+            portion = calculatePortionDescription(grams, 150, 'porción');
+          } else if (isCarb) {
+            // Carbohidrato: porción típica 150g (taza cocida)
+            portion = calculatePortionDescription(grams, 150, 'taza');
+          } else if (isFat) {
+            // Grasa: porción típica 80g
+            portion = calculatePortionDescription(grams, 80, 'porción');
+          } else {
+            // Genérico
+            portion = calculatePortionDescription(grams, 100, 'porción');
+          }
+        }
+
+        console.warn(`   → ${calculated.name || ing.name}: ${grams}g (${portion})`);
         return {
           ...ing,
-          quantity: `${calculated.suggestedGrams || 100}g`,
-          portion: calculated.portion || ing.portion,
+          quantity: `${grams}g`,
+          portion,
           nutritionInfo: {
             calories: calculated.calories || 0,
             protein: calculated.protein || 0,
             carbs: calculated.carbs || 0,
             fat: calculated.fat || 0,
-            suggestedGrams: calculated.suggestedGrams || 100,
+            suggestedGrams: grams,
           },
         };
       }
       return { ...ing, quantity: ing.quantity || '~100g' };
     });
   } catch (error) {
-    console.error('calculateMealWithUserMacros error:', error);
+    console.error('calculateWithAI error:', error);
     return ingredients.map((ing) => ({
       ...ing,
       quantity: ing.quantity || '~100g',
     }));
   }
+}
+
+// ============================================================================
+// RECALCULATE ALL MEALS FOR NEW MEAL COUNT
+// Recalcula todas las comidas cuando cambia la cantidad de comidas
+// ============================================================================
+export async function recalculateAllMealsForNewCount(
+  meals: {
+    optionId: string;
+    ingredients: { name: string }[];
+  }[],
+  profile: UserMacroProfile
+): Promise<
+  {
+    optionId: string;
+    ingredients: { name: string; quantity: string; portion: string }[];
+  }[]
+> {
+  // Calcular nuevos macros por comida
+  const dailyMacros = await calculateUserDailyMacros(profile);
+  const perMealMacros = dailyMacros.perMeal;
+
+  console.warn(
+    `🔄 Recalculando ${meals.length} comidas con ${profile.mealCount} comidas/día -> ${perMealMacros.protein}P ${perMealMacros.carbs}C ${perMealMacros.fat}G por comida`
+  );
+
+  // Recalcular cada comida
+  const results = await Promise.all(
+    meals.map(async (meal) => {
+      const ingredientsWithIds = meal.ingredients.map((ing, i) => ({
+        id: `ing-${i}`,
+        name: ing.name,
+        quantity: '',
+        portion: '',
+      }));
+
+      const calculated = await calculateMealWithUserMacros(ingredientsWithIds, perMealMacros);
+
+      return {
+        optionId: meal.optionId,
+        ingredients: calculated.map((ing) => ({
+          name: ing.name,
+          quantity: ing.quantity,
+          portion: ing.portion || '',
+        })),
+      };
+    })
+  );
+
+  return results;
 }
 
 export async function analyzeDailyNutrition(

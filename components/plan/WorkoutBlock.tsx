@@ -1,10 +1,11 @@
 // ============================================================================
 // WORKOUT BLOCK - Bloque de Entrenamiento Flotante
-// PRE + Rutina + POST, movible en la línea de tiempo
+// PRE + Rutina + POST, cada uno expande independientemente
 // ============================================================================
 
 import React, { useState } from 'react';
 import { View, Text, Pressable, ScrollView, Image } from 'react-native';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -17,11 +18,13 @@ import {
   Flame,
   ChevronUp,
   ChevronDown,
+  ChevronRight,
   GripHorizontal,
   Pill,
   Syringe,
   FlaskConical,
   Droplets,
+  Dumbbell,
 } from 'lucide-react-native';
 
 // ============================================================================
@@ -35,12 +38,21 @@ interface StackItem {
   notes?: string;
 }
 
+interface Exercise {
+  id: string;
+  name: string;
+  imageUrl?: string;
+  videoUrl?: string;
+  sets?: number;
+  reps?: string;
+}
+
 interface WorkoutBlockData {
   id: string;
   routineName: string;
   preStack: StackItem[];
   postStack: StackItem[];
-  exercises?: { id: string; name: string; imageUrl?: string }[];
+  exercises?: Exercise[];
 }
 
 interface WorkoutBlockProps {
@@ -56,7 +68,7 @@ interface WorkoutBlockProps {
 // HELPERS
 // ============================================================================
 const getTypeIcon = (type: string, color: string) => {
-  const iconProps = { size: 12, color };
+  const iconProps = { size: 14, color };
   switch (type) {
     case 'pill':
       return <Pill {...iconProps} />;
@@ -72,6 +84,52 @@ const getTypeIcon = (type: string, color: string) => {
 };
 
 // ============================================================================
+// EXERCISE CARD - Muestra imagen o primer frame del video
+// ============================================================================
+interface ExerciseCardProps {
+  exercise: Exercise;
+  index: number;
+  onPress?: () => void;
+}
+
+const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, onPress }) => {
+  // Si tiene video, crear player pausado para mostrar primer frame
+  const videoPlayer = useVideoPlayer(exercise.videoUrl || null, (player) => {
+    player.loop = false;
+    player.muted = true;
+    player.pause();
+  });
+
+  return (
+    <Pressable onPress={onPress} className="mr-3 items-center active:scale-95">
+      <View className="w-20 h-20 bg-zinc-800 rounded-xl items-center justify-center border border-zinc-700 overflow-hidden">
+        {exercise.imageUrl ? (
+          <Image source={{ uri: exercise.imageUrl }} className="w-full h-full" resizeMode="cover" />
+        ) : exercise.videoUrl ? (
+          <VideoView
+            player={videoPlayer}
+            style={{ width: 80, height: 80 }}
+            contentFit="cover"
+            nativeControls={false}
+            allowsFullscreen={false}
+          />
+        ) : (
+          <View className="items-center justify-center p-1">
+            <Dumbbell size={24} color="#DC2626" />
+            <Text
+              className="text-zinc-400 text-[9px] text-center mt-1 font-medium"
+              numberOfLines={2}
+            >
+              {exercise.name}
+            </Text>
+          </View>
+        )}
+      </View>
+    </Pressable>
+  );
+};
+
+// ============================================================================
 // COMPONENT
 // ============================================================================
 export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
@@ -82,14 +140,24 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
   isLast,
   onPressRoutine,
 }) => {
-  const [expanded, setExpanded] = useState(false);
-  const expandProgress = useSharedValue(0);
+  const [preExpanded, setPreExpanded] = useState(false);
+  const [postExpanded, setPostExpanded] = useState(false);
 
-  const toggleExpand = () => {
+  const preProgress = useSharedValue(0);
+  const postProgress = useSharedValue(0);
+
+  const togglePre = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const newState = !expanded;
-    setExpanded(newState);
-    expandProgress.value = withTiming(newState ? 1 : 0, { duration: 250 });
+    const newState = !preExpanded;
+    setPreExpanded(newState);
+    preProgress.value = withTiming(newState ? 1 : 0, { duration: 200 });
+  };
+
+  const togglePost = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const newState = !postExpanded;
+    setPostExpanded(newState);
+    postProgress.value = withTiming(newState ? 1 : 0, { duration: 200 });
   };
 
   const handleMoveUp = () => {
@@ -102,16 +170,36 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
     onMoveDown();
   };
 
-  const expandedStyle = useAnimatedStyle(() => ({
-    height: interpolate(expandProgress.value, [0, 1], [0, 200]),
-    opacity: expandProgress.value,
+  const preHeight = Math.max(data.preStack.length * 48 + 24, 80);
+  const postHeight = Math.max(data.postStack.length * 48 + 24, 80);
+
+  const preExpandedStyle = useAnimatedStyle(() => ({
+    height: interpolate(preProgress.value, [0, 1], [0, preHeight]),
+    opacity: preProgress.value,
+    marginTop: interpolate(preProgress.value, [0, 1], [0, 8]),
   }));
+
+  const postExpandedStyle = useAnimatedStyle(() => ({
+    height: interpolate(postProgress.value, [0, 1], [0, postHeight]),
+    opacity: postProgress.value,
+    marginTop: interpolate(postProgress.value, [0, 1], [0, 8]),
+  }));
+
+  const preChevronStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${interpolate(preProgress.value, [0, 1], [0, 90])}deg` }],
+  }));
+
+  const postChevronStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${interpolate(postProgress.value, [0, 1], [0, 90])}deg` }],
+  }));
+
+  const hasExercises = data.exercises && data.exercises.length > 0;
 
   return (
     <View className="mb-6">
-      <View className="bg-[#1a1a1a] border-y-2 border-yellow-500/50 shadow-lg">
+      <View className="bg-[#1a1a1a] border-y-2 border-red-500/50 shadow-lg">
         {/* Control Handle */}
-        <View className="flex-row justify-between items-center bg-yellow-500/10 px-4 py-2 border-b border-white/5">
+        <View className="flex-row justify-between items-center bg-red-500/10 px-4 py-2 border-b border-white/5">
           <View className="flex-row gap-3">
             <Pressable
               onPress={handleMoveUp}
@@ -129,117 +217,161 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
             </Pressable>
           </View>
           <View className="flex-row items-center gap-1">
-            <GripHorizontal size={14} color="#EAB308" />
-            <Text className="text-yellow-500 text-xs font-bold tracking-widest uppercase">
+            <GripHorizontal size={14} color="#DC2626" />
+            <Text className="text-red-500 text-xs font-bold tracking-widest uppercase">
               BLOQUE ENTRENO
             </Text>
           </View>
         </View>
 
         {/* Main Content */}
-        <Pressable onPress={toggleExpand} className="p-4">
-          {/* PRE-WORKOUT */}
-          <View className="flex-row items-center gap-3 mb-3 opacity-80">
-            <View className="bg-yellow-500/20 p-1.5 rounded">
-              <Zap size={14} color="#EAB308" />
+        <View className="p-4">
+          {/* ============================================ */}
+          {/* PRE-WORKOUT - Expandible independiente */}
+          {/* ============================================ */}
+          <Pressable
+            onPress={togglePre}
+            className="flex-row items-center gap-3 p-3 bg-red-500/10 rounded-lg active:bg-red-500/20"
+          >
+            <View className="bg-red-500/30 p-2 rounded">
+              <Zap size={16} color="#DC2626" />
             </View>
             <View className="flex-1">
-              <Text className="text-zinc-200 font-bold text-xs">PRE:</Text>
-              <Text className="text-zinc-400 text-sm" numberOfLines={1}>
-                {data.preStack.map((i) => i.name).join(', ') || 'Sin suplementos'}
+              <Text className="text-red-500 font-bold text-sm">PRE-WORKOUT</Text>
+              <Text className="text-zinc-400 text-xs" numberOfLines={1}>
+                {data.preStack.length > 0
+                  ? data.preStack.map((i) => i.name).join(', ')
+                  : 'Sin suplementos'}
               </Text>
             </View>
-          </View>
-
-          {/* ROUTINE TITLE */}
-          <Pressable
-            onPress={onPressRoutine}
-            className="py-4 border-y border-white/5 bg-[#111111] -mx-4 px-4"
-          >
-            <Text className="text-2xl text-white font-black italic uppercase tracking-tighter text-center">
-              {data.routineName || 'SIN RUTINA'}
-            </Text>
-            <Text className="text-xs text-zinc-500 text-center mt-1">
-              Toca para ver rutina completa
-            </Text>
+            <Animated.View style={preChevronStyle}>
+              <ChevronRight size={18} color="#DC2626" />
+            </Animated.View>
           </Pressable>
 
-          {/* POST-WORKOUT */}
-          <View className="flex-row items-center gap-3 mt-3 opacity-80">
-            <View className="bg-green-500/20 p-1.5 rounded">
-              <Flame size={14} color="#22C55E" />
+          {/* PRE Expanded Detail */}
+          <Animated.View
+            style={preExpandedStyle}
+            className="overflow-hidden bg-red-500/5 rounded-b-lg mx-1"
+          >
+            <View className="p-3">
+              {data.preStack.map((item) => (
+                <View
+                  key={item.id}
+                  className="flex-row items-center gap-3 p-2 bg-black/20 rounded-lg mb-2"
+                >
+                  <View className="bg-red-500/20 p-1.5 rounded">
+                    {getTypeIcon(item.type, '#DC2626')}
+                  </View>
+                  <View className="flex-1">
+                    <Text className="text-white text-sm font-medium">{item.name}</Text>
+                    <Text className="text-red-500/80 text-xs">{item.dose}</Text>
+                  </View>
+                  {item.notes && (
+                    <Text className="text-zinc-500 text-xs italic max-w-[80px]" numberOfLines={1}>
+                      {item.notes}
+                    </Text>
+                  )}
+                </View>
+              ))}
+              {data.preStack.length === 0 && (
+                <Text className="text-zinc-600 text-xs text-center py-2">
+                  No hay suplementos pre-entreno
+                </Text>
+              )}
             </View>
-            <View className="flex-1">
-              <Text className="text-zinc-200 font-bold text-xs">POST:</Text>
-              <Text className="text-zinc-400 text-sm" numberOfLines={1}>
-                {data.postStack.map((i) => i.name).join(', ') || 'Sin suplementos'}
+          </Animated.View>
+
+          {/* ============================================ */}
+          {/* ROUTINE - Slider de ejercicios */}
+          {/* ============================================ */}
+          <View className="my-4 py-4 border-y border-white/10 bg-[#111111] -mx-4 px-4">
+            <View className="flex-row items-center justify-center gap-2 mb-3">
+              <Dumbbell size={18} color="#DC2626" />
+              <Text className="text-2xl text-white font-black italic uppercase tracking-tighter text-center">
+                {data.routineName || 'DÍA DE DESCANSO'}
               </Text>
             </View>
-          </View>
-        </Pressable>
 
-        {/* Expanded Details */}
-        <Animated.View
-          style={expandedStyle}
-          className="px-4 pb-4 border-t border-white/5 bg-[#151515] overflow-hidden"
-        >
-          <View className="flex-row gap-4 mt-4">
-            {/* PRE Detail */}
-            <View className="flex-1">
-              <Text className="text-yellow-500 text-xs font-bold mb-2">DETALLE PRE</Text>
-              {data.preStack.map((item) => (
-                <View key={item.id} className="border-l-2 border-zinc-700 pl-2 mb-2">
-                  <View className="flex-row items-center gap-1">
-                    {getTypeIcon(item.type, '#EAB308')}
-                    <Text className="text-zinc-200 text-xs">
-                      {item.name} ({item.dose})
-                    </Text>
-                  </View>
-                  {item.notes && <Text className="text-zinc-500 text-xs italic">{item.notes}</Text>}
-                </View>
-              ))}
-              {data.preStack.length === 0 && <Text className="text-zinc-600 text-xs">Vacío</Text>}
-            </View>
-
-            {/* POST Detail */}
-            <View className="flex-1">
-              <Text className="text-green-500 text-xs font-bold mb-2">DETALLE POST</Text>
-              {data.postStack.map((item) => (
-                <View key={item.id} className="border-l-2 border-zinc-700 pl-2 mb-2">
-                  <View className="flex-row items-center gap-1">
-                    {getTypeIcon(item.type, '#22C55E')}
-                    <Text className="text-zinc-200 text-xs">
-                      {item.name} ({item.dose})
-                    </Text>
-                  </View>
-                  {item.notes && <Text className="text-zinc-500 text-xs italic">{item.notes}</Text>}
-                </View>
-              ))}
-              {data.postStack.length === 0 && <Text className="text-zinc-600 text-xs">Vacío</Text>}
-            </View>
-          </View>
-
-          {/* Exercise Carousel Preview */}
-          {data.exercises && data.exercises.length > 0 && (
-            <View className="mt-4">
-              <Text className="text-zinc-400 text-xs font-bold mb-2">EJERCICIOS DEL DÍA</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                {data.exercises.map((ex) => (
-                  <View
-                    key={ex.id}
-                    className="w-16 h-16 bg-zinc-800 rounded-lg mr-2 items-center justify-center"
-                  >
-                    {ex.imageUrl ? (
-                      <Image source={{ uri: ex.imageUrl }} className="w-full h-full rounded-lg" />
-                    ) : (
-                      <Text className="text-zinc-500 text-[8px] text-center px-1">{ex.name}</Text>
-                    )}
-                  </View>
+            {hasExercises ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                className="mt-2"
+                contentContainerStyle={{ paddingHorizontal: 4 }}
+              >
+                {data.exercises!.map((ex, index) => (
+                  <ExerciseCard key={ex.id} exercise={ex} index={index} onPress={onPressRoutine} />
                 ))}
               </ScrollView>
+            ) : (
+              <Pressable onPress={onPressRoutine} className="items-center py-4 active:opacity-70">
+                <View className="flex-row items-center gap-2 bg-red-500/10 px-4 py-2 rounded-full">
+                  <Dumbbell size={14} color="#DC2626" />
+                  <Text className="text-red-500 text-xs font-medium">
+                    Toca para configurar rutina
+                  </Text>
+                </View>
+              </Pressable>
+            )}
+          </View>
+
+          {/* ============================================ */}
+          {/* POST-WORKOUT - Expandible independiente */}
+          {/* ============================================ */}
+          <Pressable
+            onPress={togglePost}
+            className="flex-row items-center gap-3 p-3 bg-green-500/10 rounded-lg active:bg-green-500/20"
+          >
+            <View className="bg-green-500/30 p-2 rounded">
+              <Flame size={16} color="#22C55E" />
             </View>
-          )}
-        </Animated.View>
+            <View className="flex-1">
+              <Text className="text-green-500 font-bold text-sm">POST-WORKOUT</Text>
+              <Text className="text-zinc-400 text-xs" numberOfLines={1}>
+                {data.postStack.length > 0
+                  ? data.postStack.map((i) => i.name).join(', ')
+                  : 'Sin suplementos'}
+              </Text>
+            </View>
+            <Animated.View style={postChevronStyle}>
+              <ChevronRight size={18} color="#22C55E" />
+            </Animated.View>
+          </Pressable>
+
+          {/* POST Expanded Detail */}
+          <Animated.View
+            style={postExpandedStyle}
+            className="overflow-hidden bg-green-500/5 rounded-b-lg mx-1"
+          >
+            <View className="p-3">
+              {data.postStack.map((item) => (
+                <View
+                  key={item.id}
+                  className="flex-row items-center gap-3 p-2 bg-black/20 rounded-lg mb-2"
+                >
+                  <View className="bg-green-500/20 p-1.5 rounded">
+                    {getTypeIcon(item.type, '#22C55E')}
+                  </View>
+                  <View className="flex-1">
+                    <Text className="text-white text-sm font-medium">{item.name}</Text>
+                    <Text className="text-green-500/80 text-xs">{item.dose}</Text>
+                  </View>
+                  {item.notes && (
+                    <Text className="text-zinc-500 text-xs italic max-w-[80px]" numberOfLines={1}>
+                      {item.notes}
+                    </Text>
+                  )}
+                </View>
+              ))}
+              {data.postStack.length === 0 && (
+                <Text className="text-zinc-600 text-xs text-center py-2">
+                  No hay suplementos post-entreno
+                </Text>
+              )}
+            </View>
+          </Animated.View>
+        </View>
       </View>
     </View>
   );

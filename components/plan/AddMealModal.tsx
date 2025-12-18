@@ -1,9 +1,9 @@
 // ============================================================================
 // ADD MEAL MODAL - Modal para agregar comidas
-// Con toggle AXIS AI para cálculo automático de macros
+// Con toggle AXIS AI y análisis inteligente de ingredientes
 // ============================================================================
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,9 +13,14 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
-import { X, Plus, Zap, Trash2 } from 'lucide-react-native';
+import { X, Plus, Zap, Trash2, AlertTriangle, CheckCircle } from 'lucide-react-native';
+import {
+  analyzeIngredientsSmart,
+  IngredientAnalysis,
+} from '../../services/axis/ingredientAnalyzer';
 
 // ============================================================================
 // TYPES
@@ -26,8 +31,16 @@ interface Ingredient {
   portion: string;
 }
 
+interface TargetMacros {
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+}
+
 interface AddMealModalProps {
   visible: boolean;
+  targetMacros?: TargetMacros;
   onClose: () => void;
   onSave: (ingredients: Ingredient[], time: string, useAxisAI: boolean) => void;
 }
@@ -35,7 +48,12 @@ interface AddMealModalProps {
 // ============================================================================
 // COMPONENT
 // ============================================================================
-export const AddMealModal: React.FC<AddMealModalProps> = ({ visible, onClose, onSave }) => {
+export const AddMealModal: React.FC<AddMealModalProps> = ({
+  visible,
+  targetMacros,
+  onClose,
+  onSave,
+}) => {
   const [axisAI, setAxisAI] = useState(true);
   const [hour, setHour] = useState('12');
   const [minute, setMinute] = useState('00');
@@ -43,6 +61,50 @@ export const AddMealModal: React.FC<AddMealModalProps> = ({ visible, onClose, on
   const [ingredients, setIngredients] = useState<Ingredient[]>([
     { name: '', quantity: '', portion: '' },
   ]);
+  const [analysis, setAnalysis] = useState<IngredientAnalysis | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+
+  // Reset cuando se abre
+  useEffect(() => {
+    if (visible) {
+      setAxisAI(true);
+      setHour('12');
+      setMinute('00');
+      setPeriod('PM');
+      setIngredients([{ name: '', quantity: '', portion: '' }]);
+      setAnalysis(null);
+    }
+  }, [visible]);
+
+  // Analizar ingredientes cuando cambian (con debounce) - solo si AXIS AI activo
+  useEffect(() => {
+    if (!axisAI) {
+      setAnalysis(null);
+      return;
+    }
+
+    const validIngredients = ingredients.filter((ing) => ing.name.trim().length >= 3);
+    if (validIngredients.length === 0) {
+      setAnalysis(null);
+      return;
+    }
+
+    const timeoutId = setTimeout(async () => {
+      setIsAnalyzing(true);
+      try {
+        const result = await analyzeIngredientsSmart(validIngredients, {
+          targetMacros: targetMacros,
+        });
+        setAnalysis(result);
+      } catch (error) {
+        console.error('Error analyzing:', error);
+      } finally {
+        setIsAnalyzing(false);
+      }
+    }, 600);
+
+    return () => clearTimeout(timeoutId);
+  }, [ingredients, axisAI, targetMacros]);
 
   const addIngredient = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -62,7 +124,6 @@ export const AddMealModal: React.FC<AddMealModalProps> = ({ visible, onClose, on
     setIngredients(newIngs);
   };
 
-  // Convertir a formato 24h para la base de datos
   const getTime24h = (): string => {
     let h = parseInt(hour, 10) || 12;
     if (period === 'AM') {
@@ -81,7 +142,6 @@ export const AddMealModal: React.FC<AddMealModalProps> = ({ visible, onClose, on
     }
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     onSave(validIngredients, getTime24h(), axisAI);
-    // Reset form
     setIngredients([{ name: '', quantity: '', portion: '' }]);
     setHour('12');
     setMinute('00');
@@ -109,7 +169,21 @@ export const AddMealModal: React.FC<AddMealModalProps> = ({ visible, onClose, on
           <View className="bg-[#1a1a1a] rounded-t-3xl max-h-[90%] border-t border-white/10">
             {/* Header */}
             <View className="flex-row justify-between items-center p-4 border-b border-white/10 bg-[#222222] rounded-t-3xl">
-              <Text className="text-white font-bold text-lg">Agregar Comida</Text>
+              <View>
+                <Text className="text-white font-bold text-lg">Agregar Comida</Text>
+                {targetMacros && (
+                  <View className="flex-row gap-2 mt-1">
+                    <Text className="text-savage-red text-xs font-mono">
+                      {targetMacros.protein}P
+                    </Text>
+                    <Text className="text-yellow-500 text-xs font-mono">{targetMacros.carbs}C</Text>
+                    <Text className="text-blue-400 text-xs font-mono">{targetMacros.fat}G</Text>
+                    <Text className="text-zinc-500 text-xs font-mono">
+                      {targetMacros.calories} kcal
+                    </Text>
+                  </View>
+                )}
+              </View>
               <Pressable onPress={onClose} className="p-2">
                 <X size={20} color="#999" />
               </Pressable>
@@ -141,11 +215,101 @@ export const AddMealModal: React.FC<AddMealModalProps> = ({ visible, onClose, on
                 </Pressable>
               </View>
 
-              {/* Time Input - AM/PM Format */}
+              {/* Analysis Alert - Solo visible si AXIS AI está activo */}
+              {axisAI && analysis && (
+                <View
+                  className={`p-4 rounded-xl mb-4 border ${
+                    analysis.isBalanced
+                      ? 'bg-green-900/20 border-green-500/30'
+                      : analysis.hasUnhealthyOnly
+                        ? 'bg-red-900/20 border-red-500/30'
+                        : 'bg-yellow-900/20 border-yellow-500/30'
+                  }`}
+                >
+                  <View className="flex-row items-center gap-2 mb-2">
+                    {isAnalyzing ? (
+                      <ActivityIndicator size="small" color="#A855F7" />
+                    ) : analysis.isBalanced ? (
+                      <CheckCircle size={18} color="#22C55E" />
+                    ) : (
+                      <AlertTriangle
+                        size={18}
+                        color={analysis.hasUnhealthyOnly ? '#EF4444' : '#EAB308'}
+                      />
+                    )}
+                    <Text
+                      className={`font-bold ${
+                        analysis.isBalanced
+                          ? 'text-green-400'
+                          : analysis.hasUnhealthyOnly
+                            ? 'text-red-400'
+                            : 'text-yellow-400'
+                      }`}
+                    >
+                      {isAnalyzing
+                        ? 'Analizando...'
+                        : analysis.isBalanced
+                          ? '✓ Comida balanceada'
+                          : analysis.hasUnhealthyOnly
+                            ? '✗ Revisar ingredientes'
+                            : '! Falta balance'}
+                    </Text>
+                  </View>
+
+                  {/* Target macros message */}
+                  {analysis.macroFitMessage && (
+                    <Text className="text-purple-400 text-xs font-mono mb-2">
+                      🎯 {analysis.macroFitMessage}
+                    </Text>
+                  )}
+
+                  {analysis.warnings.map((warning, idx) => (
+                    <Text key={`w-${idx}`} className="text-red-400/80 text-xs mb-1">
+                      {warning}
+                    </Text>
+                  ))}
+
+                  {analysis.suggestions.map((suggestion, idx) => (
+                    <Text key={`s-${idx}`} className="text-yellow-400/80 text-xs mb-1">
+                      → {suggestion}
+                    </Text>
+                  ))}
+
+                  {!analysis.isBalanced && (
+                    <View className="flex-row gap-3 mt-2 pt-2 border-t border-white/10">
+                      <View className="flex-row items-center gap-1">
+                        <View
+                          className={`w-2 h-2 rounded-full ${
+                            analysis.hasProtein ? 'bg-green-500' : 'bg-red-500'
+                          }`}
+                        />
+                        <Text className="text-zinc-400 text-xs">Proteína</Text>
+                      </View>
+                      <View className="flex-row items-center gap-1">
+                        <View
+                          className={`w-2 h-2 rounded-full ${
+                            analysis.hasCarbs ? 'bg-green-500' : 'bg-yellow-500'
+                          }`}
+                        />
+                        <Text className="text-zinc-400 text-xs">Carbos</Text>
+                      </View>
+                      <View className="flex-row items-center gap-1">
+                        <View
+                          className={`w-2 h-2 rounded-full ${
+                            analysis.hasFat ? 'bg-green-500' : 'bg-zinc-500'
+                          }`}
+                        />
+                        <Text className="text-zinc-400 text-xs">Grasas</Text>
+                      </View>
+                    </View>
+                  )}
+                </View>
+              )}
+
+              {/* Time Input */}
               <View className="mb-4">
                 <Text className="text-zinc-400 text-xs font-bold mb-2 uppercase">Hora</Text>
                 <View className="flex-row gap-2">
-                  {/* Hour */}
                   <TextInput
                     value={hour}
                     onChangeText={(v) => {
@@ -161,7 +325,6 @@ export const AddMealModal: React.FC<AddMealModalProps> = ({ visible, onClose, on
                     maxLength={2}
                   />
                   <Text className="text-white text-2xl self-center">:</Text>
-                  {/* Minute */}
                   <TextInput
                     value={minute}
                     onChangeText={(v) => {
@@ -176,7 +339,6 @@ export const AddMealModal: React.FC<AddMealModalProps> = ({ visible, onClose, on
                     keyboardType="number-pad"
                     maxLength={2}
                   />
-                  {/* AM/PM Toggle */}
                   <Pressable
                     onPress={togglePeriod}
                     className={`px-4 rounded-lg justify-center items-center ${
@@ -237,7 +399,6 @@ export const AddMealModal: React.FC<AddMealModalProps> = ({ visible, onClose, on
                 </View>
               ))}
 
-              {/* Add Ingredient Button */}
               <Pressable
                 onPress={addIngredient}
                 className="w-full py-3 border border-dashed border-zinc-600 rounded-xl mb-6 active:border-white active:bg-white/5"
@@ -248,7 +409,6 @@ export const AddMealModal: React.FC<AddMealModalProps> = ({ visible, onClose, on
                 </View>
               </Pressable>
 
-              {/* Save Button */}
               <Pressable
                 onPress={handleSave}
                 className="w-full bg-white py-4 rounded-xl mb-8 active:bg-zinc-200"

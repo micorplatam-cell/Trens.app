@@ -49,6 +49,7 @@ interface MealCardProps {
   onSwap: (mealId: string, newOptionIndex: number) => void;
   onTimeChange: (mealId: string) => void;
   onDelete?: (mealId: string) => void;
+  onDeleteOption?: (mealId: string, optionId: string) => void;
   onEdit?: (mealId: string) => void;
   onAddOption?: (mealId: string) => void;
 }
@@ -75,6 +76,7 @@ export const MealCard: React.FC<MealCardProps> = ({
   onSwap,
   onTimeChange,
   onDelete,
+  onDeleteOption,
   onEdit,
   onAddOption,
 }) => {
@@ -86,10 +88,14 @@ export const MealCard: React.FC<MealCardProps> = ({
   // Formatear hora a AM/PM
   const displayTime = formatTimeToAMPM(meal.time);
 
-  // Long press handler - Delete
-  const handleLongPress = () => {
+  // Long press handler - Delete option or entire meal
+  const handleLongPress = (optionId: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    if (onDelete) {
+    // Si hay múltiples opciones, eliminar solo la opción
+    if (hasMultipleOptions && onDeleteOption) {
+      onDeleteOption(meal.id, optionId);
+    } else if (onDelete) {
+      // Si solo hay una opción, eliminar toda la comida
       onDelete(meal.id);
     }
   };
@@ -142,7 +148,7 @@ export const MealCard: React.FC<MealCardProps> = ({
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         if (onEdit) onEdit(meal.id);
       }}
-      onLongPress={handleLongPress}
+      onLongPress={() => handleLongPress(option.id)}
       delayLongPress={500}
       style={{ width: OPTION_WIDTH }}
       className="px-2"
@@ -154,9 +160,6 @@ export const MealCard: React.FC<MealCardProps> = ({
             <View className="bg-zinc-800 px-2 py-0.5 rounded">
               <Text className="text-zinc-400 text-xs font-mono">OPCIÓN {index + 1}</Text>
             </View>
-            {option.name !== 'Opción Principal' && option.name !== 'Opción' && (
-              <Text className="text-zinc-500 text-xs">{option.name}</Text>
-            )}
           </View>
         )}
 

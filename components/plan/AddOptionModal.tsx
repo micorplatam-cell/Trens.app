@@ -17,6 +17,11 @@ import {
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { X, Plus, Trash2, Zap, AlertTriangle, CheckCircle } from 'lucide-react-native';
+import {
+  analyzeIngredientsSmart,
+  IngredientAnalysis,
+} from '../../services/axis/ingredientAnalyzer';
+import { calculateMealWithUserMacros } from '../../services/axis/nutrition';
 
 // ============================================================================
 // TYPES
@@ -26,16 +31,6 @@ interface Ingredient {
   name: string;
   quantity: string;
   portion?: string;
-}
-
-interface IngredientAnalysis {
-  isBalanced: boolean;
-  hasProtein: boolean;
-  hasCarbs: boolean;
-  hasFat: boolean;
-  hasUnhealthyOnly: boolean;
-  suggestions: string[];
-  warnings: string[];
 }
 
 interface AddOptionModalProps {
@@ -51,132 +46,7 @@ interface AddOptionModalProps {
   onClose: () => void;
   onSave: (mealId: string, optionName: string, ingredients: Ingredient[]) => Promise<void>;
   onCalculateMacros?: (ingredients: Ingredient[]) => Promise<Ingredient[]>;
-  onAnalyzeIngredients?: (
-    ingredients: Ingredient[],
-    targetMacros?: { protein: number; carbs: number; fat: number }
-  ) => Promise<IngredientAnalysis>;
 }
-
-// ============================================================================
-// LOCAL INGREDIENT ANALYZER (fallback sin IA)
-// ============================================================================
-const analyzeIngredientsLocally = (ingredients: Ingredient[]): IngredientAnalysis => {
-  const names = ingredients.map((i) => i.name.toLowerCase()).join(' ');
-
-  // Patrones de detección
-  const proteinKeywords = [
-    'pollo',
-    'carne',
-    'res',
-    'cerdo',
-    'pescado',
-    'atún',
-    'salmón',
-    'huevo',
-    'claras',
-    'whey',
-    'proteína',
-    'tofu',
-    'tempeh',
-    'legumbres',
-    'lentejas',
-    'frijoles',
-    'garbanzos',
-    'camarones',
-    'pavo',
-    'jamón',
-    'queso',
-    'yogur',
-    'leche',
-  ];
-  const carbKeywords = [
-    'arroz',
-    'pasta',
-    'pan',
-    'avena',
-    'papa',
-    'patata',
-    'camote',
-    'batata',
-    'quinoa',
-    'maíz',
-    'tortilla',
-    'cereal',
-    'fruta',
-    'plátano',
-    'manzana',
-    'banana',
-  ];
-  const fatKeywords = [
-    'aceite',
-    'aguacate',
-    'nueces',
-    'almendras',
-    'mantequilla',
-    'manteca',
-    'tocino',
-    'bacon',
-    'aceitunas',
-    'coco',
-    'maní',
-    'cacahuate',
-  ];
-  const unhealthyKeywords = [
-    'azúcar',
-    'azucar',
-    'refresco',
-    'soda',
-    'dulce',
-    'caramelo',
-    'chocolate',
-    'galleta',
-    'pastel',
-    'helado',
-    'donut',
-    'churro',
-    'frito',
-    'papas fritas',
-  ];
-
-  const hasProtein = proteinKeywords.some((k) => names.includes(k));
-  const hasCarbs = carbKeywords.some((k) => names.includes(k));
-  const hasFat = fatKeywords.some((k) => names.includes(k));
-  const hasUnhealthy = unhealthyKeywords.some((k) => names.includes(k));
-
-  const suggestions: string[] = [];
-  const warnings: string[] = [];
-
-  // Verificar si solo hay ingredientes no saludables
-  const hasUnhealthyOnly = hasUnhealthy && !hasProtein && !hasCarbs && !hasFat;
-
-  if (hasUnhealthyOnly) {
-    warnings.push('⚠️ Solo detecté ingredientes con poco valor nutricional');
-    suggestions.push('Agrega una fuente de proteína (pollo, huevo, pescado)');
-    suggestions.push('Incluye carbohidratos complejos (arroz, avena, papa)');
-  } else {
-    if (!hasProtein) {
-      suggestions.push('Agrega proteína: pollo, huevo, pescado, tofu');
-    }
-    if (!hasCarbs) {
-      suggestions.push('Agrega carbohidratos: arroz, papa, avena');
-    }
-    if (hasUnhealthy) {
-      warnings.push('Contiene ingredientes altos en azúcar o procesados');
-    }
-  }
-
-  const isBalanced = hasProtein && (hasCarbs || hasFat) && !hasUnhealthyOnly;
-
-  return {
-    isBalanced,
-    hasProtein,
-    hasCarbs,
-    hasFat,
-    hasUnhealthyOnly,
-    suggestions,
-    warnings,
-  };
-};
 
 // ============================================================================
 // COMPONENT
@@ -189,7 +59,6 @@ export const AddOptionModal: React.FC<AddOptionModalProps> = ({
   onClose,
   onSave,
   onCalculateMacros,
-  onAnalyzeIngredients,
 }) => {
   const [ingredients, setIngredients] = useState<Ingredient[]>([
     { id: `new-${Date.now()}`, name: '', quantity: '', portion: '' },
@@ -208,8 +77,14 @@ export const AddOptionModal: React.FC<AddOptionModalProps> = ({
     }
   }, [visible]);
 
-  // Analizar ingredientes cuando cambian (con debounce)
+  // Analizar ingredientes cuando cambian (con debounce) - solo si AXIS AI activo
   useEffect(() => {
+    // Si AXIS AI está desactivado, no analizar
+    if (!axisAI) {
+      setAnalysis(null);
+      return;
+    }
+
     const validIngredients = ingredients.filter((ing) => ing.name.trim().length >= 3);
     if (validIngredients.length === 0) {
       setAnalysis(null);
@@ -219,24 +94,19 @@ export const AddOptionModal: React.FC<AddOptionModalProps> = ({
     const timeoutId = setTimeout(async () => {
       setIsAnalyzing(true);
       try {
-        if (onAnalyzeIngredients && targetMacros) {
-          const result = await onAnalyzeIngredients(validIngredients, targetMacros);
-          setAnalysis(result);
-        } else {
-          // Análisis local como fallback
-          const result = analyzeIngredientsLocally(validIngredients);
-          setAnalysis(result);
-        }
+        const result = await analyzeIngredientsSmart(validIngredients, {
+          targetMacros: targetMacros,
+        });
+        setAnalysis(result);
       } catch (error) {
         console.error('Error analyzing:', error);
-        setAnalysis(analyzeIngredientsLocally(validIngredients));
       } finally {
         setIsAnalyzing(false);
       }
-    }, 800); // Debounce de 800ms
+    }, 600);
 
     return () => clearTimeout(timeoutId);
-  }, [ingredients, onAnalyzeIngredients, targetMacros]);
+  }, [ingredients, axisAI, targetMacros]);
 
   const toggleAxisAI = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -277,8 +147,26 @@ export const AddOptionModal: React.FC<AddOptionModalProps> = ({
     try {
       let finalIngredients = validIngredients;
 
-      // Si AXIS AI está activo, calcular macros antes de guardar
-      if (axisAI && onCalculateMacros) {
+      // Si AXIS AI está activo y tenemos macros objetivo, usar calculateMealWithUserMacros
+      if (axisAI && targetMacros) {
+        try {
+          console.log('🎯 Calculando con macros objetivo:', targetMacros);
+          const calculated = await calculateMealWithUserMacros(validIngredients, targetMacros);
+          finalIngredients = calculated.map((ing) => ({
+            id: ing.id,
+            name: ing.name,
+            quantity: ing.quantity,
+            portion: ing.portion,
+          }));
+        } catch (error) {
+          console.error('Error calculating macros with target:', error);
+          // Fallback a onCalculateMacros si falla
+          if (onCalculateMacros) {
+            finalIngredients = await onCalculateMacros(validIngredients);
+          }
+        }
+      } else if (axisAI && onCalculateMacros) {
+        // Si no hay targetMacros, usar cálculo genérico
         try {
           finalIngredients = await onCalculateMacros(validIngredients);
         } catch (error) {
@@ -316,9 +204,7 @@ export const AddOptionModal: React.FC<AddOptionModalProps> = ({
                     <Text className="text-savage-red text-xs font-mono">
                       {targetMacros.protein}P
                     </Text>
-                    <Text className="text-yellow-500 text-xs font-mono">
-                      {targetMacros.carbs}C
-                    </Text>
+                    <Text className="text-yellow-500 text-xs font-mono">{targetMacros.carbs}C</Text>
                     <Text className="text-blue-400 text-xs font-mono">{targetMacros.fat}G</Text>
                     <Text className="text-zinc-500 text-xs font-mono">
                       {targetMacros.calories} kcal
@@ -361,8 +247,8 @@ export const AddOptionModal: React.FC<AddOptionModalProps> = ({
                 </View>
               )}
 
-              {/* Analysis Alert */}
-              {analysis && (
+              {/* Analysis Alert - Solo visible si AXIS AI está activo */}
+              {axisAI && analysis && (
                 <View
                   className={`p-4 rounded-xl mb-4 border ${
                     analysis.isBalanced
@@ -378,7 +264,10 @@ export const AddOptionModal: React.FC<AddOptionModalProps> = ({
                     ) : analysis.isBalanced ? (
                       <CheckCircle size={18} color="#22C55E" />
                     ) : (
-                      <AlertTriangle size={18} color={analysis.hasUnhealthyOnly ? '#EF4444' : '#EAB308'} />
+                      <AlertTriangle
+                        size={18}
+                        color={analysis.hasUnhealthyOnly ? '#EF4444' : '#EAB308'}
+                      />
                     )}
                     <Text
                       className={`font-bold ${
@@ -398,6 +287,13 @@ export const AddOptionModal: React.FC<AddOptionModalProps> = ({
                             : '! Falta balance'}
                     </Text>
                   </View>
+
+                  {/* Target macros message */}
+                  {analysis.macroFitMessage && (
+                    <Text className="text-purple-400 text-xs font-mono mb-2">
+                      🎯 {analysis.macroFitMessage}
+                    </Text>
+                  )}
 
                   {/* Warnings */}
                   {analysis.warnings.map((warning, idx) => (

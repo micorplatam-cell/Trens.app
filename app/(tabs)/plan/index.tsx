@@ -11,7 +11,7 @@ import { useRouter } from 'expo-router';
 
 import { MealCard } from '../../../components/plan/MealCard';
 import { StackCard } from '../../../components/plan/StackCard';
-import { WorkoutBlock } from '../../../components/plan/WorkoutBlock';
+import { DraggableWorkoutBlock } from '../../../components/plan/DraggableWorkoutBlock';
 import { AddMealModal } from '../../../components/plan/AddMealModal';
 import { EditMealModal } from '../../../components/plan/EditMealModal';
 import { TimePickerModal } from '../../../components/plan/TimePickerModal';
@@ -22,6 +22,8 @@ import { useAxis } from '../../../context/AxisContext';
 import {
   calculateMacrosWithAI,
   calculateUserDailyMacros,
+  recalculateAllMealsForNewCount,
+  calculateMealWithUserMacros,
 } from '../../../services/axis/nutrition';
 
 // ============================================================================
@@ -76,7 +78,7 @@ interface WorkoutBlockData {
   routineName: string;
   preStack: StackItem[];
   postStack: StackItem[];
-  exercises?: { id: string; name: string; imageUrl?: string }[];
+  exercises?: { id: string; name: string; sets?: number; reps?: string; imageUrl?: string }[];
 }
 
 interface TimelineItem {
@@ -115,7 +117,9 @@ export default function PlanScreen() {
   const [stackItems, setStackItems] = useState<StackItem[]>([]);
   const [workoutPosIndex, setWorkoutPosIndex] = useState(2);
   const [todayRoutine, setTodayRoutine] = useState<string>('SIN RUTINA');
-  const [todayExercises, setTodayExercises] = useState<{ id: string; name: string }[]>([]);
+  const [todayExercises, setTodayExercises] = useState<
+    { id: string; name: string; sets?: number; reps?: string; imageUrl?: string }[]
+  >([]);
 
   // Modals
   const [showAddMeal, setShowAddMeal] = useState(false);
@@ -129,6 +133,12 @@ export default function PlanScreen() {
   const [addOptionMealId, setAddOptionMealId] = useState<string | null>(null);
   const [addOptionMealName, setAddOptionMealName] = useState('');
   const [mealMacros, setMealMacros] = useState<{
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+  } | null>(null);
+  const [newMealMacros, setNewMealMacros] = useState<{
     calories: number;
     protein: number;
     carbs: number;
@@ -185,10 +195,39 @@ export default function PlanScreen() {
         .order('time', { ascending: true });
 
       if (mealsData) {
+        // Calcular macros objetivo por comida
+        let perMealMacros: {
+          calories: number;
+          protein: number;
+          carbs: number;
+          fat: number;
+        } | null = null;
+
+        try {
+          const { data: profile } = await supabase
+            .from('user_profiles')
+            .select('weight, height, goal')
+            .eq('user_id', user.id)
+            .single();
+
+          if (profile) {
+            const dailyMacros = await calculateUserDailyMacros({
+              weight: profile.weight || '75 KG',
+              height: profile.height || '1.75 M',
+              goal: profile.goal || 'MANTENER',
+              mealCount: mealsData.length || 3,
+            });
+            perMealMacros = dailyMacros.perMeal;
+          }
+        } catch (error) {
+          console.error('Error calculating daily macros:', error);
+        }
+
         const formattedMeals: Meal[] = mealsData.map((meal) => ({
           id: meal.id,
           time: meal.time?.slice(0, 5) || '12:00',
           selectedOption: meal.selected_option || 0,
+          targetMacros: perMealMacros || undefined,
           options: (meal.meal_options || [])
             .sort(
               (a: { option_index: number }, b: { option_index: number }) =>
@@ -248,47 +287,114 @@ export default function PlanScreen() {
       }
 
       // Fetch workout block position
-      const { data: posData } = await supabase
+      const { data: posData, error: posError } = await supabase
         .from('workout_block_position')
         .select('position_index')
         .eq('user_id', user.id)
-        .single();
+        .order('updated_at', { ascending: false })
+        .limit(1);
 
-      if (posData) {
-        setWorkoutPosIndex(posData.position_index);
+      console.warn('🏋️ PLAN: Posición cargada:', posData, posError);
+      if (posData && posData.length > 0) {
+        setWorkoutPosIndex(posData[0].position_index);
       }
 
-      // Fetch today's routine from user_assets
-      const today = new Date().toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase();
-      const { data: routineData } = await supabase
-        .from('user_assets')
-        .select('name')
-        .eq('user_id', user.id)
-        .contains('training_days', [today])
-        .is('deleted_at', null)
-        .limit(1)
+      // Fetch current training day from profiles
+      // El sistema usa días de entrenamiento (0, 1, 2...) no días de la semana
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('training_current_day, training_routine_names')
+        .eq('id', user.id)
         .single();
 
-      if (routineData) {
-        setTodayRoutine(routineData.name);
+      const currentTrainingDay = profileData?.training_current_day ?? 0;
+      const routineNames = profileData?.training_routine_names || {};
+      console.warn(`🏋️ PLAN: Día de entrenamiento actual: ${currentTrainingDay}`);
+      console.warn(`🏋️ PLAN: Nombres de rutinas:`, routineNames);
+
+      // Fetch exercises for current training day
+      // Cada ejercicio es un registro individual con asset_type='gym_exercise'
+      const { data: exercisesData, error: exercisesError } = await supabase
+        .from('user_assets')
+        .select('id, name, asset_url, training_days, metadata')
+        .eq('user_id', user.id)
+        .eq('asset_type', 'gym_exercise')
+        .is('deleted_at', null)
+        .order('order', { ascending: true });
+
+      console.warn(`🏋️ PLAN: Total ejercicios encontrados: ${exercisesData?.length || 0}`);
+      if (exercisesError) {
+        console.error('Error fetching exercises:', exercisesError);
       }
-
-      // Fetch today's exercises
-      const { data: exercisesData } = await supabase
-        .from('user_assets')
-        .select('exercises')
-        .eq('user_id', user.id)
-        .contains('training_days', [today])
-        .is('deleted_at', null)
-        .single();
-
-      if (exercisesData?.exercises) {
-        setTodayExercises(
-          exercisesData.exercises.slice(0, 6).map((ex: { name: string }, idx: number) => ({
-            id: `ex-${idx}`,
-            name: ex.name,
+      if (exercisesData && exercisesData.length > 0) {
+        console.warn(
+          '🏋️ PLAN: Ejercicios:',
+          exercisesData.map((e: any) => ({
+            name: e.name,
+            training_days: e.training_days,
           }))
         );
+      }
+
+      // Filtrar por día de entrenamiento
+      const todayExercisesFiltered =
+        exercisesData?.filter((item: any) => {
+          const itemDays = item.training_days || [0];
+          return itemDays.includes(currentTrainingDay);
+        }) || [];
+
+      console.warn(
+        `🏋️ PLAN: Ejercicios para día ${currentTrainingDay}: ${todayExercisesFiltered.length}`
+      );
+
+      if (todayExercisesFiltered.length > 0) {
+        // Usar nombre de rutina guardado de la base de datos
+        const savedRoutineName = routineNames[String(currentTrainingDay)];
+
+        // Si no hay nombre guardado, mostrar "RUTINA DÍA X"
+        const finalRoutineName = savedRoutineName || `RUTINA DÍA ${currentTrainingDay + 1}`;
+
+        setTodayRoutine(finalRoutineName);
+
+        // Helper para verificar si es video
+        const isVideoUrl = (url: string) => {
+          const videoExtensions = ['.mp4', '.mov', '.avi', '.webm', '.m4v'];
+          return videoExtensions.some((ext) => url.toLowerCase().includes(ext));
+        };
+
+        // Formatear ejercicios para el slider
+        const formattedExercises = todayExercisesFiltered.map((item: any, idx: number) => {
+          const url = item.asset_url || '';
+          const isVideo = isVideoUrl(url);
+
+          // Para videos, intentar obtener thumbnail_url del metadata, o usar videoUrl
+          let imageUrl = undefined;
+          let videoUrl = undefined;
+
+          if (isVideo) {
+            // Buscar thumbnail en metadata si existe
+            imageUrl = item.metadata?.thumbnail_url;
+            videoUrl = url;
+          } else {
+            imageUrl = url || undefined;
+          }
+
+          return {
+            id: item.id || `ex-${idx}`,
+            name: item.name,
+            imageUrl,
+            videoUrl,
+          };
+        });
+
+        console.warn('🏋️ Rutina:', finalRoutineName);
+        console.warn('🏋️ Ejercicios formateados:', formattedExercises.length);
+        setTodayExercises(formattedExercises.slice(0, 10));
+      } else {
+        // No hay ejercicios para hoy - día de descanso
+        console.warn('🏋️ Sin ejercicios para hoy - DESCANSO');
+        setTodayRoutine('DESCANSO');
+        setTodayExercises([]);
       }
     } catch (error) {
       console.error('Error fetching plan data:', error);
@@ -403,10 +509,161 @@ export default function PlanScreen() {
         onPress: async () => {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
           await supabase.from('meals').delete().eq('id', mealId);
-          setMeals((prev) => prev.filter((m) => m.id !== mealId));
+          const newMeals = meals.filter((m) => m.id !== mealId);
+          setMeals(newMeals);
+
+          // Recalcular macros de todas las comidas restantes
+          if (newMeals.length > 0) {
+            const mealIds = newMeals.map((m) => m.id);
+            recalculateAllMealsAfterChange(newMeals.length, mealIds);
+          }
         },
       },
     ]);
+  };
+
+  // Eliminar solo una opción/platillo de una comida
+  const handleDeleteOption = async (mealId: string, optionId: string) => {
+    const meal = meals.find((m) => m.id === mealId);
+    if (!meal) return;
+
+    const optionIndex = meal.options.findIndex((o) => o.id === optionId);
+    const optionName = optionIndex >= 0 ? `Opción ${optionIndex + 1}` : 'esta opción';
+
+    Alert.alert('Eliminar Platillo', `¿Estás seguro de que quieres eliminar ${optionName}?`, [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Eliminar',
+        style: 'destructive',
+        onPress: async () => {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+
+          // Eliminar la opción de la base de datos (cascade eliminará ingredientes)
+          await supabase.from('meal_options').delete().eq('id', optionId);
+
+          // Actualizar estado local
+          const updatedMeals = meals.map((m) => {
+            if (m.id === mealId) {
+              const newOptions = m.options.filter((o) => o.id !== optionId);
+              return {
+                ...m,
+                options: newOptions,
+                selectedOption: Math.min(m.selectedOption, newOptions.length - 1),
+              };
+            }
+            return m;
+          });
+          setMeals(updatedMeals);
+
+          // Actualizar selected_option en la BD si es necesario
+          const updatedMeal = updatedMeals.find((m) => m.id === mealId);
+          if (updatedMeal) {
+            await supabase
+              .from('meals')
+              .update({ selected_option: updatedMeal.selectedOption })
+              .eq('id', mealId);
+          }
+        },
+      },
+    ]);
+  };
+
+  // Recalcular macros de todas las comidas cuando cambia la cantidad
+  const recalculateAllMealsAfterChange = async (newMealCount: number, mealIds?: string[]) => {
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // Obtener perfil del usuario
+      const { data: profile } = await supabase
+        .from('user_profiles')
+        .select('weight, height, goal')
+        .eq('user_id', user.id)
+        .single();
+
+      if (!profile) return;
+
+      // Usar mealIds proporcionados o obtenerlos de la base de datos
+      let targetMealIds = mealIds;
+      if (!targetMealIds) {
+        const { data: currentMeals } = await supabase
+          .from('meals')
+          .select('id')
+          .eq('user_id', user.id);
+        targetMealIds = currentMeals?.map((m) => m.id) || [];
+      }
+
+      if (targetMealIds.length === 0) return;
+
+      // Obtener todas las opciones con sus ingredientes
+      const { data: allOptions } = await supabase
+        .from('meal_options')
+        .select(
+          `
+          id,
+          meal_id,
+          meal_ingredients (
+            id,
+            name,
+            quantity,
+            portion
+          )
+        `
+        )
+        .in('meal_id', targetMealIds);
+
+      if (!allOptions || allOptions.length === 0) return;
+
+      // Preparar datos para recálculo
+      const mealsToRecalculate = allOptions.map((opt) => ({
+        optionId: opt.id,
+        ingredients: (
+          opt.meal_ingredients as { id: string; name: string; quantity: string; portion?: string }[]
+        ).map((ing) => ({
+          name: ing.name,
+        })),
+      }));
+
+      console.log(
+        `🔄 Recalculando ${mealsToRecalculate.length} opciones para ${newMealCount} comidas...`
+      );
+
+      // Recalcular con IA
+      const recalculated = await recalculateAllMealsForNewCount(mealsToRecalculate, {
+        weight: profile.weight || '75 KG',
+        height: profile.height || '1.75 M',
+        goal: profile.goal || 'MANTENER',
+        mealCount: newMealCount,
+      });
+
+      // Actualizar cada opción en la base de datos
+      for (const option of recalculated) {
+        // Eliminar ingredientes anteriores
+        await supabase.from('meal_ingredients').delete().eq('option_id', option.optionId);
+
+        // Insertar nuevos ingredientes recalculados
+        const ingredientsToInsert = option.ingredients.map((ing, idx) => ({
+          option_id: option.optionId,
+          name: ing.name,
+          quantity: ing.quantity,
+          portion: ing.portion,
+          sort_order: idx,
+        }));
+
+        await supabase.from('meal_ingredients').insert(ingredientsToInsert);
+      }
+
+      console.log('✅ Recálculo completado, actualizando UI...');
+
+      // Refrescar datos para actualizar la UI
+      await fetchData();
+
+      console.log('✅ UI actualizada');
+    } catch (error) {
+      console.error('❌ Error recalculando comidas:', error);
+    }
   };
 
   // Editar comida (abre modal)
@@ -449,9 +706,24 @@ export default function PlanScreen() {
     }
   };
 
-  // Calcular macros con IA
-  const handleCalculateMacros = async (ingredients: Ingredient[]): Promise<Ingredient[]> => {
+  // Calcular macros con IA usando targetMacros
+  const handleCalculateMacros = async (
+    ingredients: Ingredient[],
+    targetMacros?: { calories: number; protein: number; carbs: number; fat: number }
+  ): Promise<Ingredient[]> => {
     try {
+      // Si hay targetMacros, usar la función precisa
+      if (targetMacros) {
+        const calculated = await calculateMealWithUserMacros(ingredients, targetMacros);
+        return calculated.map((ing) => ({
+          id: ing.id,
+          name: ing.name,
+          quantity: ing.quantity,
+          portion: ing.portion,
+        }));
+      }
+
+      // Fallback a la función genérica
       const calculated = await calculateMacrosWithAI(ingredients);
       return calculated.map((ing) => ({
         id: ing.id,
@@ -550,12 +822,49 @@ export default function PlanScreen() {
             quantity: ing.quantity || '',
             portion: ing.portion || '',
           }));
-          const calculated = await calculateMacrosWithAI(ingredientsWithIds);
-          finalIngredients = calculated.map((ing) => ({
-            name: ing.name,
-            quantity: ing.quantity,
-            portion: ing.portion || '',
-          }));
+
+          // Calcular targetMacros para la nueva comida
+          const newMealCount = meals.length + 1;
+          let targetMacrosForNewMeal = newMealMacros;
+
+          if (!targetMacrosForNewMeal) {
+            // Recalcular si no hay macros precalculados
+            const { data: profile } = await supabase
+              .from('user_profiles')
+              .select('weight, height, goal')
+              .eq('user_id', user.id)
+              .single();
+
+            if (profile) {
+              const dailyMacros = await calculateUserDailyMacros({
+                weight: profile.weight || '75 KG',
+                height: profile.height || '1.75 M',
+                goal: profile.goal || 'MANTENER',
+                mealCount: newMealCount,
+              });
+              targetMacrosForNewMeal = dailyMacros.perMeal;
+            }
+          }
+
+          // Usar calculateMealWithUserMacros si hay targetMacros
+          if (targetMacrosForNewMeal) {
+            const calculated = await calculateMealWithUserMacros(
+              ingredientsWithIds,
+              targetMacrosForNewMeal
+            );
+            finalIngredients = calculated.map((ing) => ({
+              name: ing.name,
+              quantity: ing.quantity,
+              portion: ing.portion || '',
+            }));
+          } else {
+            const calculated = await calculateMacrosWithAI(ingredientsWithIds);
+            finalIngredients = calculated.map((ing) => ({
+              name: ing.name,
+              quantity: ing.quantity,
+              portion: ing.portion || '',
+            }));
+          }
         } catch (aiError) {
           console.warn('Error calculando macros con IA, usando valores por defecto:', aiError);
         }
@@ -572,8 +881,12 @@ export default function PlanScreen() {
 
       await supabase.from('meal_ingredients').insert(ingredientsToInsert);
 
-      // Refresh data
-      fetchData();
+      // Calcular nuevo número de comidas
+      const newMealCount = meals.length + 1;
+
+      // Recalcular macros de todas las comidas (incluida la nueva)
+      // Esto también refrescará los datos al final
+      await recalculateAllMealsAfterChange(newMealCount);
     } catch (error) {
       console.error('Error adding meal:', error);
       Alert.alert('Error', 'No se pudo agregar la comida');
@@ -706,17 +1019,53 @@ export default function PlanScreen() {
 
   const handleMoveWorkout = async (direction: 'up' | 'down') => {
     const newIndex = direction === 'up' ? Math.max(0, workoutPosIndex - 1) : workoutPosIndex + 1;
+    await saveWorkoutPosition(newIndex);
+  };
 
+  // Handler for drag & drop
+  const handleDragEnd = async (newIndex: number) => {
+    await saveWorkoutPosition(newIndex);
+  };
+
+  // Shared function to save position
+  const saveWorkoutPosition = async (newIndex: number) => {
     setWorkoutPosIndex(newIndex);
+    console.warn('🏋️ PLAN: Nueva posición:', newIndex);
 
     const {
       data: { user },
     } = await supabase.auth.getUser();
     if (user) {
-      await supabase.from('workout_block_position').upsert({
-        user_id: user.id,
-        position_index: newIndex,
-      });
+      // Primero intentar actualizar
+      const { data: existing } = await supabase
+        .from('workout_block_position')
+        .select('id')
+        .eq('user_id', user.id)
+        .limit(1)
+        .single();
+
+      if (existing) {
+        // Actualizar el existente
+        const { error } = await supabase
+          .from('workout_block_position')
+          .update({ position_index: newIndex, updated_at: new Date().toISOString() })
+          .eq('id', existing.id);
+        console.warn(
+          '🏋️ PLAN: Actualizando posición:',
+          newIndex,
+          error ? `Error: ${error.message}` : 'OK'
+        );
+      } else {
+        // Insertar nuevo
+        const { error } = await supabase
+          .from('workout_block_position')
+          .insert({ user_id: user.id, position_index: newIndex });
+        console.warn(
+          '🏋️ PLAN: Insertando posición:',
+          newIndex,
+          error ? `Error: ${error.message}` : 'OK'
+        );
+      }
     }
   };
 
@@ -851,6 +1200,7 @@ export default function PlanScreen() {
                     onSwap={handleSwap}
                     onTimeChange={handleTimeChange}
                     onDelete={handleDeleteMeal}
+                    onDeleteOption={handleDeleteOption}
                     onEdit={handleEditMeal}
                     onAddOption={handleAddOption}
                   />
@@ -865,14 +1215,16 @@ export default function PlanScreen() {
               if (item.type === 'workout') {
                 const workout = item.data as WorkoutBlockData;
                 return (
-                  <WorkoutBlock
+                  <DraggableWorkoutBlock
                     key="workout-block"
                     data={workout}
+                    currentIndex={workoutPosIndex}
+                    totalItems={timeline.length}
                     onMoveUp={() => handleMoveWorkout('up')}
                     onMoveDown={() => handleMoveWorkout('down')}
-                    isFirst={workoutPosIndex === 0}
-                    isLast={workoutPosIndex >= timeline.length - 1}
+                    onDragEnd={handleDragEnd}
                     onPressRoutine={() => router.push('/(tabs)/gym')}
+                    itemHeight={160}
                   />
                 );
               }
@@ -884,8 +1236,33 @@ export default function PlanScreen() {
 
         {/* Add Meal Button */}
         <Pressable
-          onPress={() => {
+          onPress={async () => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            // Calcular macros para la nueva comida (n+1 comidas)
+            try {
+              const {
+                data: { user },
+              } = await supabase.auth.getUser();
+              if (user) {
+                const { data: profile } = await supabase
+                  .from('user_profiles')
+                  .select('weight, height, goal')
+                  .eq('user_id', user.id)
+                  .single();
+
+                if (profile) {
+                  const dailyMacros = await calculateUserDailyMacros({
+                    weight: profile.weight || '75 KG',
+                    height: profile.height || '1.75 M',
+                    goal: profile.goal || 'MANTENER',
+                    mealCount: meals.length + 1, // Nueva comida
+                  });
+                  setNewMealMacros(dailyMacros.perMeal);
+                }
+              }
+            } catch (error) {
+              console.error('Error calculating macros for new meal:', error);
+            }
             setShowAddMeal(true);
           }}
           className="w-full py-4 mt-4 mb-24 border-2 border-dashed border-zinc-800 rounded-xl active:border-white/20 active:bg-white/5"
@@ -900,7 +1277,11 @@ export default function PlanScreen() {
       {/* Modals */}
       <AddMealModal
         visible={showAddMeal}
-        onClose={() => setShowAddMeal(false)}
+        targetMacros={newMealMacros || undefined}
+        onClose={() => {
+          setShowAddMeal(false);
+          setNewMealMacros(null);
+        }}
         onSave={handleAddMeal}
       />
 
