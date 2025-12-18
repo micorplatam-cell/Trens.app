@@ -5,10 +5,7 @@
 
 import React, { useRef, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, Dimensions } from 'react-native';
-import Animated, {
-  useAnimatedStyle,
-  useSharedValue,
-} from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { Clock, Plus, ChevronLeft, ChevronRight } from 'lucide-react-native';
 
@@ -98,24 +95,30 @@ export const MealCard: React.FC<MealCardProps> = ({
   };
 
   // Navegar a opción específica
-  const navigateToOption = useCallback((index: number) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    scrollViewRef.current?.scrollTo({
-      x: index * OPTION_WIDTH,
-      animated: true,
-    });
-    onSwap(meal.id, index);
-  }, [meal.id, onSwap]);
+  const navigateToOption = useCallback(
+    (index: number) => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      scrollViewRef.current?.scrollTo({
+        x: index * OPTION_WIDTH,
+        animated: true,
+      });
+      onSwap(meal.id, index);
+    },
+    [meal.id, onSwap]
+  );
 
   // Handle scroll end
-  const handleScrollEnd = useCallback((event: { nativeEvent: { contentOffset: { x: number } } }) => {
-    const offsetX = event.nativeEvent.contentOffset.x;
-    const newIndex = Math.round(offsetX / OPTION_WIDTH);
-    if (newIndex !== meal.selectedOption && newIndex >= 0 && newIndex < meal.options.length) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      onSwap(meal.id, newIndex);
-    }
-  }, [meal.id, meal.selectedOption, meal.options.length, onSwap]);
+  const handleScrollEnd = useCallback(
+    (event: { nativeEvent: { contentOffset: { x: number } } }) => {
+      const offsetX = event.nativeEvent.contentOffset.x;
+      const newIndex = Math.round(offsetX / OPTION_WIDTH);
+      if (newIndex !== meal.selectedOption && newIndex >= 0 && newIndex < meal.options.length) {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        onSwap(meal.id, newIndex);
+      }
+    },
+    [meal.id, meal.selectedOption, meal.options.length, onSwap]
+  );
 
   // Handle add option
   const handleAddOption = () => {
@@ -149,9 +152,7 @@ export const MealCard: React.FC<MealCardProps> = ({
         {hasMultipleOptions && (
           <View className="flex-row items-center gap-2 mb-3">
             <View className="bg-zinc-800 px-2 py-0.5 rounded">
-              <Text className="text-zinc-400 text-xs font-mono">
-                OPCIÓN {index + 1}
-              </Text>
+              <Text className="text-zinc-400 text-xs font-mono">OPCIÓN {index + 1}</Text>
             </View>
             {option.name !== 'Opción Principal' && option.name !== 'Opción' && (
               <Text className="text-zinc-500 text-xs">{option.name}</Text>
@@ -161,17 +162,10 @@ export const MealCard: React.FC<MealCardProps> = ({
 
         {/* Ingredients */}
         {option.ingredients.map((ingredient, idx) => (
-          <View
-            key={ingredient.id || idx}
-            className="flex-row justify-between items-start py-1.5"
-          >
-            <Text className="text-zinc-300 font-medium flex-1 pr-2">
-              {ingredient.name}
-            </Text>
+          <View key={ingredient.id || idx} className="flex-row justify-between items-start py-1.5">
+            <Text className="text-zinc-300 font-medium flex-1 pr-2">{ingredient.name}</Text>
             <View className="items-end">
-              <Text className="text-white font-bold font-mono">
-                {ingredient.quantity}
-              </Text>
+              <Text className="text-white font-bold font-mono">{ingredient.quantity}</Text>
               {ingredient.portion && (
                 <Text className="text-zinc-500 text-xs">{ingredient.portion}</Text>
               )}
@@ -202,9 +196,7 @@ export const MealCard: React.FC<MealCardProps> = ({
         <View className="bg-zinc-800 p-3 rounded-full mb-2">
           <Plus size={24} color="#71717a" />
         </View>
-        <Text className="text-zinc-500 text-xs font-medium text-center">
-          AÑADIR{'\n'}PLATILLO
-        </Text>
+        <Text className="text-zinc-500 text-xs font-medium text-center">AÑADIR{'\n'}PLATILLO</Text>
       </View>
     </Pressable>
   );
@@ -230,9 +222,7 @@ export const MealCard: React.FC<MealCardProps> = ({
                 <Text className="text-yellow-500 text-xs font-mono">
                   {meal.targetMacros.carbs}C
                 </Text>
-                <Text className="text-blue-400 text-xs font-mono">
-                  {meal.targetMacros.fat}G
-                </Text>
+                <Text className="text-blue-400 text-xs font-mono">{meal.targetMacros.fat}G</Text>
                 <Text className="text-zinc-500 text-xs font-mono">
                   {meal.targetMacros.calories} kcal
                 </Text>
@@ -278,16 +268,10 @@ export const MealCard: React.FC<MealCardProps> = ({
           {/* Dots */}
           <View className="flex-row gap-2 flex-1 justify-center">
             {meal.options.map((_, idx) => (
-              <Pressable
-                key={idx}
-                onPress={() => navigateToOption(idx)}
-                className="p-1"
-              >
+              <Pressable key={idx} onPress={() => navigateToOption(idx)} className="p-1">
                 <View
                   className={`rounded-full ${
-                    idx === meal.selectedOption
-                      ? 'bg-white w-6 h-1.5'
-                      : 'bg-zinc-600 w-1.5 h-1.5'
+                    idx === meal.selectedOption ? 'bg-white w-6 h-1.5' : 'bg-zinc-600 w-1.5 h-1.5'
                   }`}
                 />
               </Pressable>
@@ -301,7 +285,9 @@ export const MealCard: React.FC<MealCardProps> = ({
 
           {/* Navigation arrows */}
           <Pressable
-            onPress={() => navigateToOption(Math.min(meal.options.length - 1, meal.selectedOption + 1))}
+            onPress={() =>
+              navigateToOption(Math.min(meal.options.length - 1, meal.selectedOption + 1))
+            }
             disabled={meal.selectedOption === meal.options.length - 1}
             className={`p-1 ${meal.selectedOption === meal.options.length - 1 ? 'opacity-20' : 'opacity-100'}`}
           >

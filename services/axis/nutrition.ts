@@ -247,11 +247,11 @@ interface SimpleIngredient {
 // USER PROFILE FOR MACROS CALCULATION
 // ============================================================================
 interface UserMacroProfile {
-  weight: string;        // "80.5 KG"
-  height: string;        // "1.75 M"
-  goal: string;          // "GANAR MASA MUSCULAR", "DEFINIR", "MANTENER"
+  weight: string; // "80.5 KG"
+  height: string; // "1.75 M"
+  goal: string; // "GANAR MASA MUSCULAR", "DEFINIR", "MANTENER"
   activityLevel?: string; // "SEDENTARIO", "MODERADO", "ACTIVO", "MUY ACTIVO"
-  mealCount: number;     // Número de comidas del usuario
+  mealCount: number; // Número de comidas del usuario
 }
 
 interface DailyMacros {
@@ -271,56 +271,68 @@ interface DailyMacros {
 // CALCULATE USER DAILY MACROS
 // Calcula los macros totales del usuario basado en su perfil
 // ============================================================================
-export async function calculateUserDailyMacros(
-  profile: UserMacroProfile
-): Promise<DailyMacros> {
+export async function calculateUserDailyMacros(profile: UserMacroProfile): Promise<DailyMacros> {
   // Extraer peso en kg
   const weightMatch = profile.weight.match(/(\d+\.?\d*)/);
   const weightKg = weightMatch ? parseFloat(weightMatch[1]) : 75;
-  
+
   // Extraer altura en metros
   const heightMatch = profile.height.match(/(\d+\.?\d*)/);
   const heightM = heightMatch ? parseFloat(heightMatch[1]) : 1.75;
-  
+
   // Calcular BMR (Basal Metabolic Rate) con Harris-Benedict
   // Asumiendo hombre adulto por defecto
-  const bmr = 88.362 + (13.397 * weightKg) + (4.799 * heightM * 100) - (5.677 * 30); // Edad estimada 30
-  
+  const bmr = 88.362 + 13.397 * weightKg + 4.799 * heightM * 100 - 5.677 * 30; // Edad estimada 30
+
   // Factor de actividad
   let activityFactor = 1.55; // Moderadamente activo por defecto
   switch (profile.activityLevel?.toUpperCase()) {
-    case 'SEDENTARIO': activityFactor = 1.2; break;
-    case 'LIGERO': activityFactor = 1.375; break;
-    case 'MODERADO': activityFactor = 1.55; break;
-    case 'ACTIVO': activityFactor = 1.725; break;
-    case 'MUY ACTIVO': activityFactor = 1.9; break;
+    case 'SEDENTARIO':
+      activityFactor = 1.2;
+      break;
+    case 'LIGERO':
+      activityFactor = 1.375;
+      break;
+    case 'MODERADO':
+      activityFactor = 1.55;
+      break;
+    case 'ACTIVO':
+      activityFactor = 1.725;
+      break;
+    case 'MUY ACTIVO':
+      activityFactor = 1.9;
+      break;
   }
-  
+
   // TDEE (Total Daily Energy Expenditure)
   let tdee = bmr * activityFactor;
-  
+
   // Ajuste por objetivo
   const goalLower = profile.goal.toLowerCase();
   let proteinMultiplier = 2.0; // g por kg por defecto
-  let carbPercentage = 0.40;
+  let carbPercentage = 0.4;
   let fatPercentage = 0.25;
-  
+
   if (goalLower.includes('ganar') || goalLower.includes('masa') || goalLower.includes('volumen')) {
     tdee *= 1.15; // Surplus del 15%
     proteinMultiplier = 2.2;
     carbPercentage = 0.45;
     fatPercentage = 0.25;
-  } else if (goalLower.includes('defin') || goalLower.includes('perder') || goalLower.includes('bajar')) {
+  } else if (
+    goalLower.includes('defin') ||
+    goalLower.includes('perder') ||
+    goalLower.includes('bajar')
+  ) {
     tdee *= 0.85; // Deficit del 15%
     proteinMultiplier = 2.4; // Más proteína en déficit
-    carbPercentage = 0.30;
-    fatPercentage = 0.30;
+    carbPercentage = 0.3;
+    fatPercentage = 0.3;
   } else if (goalLower.includes('mantener') || goalLower.includes('recomp')) {
     proteinMultiplier = 2.0;
-    carbPercentage = 0.40;
+    carbPercentage = 0.4;
     fatPercentage = 0.25;
   }
-  
+
   // Calcular macros
   const totalCalories = Math.round(tdee);
   const totalProtein = Math.round(weightKg * proteinMultiplier);
@@ -328,10 +340,10 @@ export async function calculateUserDailyMacros(
   const remainingCalories = totalCalories - proteinCalories;
   const totalCarbs = Math.round((remainingCalories * carbPercentage) / 4);
   const totalFat = Math.round((remainingCalories * fatPercentage) / 9);
-  
+
   // Distribuir entre comidas
   const mealCount = Math.max(profile.mealCount, 1);
-  
+
   return {
     totalCalories,
     totalProtein,

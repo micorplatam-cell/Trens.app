@@ -1,9 +1,9 @@
 // ============================================================================
 // ADD OPTION MODAL - Modal para añadir un nuevo platillo a una comida
-// Genera opciones con AXIS AI o permite ingreso manual
+// Con análisis inteligente de ingredientes por AXIS AI
 // ============================================================================
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -16,7 +16,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
-import { X, Plus, Trash2, Zap, Sparkles } from 'lucide-react-native';
+import { X, Plus, Trash2, Zap, AlertTriangle, CheckCircle } from 'lucide-react-native';
 
 // ============================================================================
 // TYPES
@@ -26,6 +26,16 @@ interface Ingredient {
   name: string;
   quantity: string;
   portion?: string;
+}
+
+interface IngredientAnalysis {
+  isBalanced: boolean;
+  hasProtein: boolean;
+  hasCarbs: boolean;
+  hasFat: boolean;
+  hasUnhealthyOnly: boolean;
+  suggestions: string[];
+  warnings: string[];
 }
 
 interface AddOptionModalProps {
@@ -41,8 +51,132 @@ interface AddOptionModalProps {
   onClose: () => void;
   onSave: (mealId: string, optionName: string, ingredients: Ingredient[]) => Promise<void>;
   onCalculateMacros?: (ingredients: Ingredient[]) => Promise<Ingredient[]>;
-  onGenerateWithAI?: (mealId: string) => Promise<{ name: string; ingredients: Ingredient[] } | null>;
+  onAnalyzeIngredients?: (
+    ingredients: Ingredient[],
+    targetMacros?: { protein: number; carbs: number; fat: number }
+  ) => Promise<IngredientAnalysis>;
 }
+
+// ============================================================================
+// LOCAL INGREDIENT ANALYZER (fallback sin IA)
+// ============================================================================
+const analyzeIngredientsLocally = (ingredients: Ingredient[]): IngredientAnalysis => {
+  const names = ingredients.map((i) => i.name.toLowerCase()).join(' ');
+
+  // Patrones de detección
+  const proteinKeywords = [
+    'pollo',
+    'carne',
+    'res',
+    'cerdo',
+    'pescado',
+    'atún',
+    'salmón',
+    'huevo',
+    'claras',
+    'whey',
+    'proteína',
+    'tofu',
+    'tempeh',
+    'legumbres',
+    'lentejas',
+    'frijoles',
+    'garbanzos',
+    'camarones',
+    'pavo',
+    'jamón',
+    'queso',
+    'yogur',
+    'leche',
+  ];
+  const carbKeywords = [
+    'arroz',
+    'pasta',
+    'pan',
+    'avena',
+    'papa',
+    'patata',
+    'camote',
+    'batata',
+    'quinoa',
+    'maíz',
+    'tortilla',
+    'cereal',
+    'fruta',
+    'plátano',
+    'manzana',
+    'banana',
+  ];
+  const fatKeywords = [
+    'aceite',
+    'aguacate',
+    'nueces',
+    'almendras',
+    'mantequilla',
+    'manteca',
+    'tocino',
+    'bacon',
+    'aceitunas',
+    'coco',
+    'maní',
+    'cacahuate',
+  ];
+  const unhealthyKeywords = [
+    'azúcar',
+    'azucar',
+    'refresco',
+    'soda',
+    'dulce',
+    'caramelo',
+    'chocolate',
+    'galleta',
+    'pastel',
+    'helado',
+    'donut',
+    'churro',
+    'frito',
+    'papas fritas',
+  ];
+
+  const hasProtein = proteinKeywords.some((k) => names.includes(k));
+  const hasCarbs = carbKeywords.some((k) => names.includes(k));
+  const hasFat = fatKeywords.some((k) => names.includes(k));
+  const hasUnhealthy = unhealthyKeywords.some((k) => names.includes(k));
+
+  const suggestions: string[] = [];
+  const warnings: string[] = [];
+
+  // Verificar si solo hay ingredientes no saludables
+  const hasUnhealthyOnly = hasUnhealthy && !hasProtein && !hasCarbs && !hasFat;
+
+  if (hasUnhealthyOnly) {
+    warnings.push('⚠️ Solo detecté ingredientes con poco valor nutricional');
+    suggestions.push('Agrega una fuente de proteína (pollo, huevo, pescado)');
+    suggestions.push('Incluye carbohidratos complejos (arroz, avena, papa)');
+  } else {
+    if (!hasProtein) {
+      suggestions.push('Agrega proteína: pollo, huevo, pescado, tofu');
+    }
+    if (!hasCarbs) {
+      suggestions.push('Agrega carbohidratos: arroz, papa, avena');
+    }
+    if (hasUnhealthy) {
+      warnings.push('Contiene ingredientes altos en azúcar o procesados');
+    }
+  }
+
+  const isBalanced = hasProtein && (hasCarbs || hasFat) && !hasUnhealthyOnly;
+
+  return {
+    isBalanced,
+    hasProtein,
+    hasCarbs,
+    hasFat,
+    hasUnhealthyOnly,
+    suggestions,
+    warnings,
+  };
+};
 
 // ============================================================================
 // COMPONENT
@@ -55,24 +189,54 @@ export const AddOptionModal: React.FC<AddOptionModalProps> = ({
   onClose,
   onSave,
   onCalculateMacros,
-  onGenerateWithAI,
+  onAnalyzeIngredients,
 }) => {
-  const [optionName, setOptionName] = useState('');
   const [ingredients, setIngredients] = useState<Ingredient[]>([
     { id: `new-${Date.now()}`, name: '', quantity: '', portion: '' },
   ]);
   const [isSaving, setIsSaving] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
   const [axisAI, setAxisAI] = useState(true);
+  const [analysis, setAnalysis] = useState<IngredientAnalysis | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   // Reset state when modal opens
-  React.useEffect(() => {
+  useEffect(() => {
     if (visible) {
-      setOptionName('');
       setIngredients([{ id: `new-${Date.now()}`, name: '', quantity: '', portion: '' }]);
       setAxisAI(true);
+      setAnalysis(null);
     }
   }, [visible]);
+
+  // Analizar ingredientes cuando cambian (con debounce)
+  useEffect(() => {
+    const validIngredients = ingredients.filter((ing) => ing.name.trim().length >= 3);
+    if (validIngredients.length === 0) {
+      setAnalysis(null);
+      return;
+    }
+
+    const timeoutId = setTimeout(async () => {
+      setIsAnalyzing(true);
+      try {
+        if (onAnalyzeIngredients && targetMacros) {
+          const result = await onAnalyzeIngredients(validIngredients, targetMacros);
+          setAnalysis(result);
+        } else {
+          // Análisis local como fallback
+          const result = analyzeIngredientsLocally(validIngredients);
+          setAnalysis(result);
+        }
+      } catch (error) {
+        console.error('Error analyzing:', error);
+        setAnalysis(analyzeIngredientsLocally(validIngredients));
+      } finally {
+        setIsAnalyzing(false);
+      }
+    }, 800); // Debounce de 800ms
+
+    return () => clearTimeout(timeoutId);
+  }, [ingredients, onAnalyzeIngredients, targetMacros]);
 
   const toggleAxisAI = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -100,28 +264,6 @@ export const AddOptionModal: React.FC<AddOptionModalProps> = ({
     setIngredients(newIngs);
   };
 
-  // Generar platillo completo con IA
-  const handleGenerateWithAI = async () => {
-    if (!onGenerateWithAI) return;
-
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    setIsGenerating(true);
-
-    try {
-      const generated = await onGenerateWithAI(mealId);
-      if (generated) {
-        setOptionName(generated.name);
-        setIngredients(generated.ingredients);
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      }
-    } catch (error) {
-      console.error('Error generating with AI:', error);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
   const handleSave = async () => {
     const validIngredients = ingredients.filter((ing) => ing.name.trim());
     if (validIngredients.length === 0) {
@@ -144,7 +286,7 @@ export const AddOptionModal: React.FC<AddOptionModalProps> = ({
         }
       }
 
-      const name = optionName.trim() || `Opción ${Date.now().toString().slice(-4)}`;
+      const name = `Opción ${Date.now().toString().slice(-4)}`;
       await onSave(mealId, name, finalIngredients);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       onClose();
@@ -171,9 +313,16 @@ export const AddOptionModal: React.FC<AddOptionModalProps> = ({
                 <Text className="text-zinc-500 text-xs">{mealName}</Text>
                 {targetMacros && (
                   <View className="flex-row gap-2 mt-1">
-                    <Text className="text-savage-red text-xs">{targetMacros.protein}P</Text>
-                    <Text className="text-yellow-500 text-xs">{targetMacros.carbs}C</Text>
-                    <Text className="text-blue-400 text-xs">{targetMacros.fat}G</Text>
+                    <Text className="text-savage-red text-xs font-mono">
+                      {targetMacros.protein}P
+                    </Text>
+                    <Text className="text-yellow-500 text-xs font-mono">
+                      {targetMacros.carbs}C
+                    </Text>
+                    <Text className="text-blue-400 text-xs font-mono">{targetMacros.fat}G</Text>
+                    <Text className="text-zinc-500 text-xs font-mono">
+                      {targetMacros.calories} kcal
+                    </Text>
                   </View>
                 )}
               </View>
@@ -183,41 +332,6 @@ export const AddOptionModal: React.FC<AddOptionModalProps> = ({
             </View>
 
             <ScrollView className="p-4" showsVerticalScrollIndicator={false}>
-              {/* AI Generate Button */}
-              {onGenerateWithAI && (
-                <Pressable
-                  onPress={handleGenerateWithAI}
-                  disabled={isGenerating}
-                  className="bg-gradient-to-r from-purple-900/30 to-blue-900/30 border border-purple-500/30 p-4 rounded-xl mb-4 active:opacity-80"
-                >
-                  <View className="flex-row items-center justify-center gap-3">
-                    {isGenerating ? (
-                      <ActivityIndicator size="small" color="#A855F7" />
-                    ) : (
-                      <Sparkles size={20} color="#A855F7" />
-                    )}
-                    <Text className="text-purple-300 font-bold">
-                      {isGenerating ? 'GENERANDO PLATILLO...' : 'GENERAR CON AXIS AI'}
-                    </Text>
-                  </View>
-                  <Text className="text-purple-400/60 text-xs text-center mt-1">
-                    Crea un platillo alternativo con los mismos macros
-                  </Text>
-                </Pressable>
-              )}
-
-              {/* Option Name */}
-              <Text className="text-zinc-400 text-xs font-bold mb-2 uppercase">
-                Nombre del platillo (opcional)
-              </Text>
-              <TextInput
-                value={optionName}
-                onChangeText={setOptionName}
-                placeholder="Ej: Versión vegetariana, Con arroz..."
-                placeholderTextColor="#666"
-                className="bg-[#222222] border border-white/10 text-white p-3 rounded-xl mb-4"
-              />
-
               {/* AXIS AI Toggle */}
               {onCalculateMacros && (
                 <View className="flex-row items-center justify-between bg-purple-900/10 p-4 rounded-xl border border-purple-500/20 mb-4">
@@ -244,6 +358,90 @@ export const AddOptionModal: React.FC<AddOptionModalProps> = ({
                       }`}
                     />
                   </Pressable>
+                </View>
+              )}
+
+              {/* Analysis Alert */}
+              {analysis && (
+                <View
+                  className={`p-4 rounded-xl mb-4 border ${
+                    analysis.isBalanced
+                      ? 'bg-green-900/20 border-green-500/30'
+                      : analysis.hasUnhealthyOnly
+                        ? 'bg-red-900/20 border-red-500/30'
+                        : 'bg-yellow-900/20 border-yellow-500/30'
+                  }`}
+                >
+                  <View className="flex-row items-center gap-2 mb-2">
+                    {isAnalyzing ? (
+                      <ActivityIndicator size="small" color="#A855F7" />
+                    ) : analysis.isBalanced ? (
+                      <CheckCircle size={18} color="#22C55E" />
+                    ) : (
+                      <AlertTriangle size={18} color={analysis.hasUnhealthyOnly ? '#EF4444' : '#EAB308'} />
+                    )}
+                    <Text
+                      className={`font-bold ${
+                        analysis.isBalanced
+                          ? 'text-green-400'
+                          : analysis.hasUnhealthyOnly
+                            ? 'text-red-400'
+                            : 'text-yellow-400'
+                      }`}
+                    >
+                      {isAnalyzing
+                        ? 'Analizando...'
+                        : analysis.isBalanced
+                          ? '✓ Comida balanceada'
+                          : analysis.hasUnhealthyOnly
+                            ? '✗ Revisar ingredientes'
+                            : '! Falta balance'}
+                    </Text>
+                  </View>
+
+                  {/* Warnings */}
+                  {analysis.warnings.map((warning, idx) => (
+                    <Text key={`w-${idx}`} className="text-red-400/80 text-xs mb-1">
+                      {warning}
+                    </Text>
+                  ))}
+
+                  {/* Suggestions */}
+                  {analysis.suggestions.map((suggestion, idx) => (
+                    <Text key={`s-${idx}`} className="text-yellow-400/80 text-xs mb-1">
+                      → {suggestion}
+                    </Text>
+                  ))}
+
+                  {/* Macro indicators */}
+                  {!analysis.isBalanced && (
+                    <View className="flex-row gap-3 mt-2 pt-2 border-t border-white/10">
+                      <View className="flex-row items-center gap-1">
+                        <View
+                          className={`w-2 h-2 rounded-full ${
+                            analysis.hasProtein ? 'bg-green-500' : 'bg-red-500'
+                          }`}
+                        />
+                        <Text className="text-zinc-400 text-xs">Proteína</Text>
+                      </View>
+                      <View className="flex-row items-center gap-1">
+                        <View
+                          className={`w-2 h-2 rounded-full ${
+                            analysis.hasCarbs ? 'bg-green-500' : 'bg-yellow-500'
+                          }`}
+                        />
+                        <Text className="text-zinc-400 text-xs">Carbos</Text>
+                      </View>
+                      <View className="flex-row items-center gap-1">
+                        <View
+                          className={`w-2 h-2 rounded-full ${
+                            analysis.hasFat ? 'bg-green-500' : 'bg-zinc-500'
+                          }`}
+                        />
+                        <Text className="text-zinc-400 text-xs">Grasas</Text>
+                      </View>
+                    </View>
+                  )}
                 </View>
               )}
 
@@ -313,9 +511,7 @@ export const AddOptionModal: React.FC<AddOptionModalProps> = ({
                 {isSaving ? (
                   <ActivityIndicator size="small" color="#FFF" />
                 ) : (
-                  <Text className="text-white font-bold text-center text-lg">
-                    AÑADIR PLATILLO
-                  </Text>
+                  <Text className="text-white font-bold text-center text-lg">AÑADIR PLATILLO</Text>
                 )}
               </Pressable>
             </ScrollView>

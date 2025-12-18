@@ -19,7 +19,10 @@ import { StackManagerModal } from '../../../components/plan/StackManagerModal';
 import { AddOptionModal } from '../../../components/plan/AddOptionModal';
 import { supabase } from '../../../lib/supabase';
 import { useAxis } from '../../../context/AxisContext';
-import { calculateMacrosWithAI, calculateUserDailyMacros, suggestMealAlternatives } from '../../../services/axis/nutrition';
+import {
+  calculateMacrosWithAI,
+  calculateUserDailyMacros,
+} from '../../../services/axis/nutrition';
 
 // ============================================================================
 // TYPES
@@ -125,7 +128,12 @@ export default function PlanScreen() {
   const [showAddOption, setShowAddOption] = useState(false);
   const [addOptionMealId, setAddOptionMealId] = useState<string | null>(null);
   const [addOptionMealName, setAddOptionMealName] = useState('');
-  const [mealMacros, setMealMacros] = useState<{ calories: number; protein: number; carbs: number; fat: number } | null>(null);
+  const [mealMacros, setMealMacros] = useState<{
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+  } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -618,7 +626,9 @@ export default function PlanScreen() {
     let macros = meal.targetMacros;
     if (!macros) {
       try {
-        const { data: { user } } = await supabase.auth.getUser();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
         if (user) {
           const { data: profile } = await supabase
             .from('user_profiles')
@@ -683,10 +693,7 @@ export default function PlanScreen() {
       await supabase.from('meal_ingredients').insert(ingredientsToInsert);
 
       // Actualizar la comida para seleccionar la nueva opción
-      await supabase
-        .from('meals')
-        .update({ selected_option: newOptionIndex })
-        .eq('id', mealId);
+      await supabase.from('meals').update({ selected_option: newOptionIndex }).eq('id', mealId);
 
       // Refrescar datos
       fetchData();
@@ -694,28 +701,6 @@ export default function PlanScreen() {
       console.error('Error saving option:', error);
       Alert.alert('Error', 'No se pudo guardar el platillo');
       throw error;
-    }
-  };
-
-  // Generar platillo alternativo con IA
-  const handleGenerateOptionWithAI = async (
-    mealId: string
-  ): Promise<{ name: string; ingredients: Ingredient[] } | null> => {
-    const meal = meals.find((m) => m.id === mealId);
-    if (!meal || meal.options.length === 0) return null;
-
-    const currentOption = meal.options[meal.selectedOption] || meal.options[0];
-    if (!currentOption.ingredients || currentOption.ingredients.length === 0) return null;
-
-    try {
-      const alternatives = await suggestMealAlternatives(currentOption.ingredients);
-      if (alternatives.length > 0) {
-        return alternatives[0];
-      }
-      return null;
-    } catch (error) {
-      console.error('Error generating with AI:', error);
-      return null;
     }
   };
 
@@ -961,7 +946,6 @@ export default function PlanScreen() {
         }}
         onSave={handleSaveOption}
         onCalculateMacros={handleCalculateMacros}
-        onGenerateWithAI={handleGenerateOptionWithAI}
       />
     </View>
   );
