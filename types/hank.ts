@@ -1,11 +1,11 @@
 // ============================================================================
-// AXIS TYPES - Sistema completo de tipos para el Agente AXIS
+// HANK TYPES - Sistema completo de tipos para el Agente HANK
 // ============================================================================
 
 // ============================================================================
 // TOOL NAMES - Todas las herramientas disponibles
 // ============================================================================
-export type AxisToolName =
+export type HankToolName =
   // GYM Tools
   | 'GYM_ADD_EXERCISE'
   | 'GYM_REMOVE_EXERCISE'
@@ -57,7 +57,7 @@ export interface ToolParameter {
 }
 
 export interface ToolDefinition {
-  name: AxisToolName;
+  name: HankToolName;
   description: string;
   parameters: Record<string, ToolParameter>;
   requiredParams: string[];
@@ -66,12 +66,12 @@ export interface ToolDefinition {
 // ============================================================================
 // TOOL CALL & RESULT
 // ============================================================================
-export interface AxisToolCall {
-  tool: AxisToolName;
+export interface HankToolCall {
+  tool: HankToolName;
   parameters: Record<string, unknown>;
 }
 
-export interface AxisToolResult {
+export interface HankToolResult {
   success: boolean;
   message: string;
   data?: unknown;
@@ -80,7 +80,7 @@ export interface AxisToolResult {
 }
 
 // ============================================================================
-// CONTEXT TYPES - El cerebro de AXIS
+// CONTEXT TYPES - El cerebro de HANK
 // ============================================================================
 export type ScreenModule = 'nucleo' | 'gym' | 'plan' | 'pro' | 'adn';
 export type SportMode = 'BODYBUILDING' | 'POWERLIFTING' | 'CROSSFIT' | 'MOTO' | 'SURF' | null;
@@ -114,7 +114,7 @@ export interface UserProfile {
 // ALIAS SYSTEM - Comandos personalizados del usuario
 // ============================================================================
 export interface AliasAction {
-  tool: AxisToolName;
+  tool: HankToolName;
   parameters: Record<string, unknown>;
 }
 
@@ -127,9 +127,9 @@ export interface UserAlias {
 }
 
 // ============================================================================
-// AXIS CONTEXT STATE - Estado global del provider
+// HANK CONTEXT STATE - Estado global del provider
 // ============================================================================
-export interface AxisContextState {
+export interface HankContextState {
   // Processing state
   isProcessing: boolean;
   lastAction: string | null;
@@ -145,9 +145,9 @@ export interface AxisContextState {
   aliases: UserAlias[];
 
   // Actions
-  executeCommand: (command: string) => Promise<AxisToolResult[]>;
-  executeTool: (toolCall: AxisToolCall) => Promise<AxisToolResult>;
-  executeToolChain: (toolCalls: AxisToolCall[]) => Promise<AxisToolResult[]>;
+  executeCommand: (command: string) => Promise<HankToolResult[]>;
+  executeTool: (toolCall: HankToolCall) => Promise<HankToolResult>;
+  executeToolChain: (toolCalls: HankToolCall[]) => Promise<HankToolResult[]>;
 
   // Context updates
   setScreenContext: (ctx: ScreenContext) => void;
@@ -160,12 +160,12 @@ export interface AxisContextState {
   // Alias management
   addAlias: (alias: Omit<UserAlias, 'id' | 'createdAt'>) => void;
   removeAlias: (triggerId: string) => void;
-  executeAlias: (trigger: string) => Promise<AxisToolResult[] | null>;
+  executeAlias: (trigger: string) => Promise<HankToolResult[] | null>;
 
   // Conversation management
   clearConversation: () => Promise<void>;
 
-  // Data refresh trigger (incrementa cuando AXIS modifica datos)
+  // Data refresh trigger (incrementa cuando HANK modifica datos)
   refreshTrigger: number;
 
   // LLM Integration
@@ -176,14 +176,14 @@ export interface AxisContextState {
 // ============================================================================
 // CONVERSATION TYPES
 // ============================================================================
-export interface AxisMessage {
+export interface HankMessage {
   id: string;
-  role: 'user' | 'axis' | 'system';
+  role: 'user' | 'hank' | 'system';
   content: string;
   toolCalls?: Array<{
-    tool: AxisToolName;
+    tool: HankToolName;
     params: Record<string, unknown>;
-    result: AxisToolResult;
+    result: HankToolResult;
   }>;
   timestamp: Date;
 }

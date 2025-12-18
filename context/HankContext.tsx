@@ -1,5 +1,5 @@
 // ============================================================================
-// AXIS CONTEXT - Proveedor global completo para el Agente AXIS
+// HANK CONTEXT - Proveedor global completo para el Agente HANK
 // Incluye: Contexto dinámico, Sistema de Aliases, Integración LLM
 // ============================================================================
 
@@ -13,19 +13,19 @@ import React, {
   useRef,
   ReactNode,
 } from 'react';
-import { useAxisExecutor } from '../hooks/useAxisExecutor';
+import { useHankExecutor } from '../hooks/useHankExecutor';
 import { supabase } from '../lib/supabase';
-import { callGemini, continueAfterToolExecution } from '../services/axis/gemini';
+import { callGemini, continueAfterToolExecution } from '../services/hank/gemini';
 import type {
-  AxisContextState,
-  AxisToolResult,
-  AxisToolCall,
+  HankContextState,
+  HankToolResult,
+  HankToolCall,
   ScreenContext,
   ActiveAsset,
   SportMode,
   UserProfile,
   UserAlias,
-} from '../types/axis';
+} from '../types/hank';
 
 // ============================================================================
 // GEMINI API KEY - Configura tu clave aquí o usa variable de entorno
@@ -88,18 +88,18 @@ const PRESET_ALIASES: Omit<UserAlias, 'id' | 'createdAt'>[] = [
 // ============================================================================
 // CONTEXT CREATION
 // ============================================================================
-const AxisContext = createContext<AxisContextState | undefined>(undefined);
+const HankContext = createContext<HankContextState | undefined>(undefined);
 
 // ============================================================================
 // PROVIDER PROPS
 // ============================================================================
-interface AxisProviderProps {
+interface HankProviderProps {
   children: ReactNode;
   userId: string | null;
 }
 
 // ============================================================================
-// AXIS PROVIDER
+// HANK PROVIDER
 // ============================================================================
 
 // Tipo para mensajes del historial (compatible con Gemini)
@@ -117,20 +117,20 @@ interface DBChatMessage {
   created_at: string;
 }
 
-export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
+export const HankProvider = ({ children, userId }: HankProviderProps) => {
   // -------------------------------------------------------------------------
   // STATE
   // -------------------------------------------------------------------------
   const [isProcessing, setIsProcessing] = useState(false);
   const [lastAction, setLastAction] = useState<string | null>(null);
 
-  // Conversation History - Para que AXIS recuerde el contexto del chat (máximo 24h)
+  // Conversation History - Para que HANK recuerde el contexto del chat (máximo 24h)
   const [conversationHistory, setConversationHistory] = useState<ChatMessage[]>([]);
 
   // Flag para indicar si ya se cargó/verificó el historial
   const historyInitialized = useRef(false);
 
-  // Refresh Trigger - Se incrementa cuando AXIS modifica datos para que las pantallas recarguen
+  // Refresh Trigger - Se incrementa cuando HANK modifica datos para que las pantallas recarguen
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   // Dynamic Context
@@ -154,14 +154,14 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
     executeToolChain: executeToolChainRaw,
     getToolDefinitions,
     isExecuting,
-  } = useAxisExecutor({
+  } = useHankExecutor({
     userId,
     currentTrainingDay: screenContext.currentTrainingDay ?? 0, // Pasar día actual de la pantalla
   });
 
   // Wrapper para executeTool que incrementa refreshTrigger si exitoso
   const executeTool = useCallback(
-    async (toolCall: AxisToolCall): Promise<AxisToolResult> => {
+    async (toolCall: HankToolCall): Promise<HankToolResult> => {
       const result = await executeToolRaw(toolCall);
       if (result.success) {
         console.warn('🔄 executeTool exitoso, incrementando refreshTrigger');
@@ -174,7 +174,7 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
 
   // Wrapper para executeToolChain que incrementa refreshTrigger si alguno exitoso
   const executeToolChain = useCallback(
-    async (toolCalls: AxisToolCall[]): Promise<AxisToolResult[]> => {
+    async (toolCalls: HankToolCall[]): Promise<HankToolResult[]> => {
       const results = await executeToolChainRaw(toolCalls);
       if (results.some((r) => r.success)) {
         console.warn('🔄 executeToolChain exitoso, incrementando refreshTrigger');
@@ -200,25 +200,25 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
       try {
         // Primero, limpiar mensajes anteriores a medianoche usando la función de DB
         const { data: cleanedCount, error: cleanError } = await supabase.rpc(
-          'clean_old_axis_messages',
+          'clean_old_hank_messages',
           { p_user_id: userId }
         );
 
         if (cleanError) {
-          console.warn('⚠️ AXIS: Error limpiando mensajes antiguos:', cleanError.message);
+          console.warn('⚠️ HANK: Error limpiando mensajes antiguos:', cleanError.message);
         } else if (cleanedCount && cleanedCount > 0) {
-          console.warn(`🧹 AXIS: Limpiados ${cleanedCount} mensajes de días anteriores`);
+          console.warn(`🧹 HANK: Limpiados ${cleanedCount} mensajes de días anteriores`);
         }
 
         // Cargar mensajes del día de hoy
         const { data: messages, error } = await supabase
-          .from('axis_chat_messages')
+          .from('hank_chat_messages')
           .select('*')
           .eq('user_id', userId)
           .order('created_at', { ascending: true });
 
         if (error) {
-          console.warn('⚠️ AXIS: Error cargando historial:', error.message);
+          console.warn('⚠️ HANK: Error cargando historial:', error.message);
           return;
         }
 
@@ -228,11 +228,11 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
             role: msg.role,
             parts: [{ text: msg.content }],
           }));
-          console.warn(`🧠 AXIS: Cargando ${history.length} mensajes del historial`);
+          console.warn(`🧠 HANK: Cargando ${history.length} mensajes del historial`);
           setConversationHistory(history);
         }
       } catch (error) {
-        console.warn('⚠️ AXIS: Error inicializando historial:', error);
+        console.warn('⚠️ HANK: Error inicializando historial:', error);
       }
     };
 
@@ -244,20 +244,20 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
    */
   const saveMessageToSupabase = useCallback(
     async (role: 'user' | 'model', content: string) => {
-      console.warn('💾 AXIS: Intentando guardar mensaje:', {
+      console.warn('💾 HANK: Intentando guardar mensaje:', {
         role,
         userId,
         contentLength: content.length,
       });
 
       if (!userId) {
-        console.warn('❌ AXIS: No se puede guardar - userId es null');
+        console.warn('❌ HANK: No se puede guardar - userId es null');
         return;
       }
 
       try {
         const { data, error } = await supabase
-          .from('axis_chat_messages')
+          .from('hank_chat_messages')
           .insert({
             user_id: userId,
             role,
@@ -267,16 +267,16 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
 
         if (error) {
           console.warn(
-            '⚠️ AXIS: Error guardando mensaje:',
+            '⚠️ HANK: Error guardando mensaje:',
             error.message,
             error.details,
             error.hint
           );
         } else {
-          console.warn('✅ AXIS: Mensaje guardado exitosamente:', data);
+          console.warn('✅ HANK: Mensaje guardado exitosamente:', data);
         }
       } catch (error) {
-        console.warn('⚠️ AXIS: Error guardando mensaje:', error);
+        console.warn('⚠️ HANK: Error guardando mensaje:', error);
       }
     },
     [userId]
@@ -291,12 +291,12 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
 
     const checkMidnight = async () => {
       // Llamar a la función de limpieza de DB
-      const { data: cleanedCount, error } = await supabase.rpc('clean_old_axis_messages', {
+      const { data: cleanedCount, error } = await supabase.rpc('clean_old_hank_messages', {
         p_user_id: userId,
       });
 
       if (!error && cleanedCount && cleanedCount > 0) {
-        console.warn(`🧹 AXIS: ¡Medianoche! Limpiados ${cleanedCount} mensajes automáticamente`);
+        console.warn(`🧹 HANK: ¡Medianoche! Limpiados ${cleanedCount} mensajes automáticamente`);
         setConversationHistory([]);
       }
     };
@@ -377,12 +377,12 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
    * Ejecuta un alias si el trigger coincide
    */
   const executeAlias = useCallback(
-    async (trigger: string): Promise<AxisToolResult[] | null> => {
+    async (trigger: string): Promise<HankToolResult[] | null> => {
       const alias = aliases.find((a) => a.trigger.toLowerCase() === trigger.toLowerCase());
 
       if (!alias) return null;
 
-      console.warn(`🤖 AXIS: Ejecutando alias "${alias.trigger}"`);
+      console.warn(`🤖 HANK: Ejecutando alias "${alias.trigger}"`);
       const results = await executeToolChain(alias.actions);
       return results;
     },
@@ -454,15 +454,15 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
     if (!userId) return;
 
     try {
-      const { error } = await supabase.from('axis_chat_messages').delete().eq('user_id', userId);
+      const { error } = await supabase.from('hank_chat_messages').delete().eq('user_id', userId);
 
       if (error) {
-        console.warn('⚠️ AXIS: Error limpiando historial:', error.message);
+        console.warn('⚠️ HANK: Error limpiando historial:', error.message);
       } else {
-        console.warn('🧹 AXIS: Historial del chat limpiado manualmente');
+        console.warn('🧹 HANK: Historial del chat limpiado manualmente');
       }
     } catch (error) {
-      console.warn('⚠️ AXIS: Error limpiando historial:', error);
+      console.warn('⚠️ HANK: Error limpiando historial:', error);
     }
   }, [userId]);
 
@@ -470,11 +470,11 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
    * Procesa un comando de texto del usuario usando Gemini AI
    */
   const executeCommand = useCallback(
-    async (userText: string): Promise<AxisToolResult[]> => {
+    async (userText: string): Promise<HankToolResult[]> => {
       setIsProcessing(true);
       setLastAction(userText);
-      console.warn('🧠 AXIS recibió comando:', userText);
-      console.warn('🎯 AXIS activeAsset:', activeAsset ? activeAsset.name : 'NINGUNO');
+      console.warn('🧠 HANK recibió comando:', userText);
+      console.warn('🎯 HANK activeAsset:', activeAsset ? activeAsset.name : 'NINGUNO');
 
       try {
         // 1. Verificar si es un alias
@@ -520,7 +520,7 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
 
         // 4. Si Gemini devuelve tool calls, ejecutarlas
         if (geminiResponse.toolCalls.length > 0) {
-          const results: AxisToolResult[] = [];
+          const results: HankToolResult[] = [];
           const toolResults: Array<{ toolName: string; result: Record<string, unknown> }> = [];
 
           for (const toolCall of geminiResponse.toolCalls) {
@@ -558,9 +558,9 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
 
           // Trigger refresh si alguna operación fue exitosa
           if (results.some((r) => r.success)) {
-            console.warn('🔄 AXIS: Operación exitosa, incrementando refreshTrigger');
+            console.warn('🔄 HANK: Operación exitosa, incrementando refreshTrigger');
             setRefreshTrigger((prev) => {
-              console.warn('🔄 AXIS: refreshTrigger ahora será:', prev + 1);
+              console.warn('🔄 HANK: refreshTrigger ahora será:', prev + 1);
               return prev + 1;
             });
           }
@@ -611,7 +611,7 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
   /**
    * Parseo básico de patrones comunes (placeholder para LLM)
    */
-  const parseAndExecuteBasic = async (text: string): Promise<AxisToolResult[]> => {
+  const parseAndExecuteBasic = async (text: string): Promise<HankToolResult[]> => {
     const lower = text.toLowerCase();
 
     // Helper: Resolver "este ejercicio", "el actual", etc. al activeAsset
@@ -881,7 +881,7 @@ export const AxisProvider = ({ children, userId }: AxisProviderProps) => {
     // Usar el día del contexto de pantalla (UI) si está disponible, sino el del perfil
     const currentDay = screenContext.currentTrainingDay ?? userProfile.currentTrainingDay;
 
-    return `Eres AXIS, el asistente de IA de TRENS (High-Performance Fitness App).
+    return `Eres HANK, el asistente de IA de TRENS (High-Performance Fitness App).
 
 CONTEXTO ACTUAL:
 - Módulo activo: ${screenContext.module.toUpperCase()}
@@ -925,7 +925,7 @@ IMPORTANTE: Puedes ejecutar múltiples herramientas si la solicitud lo requiere.
   // -------------------------------------------------------------------------
   // CONTEXT VALUE
   // -------------------------------------------------------------------------
-  const value = useMemo<AxisContextState>(
+  const value = useMemo<HankContextState>(
     () => ({
       // State
       isProcessing: isProcessing || isExecuting,
@@ -990,14 +990,14 @@ IMPORTANTE: Puedes ejecutar múltiples herramientas si la solicitud lo requiere.
     ]
   );
 
-  return <AxisContext.Provider value={value}>{children}</AxisContext.Provider>;
+  return <HankContext.Provider value={value}>{children}</HankContext.Provider>;
 };
 
 // ============================================================================
 // HOOK
 // ============================================================================
-// Valores por defecto cuando no hay AxisProvider (evita crashes en hot reload)
-const defaultAxisState: AxisContextState = {
+// Valores por defecto cuando no hay HankProvider (evita crashes en hot reload)
+const defaultHankState: HankContextState = {
   isProcessing: false,
   lastAction: null,
   screenContext: defaultScreenContext,
@@ -1007,7 +1007,7 @@ const defaultAxisState: AxisContextState = {
   availableExercises: [],
   aliases: [],
   executeCommand: async () => [],
-  executeTool: async () => ({ success: false, message: 'AxisProvider no disponible' }),
+  executeTool: async () => ({ success: false, message: 'HankProvider no disponible' }),
   executeToolChain: async () => [],
   setScreenContext: () => {},
   setActiveAsset: async () => {},
@@ -1021,12 +1021,12 @@ const defaultAxisState: AxisContextState = {
   getSystemPrompt: () => '',
 };
 
-export const useAxis = (): AxisContextState => {
-  const context = useContext(AxisContext);
+export const useHank = (): HankContextState => {
+  const context = useContext(HankContext);
   if (!context) {
     // Retornar valores por defecto en lugar de crash (hot reload safety)
-    console.warn('useAxis: AxisProvider no disponible, usando valores por defecto');
-    return defaultAxisState;
+    console.warn('useHank: HankProvider no disponible, usando valores por defecto');
+    return defaultHankState;
   }
   return context;
 };

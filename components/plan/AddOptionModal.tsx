@@ -1,6 +1,6 @@
 // ============================================================================
 // ADD OPTION MODAL - Modal para añadir un nuevo platillo a una comida
-// Con análisis inteligente de ingredientes por AXIS AI
+// Con análisis inteligente de ingredientes por HANK AI
 // ============================================================================
 
 import React, { useState, useEffect } from 'react';
@@ -20,8 +20,8 @@ import { X, Plus, Trash2, Zap, AlertTriangle, CheckCircle } from 'lucide-react-n
 import {
   analyzeIngredientsSmart,
   IngredientAnalysis,
-} from '../../services/axis/ingredientAnalyzer';
-import { calculateMealWithUserMacros } from '../../services/axis/nutrition';
+} from '../../services/hank/ingredientAnalyzer';
+import { calculateMealWithUserMacros } from '../../services/hank/nutrition';
 
 // ============================================================================
 // TYPES
@@ -64,7 +64,7 @@ export const AddOptionModal: React.FC<AddOptionModalProps> = ({
     { id: `new-${Date.now()}`, name: '', quantity: '', portion: '' },
   ]);
   const [isSaving, setIsSaving] = useState(false);
-  const [axisAI, setAxisAI] = useState(true);
+  const [hankAI, setHankAI] = useState(true);
   const [analysis, setAnalysis] = useState<IngredientAnalysis | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
@@ -72,15 +72,15 @@ export const AddOptionModal: React.FC<AddOptionModalProps> = ({
   useEffect(() => {
     if (visible) {
       setIngredients([{ id: `new-${Date.now()}`, name: '', quantity: '', portion: '' }]);
-      setAxisAI(true);
+      setHankAI(true);
       setAnalysis(null);
     }
   }, [visible]);
 
-  // Analizar ingredientes cuando cambian (con debounce) - solo si AXIS AI activo
+  // Analizar ingredientes cuando cambian (con debounce) - solo si HANK AI activo
   useEffect(() => {
-    // Si AXIS AI está desactivado, no analizar
-    if (!axisAI) {
+    // Si HANK AI está desactivado, no analizar
+    if (!hankAI) {
       setAnalysis(null);
       return;
     }
@@ -106,11 +106,11 @@ export const AddOptionModal: React.FC<AddOptionModalProps> = ({
     }, 600);
 
     return () => clearTimeout(timeoutId);
-  }, [ingredients, axisAI, targetMacros]);
+  }, [ingredients, hankAI, targetMacros]);
 
-  const toggleAxisAI = () => {
+  const toggleHankAI = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setAxisAI(!axisAI);
+    setHankAI(!hankAI);
   };
 
   const addIngredient = () => {
@@ -147,8 +147,8 @@ export const AddOptionModal: React.FC<AddOptionModalProps> = ({
     try {
       let finalIngredients = validIngredients;
 
-      // Si AXIS AI está activo y tenemos macros objetivo, usar calculateMealWithUserMacros
-      if (axisAI && targetMacros) {
+      // Si HANK AI está activo y tenemos macros objetivo, usar calculateMealWithUserMacros
+      if (hankAI && targetMacros) {
         try {
           console.log('🎯 Calculando con macros objetivo:', targetMacros);
           const calculated = await calculateMealWithUserMacros(validIngredients, targetMacros);
@@ -165,7 +165,7 @@ export const AddOptionModal: React.FC<AddOptionModalProps> = ({
             finalIngredients = await onCalculateMacros(validIngredients);
           }
         }
-      } else if (axisAI && onCalculateMacros) {
+      } else if (hankAI && onCalculateMacros) {
         // Si no hay targetMacros, usar cálculo genérico
         try {
           finalIngredients = await onCalculateMacros(validIngredients);
@@ -218,7 +218,7 @@ export const AddOptionModal: React.FC<AddOptionModalProps> = ({
             </View>
 
             <ScrollView className="p-4" showsVerticalScrollIndicator={false}>
-              {/* AXIS AI Toggle */}
+              {/* HANK AI Toggle */}
               {onCalculateMacros && (
                 <View className="flex-row items-center justify-between bg-purple-900/10 p-4 rounded-xl border border-purple-500/20 mb-4">
                   <View className="flex-row items-center gap-3">
@@ -226,29 +226,29 @@ export const AddOptionModal: React.FC<AddOptionModalProps> = ({
                       <Zap size={16} color="#FFF" />
                     </View>
                     <View>
-                      <Text className="text-purple-300 font-bold">AXIS AI</Text>
+                      <Text className="text-purple-300 font-bold">HANK AI</Text>
                       <Text className="text-purple-400/60 text-xs">
                         Cálculo automático de gramos
                       </Text>
                     </View>
                   </View>
                   <Pressable
-                    onPress={toggleAxisAI}
+                    onPress={toggleHankAI}
                     className={`w-12 h-6 rounded-full justify-center ${
-                      axisAI ? 'bg-purple-500' : 'bg-zinc-700'
+                      hankAI ? 'bg-purple-500' : 'bg-zinc-700'
                     }`}
                   >
                     <View
                       className={`w-4 h-4 bg-white rounded-full mx-1 ${
-                        axisAI ? 'self-end' : 'self-start'
+                        hankAI ? 'self-end' : 'self-start'
                       }`}
                     />
                   </Pressable>
                 </View>
               )}
 
-              {/* Analysis Alert - Solo visible si AXIS AI está activo */}
-              {axisAI && analysis && (
+              {/* Analysis Alert - Solo visible si HANK AI está activo */}
+              {hankAI && analysis && (
                 <View
                   className={`p-4 rounded-xl mb-4 border ${
                     analysis.isBalanced
@@ -363,8 +363,8 @@ export const AddOptionModal: React.FC<AddOptionModalProps> = ({
                     placeholderTextColor="#666"
                     className="bg-transparent border-b border-zinc-700 text-white py-2 mb-2"
                   />
-                  {/* Solo mostrar campos manuales cuando AXIS AI está desactivado */}
-                  {!axisAI && (
+                  {/* Solo mostrar campos manuales cuando HANK AI está desactivado */}
+                  {!hankAI && (
                     <View className="flex-row gap-2 mt-2">
                       <TextInput
                         value={ing.quantity}

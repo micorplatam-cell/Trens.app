@@ -1,5 +1,5 @@
 // ============================================================================
-// AXIS EXECUTOR HOOK - El cerebro que decide qué herramienta ejecutar
+// HANK EXECUTOR HOOK - El cerebro que decide qué herramienta ejecutar
 // ============================================================================
 
 import { useState, useCallback } from 'react';
@@ -32,17 +32,17 @@ import {
   planRemoveSupplement,
   planGetStack,
   TOOL_DEFINITIONS,
-} from '../services/axis/tools';
-import { calculateMacrosWithAI, analyzeDailyNutrition } from '../services/axis/nutrition';
-import type { AxisToolCall, AxisToolResult, ToolDefinition } from '../types/axis';
+} from '../services/hank/tools';
+import { calculateMacrosWithAI, analyzeDailyNutrition } from '../services/hank/nutrition';
+import type { HankToolCall, HankToolResult, ToolDefinition } from '../types/hank';
 
-interface UseAxisExecutorProps {
+interface UseHankExecutorProps {
   userId: string | null;
   currentTrainingDay?: number; // Día de entrenamiento desde el contexto de pantalla
 }
 
-export const useAxisExecutor = (
-  { userId, currentTrainingDay = 0 }: UseAxisExecutorProps = { userId: null, currentTrainingDay: 0 }
+export const useHankExecutor = (
+  { userId, currentTrainingDay = 0 }: UseHankExecutorProps = { userId: null, currentTrainingDay: 0 }
 ) => {
   const [isExecuting, setIsExecuting] = useState(false);
 
@@ -51,15 +51,15 @@ export const useAxisExecutor = (
    * IMPORTANTE: currentTrainingDay del contexto sobrescribe el de Gemini para evitar errores
    */
   const executeTool = useCallback(
-    async (toolCall: AxisToolCall): Promise<AxisToolResult> => {
+    async (toolCall: HankToolCall): Promise<HankToolResult> => {
       if (!userId) {
         return { success: false, message: 'Usuario no autenticado.' };
       }
 
       setIsExecuting(true);
-      console.warn(`🤖 AXIS Ejecutando: ${toolCall.tool}`, toolCall.parameters);
+      console.warn(`🤖 HANK Ejecutando: ${toolCall.tool}`, toolCall.parameters);
 
-      let result: AxisToolResult;
+      let result: HankToolResult;
 
       try {
         const p = toolCall.parameters;
@@ -226,7 +226,7 @@ export const useAxisExecutor = (
 
           case 'GET_USER_CONTEXT':
             // Este se maneja desde el contexto, no aquí
-            result = { success: true, message: 'Contexto obtenido desde AxisContext.' };
+            result = { success: true, message: 'Contexto obtenido desde HankContext.' };
             break;
 
           // ADN TOOLS
@@ -387,13 +387,13 @@ ${analysis.recommendations.map((r) => `• ${r}`).join('\n')}`,
             result = { success: false, message: `Herramienta "${toolCall.tool}" no reconocida.` };
         }
       } catch (e) {
-        console.error('Error crítico en Axis Executor:', e);
+        console.error('Error crítico en Hank Executor:', e);
         result = { success: false, message: 'Error interno de ejecución.' };
       } finally {
         setIsExecuting(false);
       }
 
-      console.warn(`🤖 AXIS Resultado:`, result);
+      console.warn(`🤖 HANK Resultado:`, result);
       return result;
     },
     [userId, currentTrainingDay] // Agregar currentTrainingDay a las dependencias
@@ -403,8 +403,8 @@ ${analysis.recommendations.map((r) => `• ${r}`).join('\n')}`,
    * Ejecuta múltiples herramientas en secuencia
    */
   const executeToolChain = useCallback(
-    async (toolCalls: AxisToolCall[]): Promise<AxisToolResult[]> => {
-      const results: AxisToolResult[] = [];
+    async (toolCalls: HankToolCall[]): Promise<HankToolResult[]> => {
+      const results: HankToolResult[] = [];
 
       for (const call of toolCalls) {
         const result = await executeTool(call);
@@ -412,7 +412,7 @@ ${analysis.recommendations.map((r) => `• ${r}`).join('\n')}`,
 
         // Si una falla, detener la cadena
         if (!result.success) {
-          console.warn('🤖 AXIS: Cadena detenida por error en:', call.tool);
+          console.warn('🤖 HANK: Cadena detenida por error en:', call.tool);
           break;
         }
       }

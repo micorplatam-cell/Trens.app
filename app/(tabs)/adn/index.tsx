@@ -13,7 +13,7 @@ import { Grid, Lock, Plus, Play, Eye, EyeOff, Edit2 } from 'lucide-react-native'
 import * as Haptics from 'expo-haptics';
 import { supabase } from '../../../lib/supabase';
 import { useAuth } from '../../_layout';
-import { useAxis } from '../../../context/AxisContext';
+import { useHank } from '../../../context/HankContext';
 import TrensID from '../../../components/adn/TrensID';
 import RecordCard from '../../../components/adn/RecordCard';
 import AddRecordModal from '../../../components/adn/AddRecordModal';
@@ -58,7 +58,7 @@ interface Video {
 
 export default function AdnScreen() {
   const { user } = useAuth();
-  const { refreshTrigger } = useAxis();
+  const { refreshTrigger } = useHank();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'legacy' | 'vault'>('legacy');
@@ -162,7 +162,7 @@ export default function AdnScreen() {
     fetchData();
   }, [fetchData]);
 
-  // Refrescar cuando AXIS modifica datos
+  // Refrescar cuando HANK modifica datos
   useEffect(() => {
     if (refreshTrigger > 0) {
       console.log('🔄 ADN: refreshTrigger cambió, recargando datos...');

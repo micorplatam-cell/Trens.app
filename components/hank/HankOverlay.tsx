@@ -1,5 +1,5 @@
 // ============================================================================
-// AXIS OVERLAY - Interfaz Visual del Agente AXIS
+// HANK OVERLAY - Interfaz Visual del Agente HANK
 // FAB flotante + Modal de Chat con estilo Savage Mode
 // Incluye Long Press para comando de voz con confirmación
 // ============================================================================
@@ -31,23 +31,23 @@ import Animated, {
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { Bot, Send, Mic, MicOff, Sparkles, ChevronDown, Check, X } from 'lucide-react-native';
-import { useAxis } from '../../context/AxisContext';
+import { useHank } from '../../context/HankContext';
 import { useVoiceInput } from '../../hooks/useVoiceInput';
-import { callGemini } from '../../services/axis/gemini';
+import { callGemini } from '../../services/hank/gemini';
 import { supabase } from '../../lib/supabase';
-import type { AxisToolResult, AxisToolCall } from '../../types/axis';
+import type { HankToolResult, HankToolCall } from '../../types/hank';
 
 // ============================================================================
 // TYPES
 // ============================================================================
 interface ChatMessage {
   id: string;
-  role: 'user' | 'axis';
+  role: 'user' | 'hank';
   content: string;
   timestamp: Date;
-  results?: AxisToolResult[];
+  results?: HankToolResult[];
   pendingConfirmation?: boolean;
-  pendingToolCalls?: AxisToolCall[];
+  pendingToolCalls?: HankToolCall[];
 }
 
 // Tipo para mensajes de la base de datos
@@ -71,8 +71,8 @@ const LONG_PRESS_DURATION = 400; // ms para activar long press
 // ============================================================================
 const getDefaultWelcomeMessage = (): ChatMessage => ({
   id: 'welcome',
-  role: 'axis',
-  content: '¿Qué necesitas? Mantén presionado 🎤 para comandos con confirmación.',
+  role: 'hank',
+  content: 'Qué onda. ¿En qué te ayudo hoy? 💪 Mantén presionado 🎤 para voz.',
   timestamp: new Date(),
 });
 
@@ -84,7 +84,7 @@ const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 // ============================================================================
 // FAB BUTTON (Floating Action Button) con Long Press
 // ============================================================================
-const AxisFAB: React.FC<{
+const HankFAB: React.FC<{
   onPress: () => void;
   onLongPressStart: () => void;
   onLongPressEnd: () => void;
@@ -282,7 +282,7 @@ const MessageBubble: React.FC<{ message: ChatMessage }> = ({ message }) => {
       <Text
         className={`text-xs font-mono mb-1 ${isUser ? 'text-zinc-500 text-right' : 'text-red-500'}`}
       >
-        {isUser ? 'TÚ' : 'AXIS'}
+        {isUser ? 'TÚ' : 'HANK'}
       </Text>
 
       {/* Bubble */}
@@ -378,7 +378,7 @@ const ThinkingIndicator: React.FC = () => {
 
   return (
     <View className="self-start max-w-[85%] mb-3">
-      <Text className="text-xs font-mono mb-1 text-red-500">AXIS</Text>
+      <Text className="text-xs font-mono mb-1 text-red-500">HANK</Text>
       <View className="px-4 py-3 rounded-2xl bg-red-600/20 border border-red-600/30 rounded-tl-sm flex-row items-center">
         <Animated.View
           style={[
@@ -404,15 +404,15 @@ const ThinkingIndicator: React.FC = () => {
 };
 
 // ============================================================================
-// MAIN COMPONENT: AXIS OVERLAY
+// MAIN COMPONENT: HANK OVERLAY
 // ============================================================================
-export const AxisOverlay: React.FC = () => {
+export const HankOverlay: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [inputText, setInputText] = useState('');
   const [isListening, setIsListening] = useState(false);
   const [pendingExecution, setPendingExecution] = useState<{
     text: string;
-    toolCalls: AxisToolCall[];
+    toolCalls: HankToolCall[];
   } | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([getDefaultWelcomeMessage()]);
   const [userId, setUserId] = useState<string | null>(null);
@@ -429,7 +429,7 @@ export const AxisOverlay: React.FC = () => {
     userProfile,
     availableExercises,
     clearConversation,
-  } = useAxis();
+  } = useHank();
 
   // Voice input hook
   const {
@@ -466,16 +466,16 @@ export const AxisOverlay: React.FC = () => {
       messagesInitialized.current = true;
 
       try {
-        // La limpieza de medianoche ya se hace en AxisContext con clean_old_axis_messages
+        // La limpieza de medianoche ya se hace en HankContext con clean_old_hank_messages
         // Aquí solo cargamos los mensajes del día
         const { data: dbMessages, error } = await supabase
-          .from('axis_chat_messages')
+          .from('hank_chat_messages')
           .select('*')
           .eq('user_id', userId)
           .order('created_at', { ascending: true });
 
         if (error) {
-          console.warn('⚠️ AXIS UI: Error cargando mensajes:', error.message);
+          console.warn('⚠️ HANK UI: Error cargando mensajes:', error.message);
           return;
         }
 
@@ -483,18 +483,18 @@ export const AxisOverlay: React.FC = () => {
           // Convertir de DB format a UI format
           const uiMessages: ChatMessage[] = dbMessages.map((msg: DBUIMessage) => ({
             id: msg.id,
-            role: msg.role === 'model' ? 'axis' : 'user',
+            role: msg.role === 'model' ? 'hank' : 'user',
             content: msg.content,
             timestamp: new Date(msg.created_at),
           }));
 
           // Agregar mensaje de bienvenida al inicio si no hay mensajes
           const allMessages = [getDefaultWelcomeMessage(), ...uiMessages];
-          console.warn(`💬 AXIS UI: Cargando ${uiMessages.length} mensajes desde Supabase`);
+          console.warn(`💬 HANK UI: Cargando ${uiMessages.length} mensajes desde Supabase`);
           setMessages(allMessages);
         }
       } catch (error) {
-        console.warn('⚠️ AXIS UI: Error inicializando mensajes:', error);
+        console.warn('⚠️ HANK UI: Error inicializando mensajes:', error);
       }
     };
 
@@ -503,19 +503,19 @@ export const AxisOverlay: React.FC = () => {
 
   /**
    * Verificar medianoche periódicamente (cada minuto)
-   * La limpieza real se hace en AxisContext, aquí solo refrescamos la UI
+   * La limpieza real se hace en HankContext, aquí solo refrescamos la UI
    */
   useEffect(() => {
     if (!userId) return;
 
     const checkMidnight = async () => {
       // Llamar a la función de limpieza de DB
-      const { data: cleanedCount, error } = await supabase.rpc('clean_old_axis_messages', {
+      const { data: cleanedCount, error } = await supabase.rpc('clean_old_hank_messages', {
         p_user_id: userId,
       });
 
       if (!error && cleanedCount && cleanedCount > 0) {
-        console.warn(`🧹 AXIS UI: ¡Medianoche! Limpiados ${cleanedCount} mensajes`);
+        console.warn(`🧹 HANK UI: ¡Medianoche! Limpiados ${cleanedCount} mensajes`);
         setMessages([getDefaultWelcomeMessage()]);
       }
     };
@@ -568,10 +568,10 @@ export const AxisOverlay: React.FC = () => {
     // Execute command
     const results = await executeCommand(userMessage.content);
 
-    // Add Axis response
-    const axisMessage: ChatMessage = {
+    // Add Hank response
+    const hankMessage: ChatMessage = {
       id: (Date.now() + 1).toString(),
-      role: 'axis',
+      role: 'hank',
       content:
         results.length > 0 && results[0].success
           ? '✅ Listo. ¿Algo más?'
@@ -582,10 +582,10 @@ export const AxisOverlay: React.FC = () => {
 
     // If the first result has a message, use it as the main content
     if (results.length === 1) {
-      axisMessage.content = results[0].message;
+      hankMessage.content = results[0].message;
     }
 
-    setMessages((prev) => [...prev, axisMessage]);
+    setMessages((prev) => [...prev, hankMessage]);
 
     // Scroll to bottom
     setTimeout(() => {
@@ -615,7 +615,7 @@ export const AxisOverlay: React.FC = () => {
         // Agregar indicador de procesamiento
         const thinkingMessage: ChatMessage = {
           id: `thinking-${Date.now()}`,
-          role: 'axis',
+          role: 'hank',
           content: '🎤 ' + transcription,
           timestamp: new Date(),
         };
@@ -627,14 +627,14 @@ export const AxisOverlay: React.FC = () => {
         // Remover thinking y agregar respuesta
         setMessages((prev) => prev.filter((m) => !m.id.startsWith('thinking-')));
 
-        const axisMessage: ChatMessage = {
-          id: `axis-${Date.now()}`,
-          role: 'axis',
+        const hankMessage: ChatMessage = {
+          id: `hank-${Date.now()}`,
+          role: 'hank',
           content: results.length > 0 ? results[0].message : 'Comando ejecutado.',
           timestamp: new Date(),
           results,
         };
-        setMessages((prev) => [...prev, axisMessage]);
+        setMessages((prev) => [...prev, hankMessage]);
         setInputText('');
 
         setTimeout(() => {
@@ -644,7 +644,7 @@ export const AxisOverlay: React.FC = () => {
         // Mostrar error
         const errorMessage: ChatMessage = {
           id: `error-${Date.now()}`,
-          role: 'axis',
+          role: 'hank',
           content: `❌ ${voiceError}`,
           timestamp: new Date(),
         };
@@ -783,7 +783,7 @@ export const AxisOverlay: React.FC = () => {
 
             const confirmMessage: ChatMessage = {
               id: `confirm-${Date.now()}`,
-              role: 'axis',
+              role: 'hank',
               content: `⚠️ ¿Ejecutar?\n\n• ${actionDescription}`,
               timestamp: new Date(),
               pendingConfirmation: true,
@@ -810,38 +810,38 @@ export const AxisOverlay: React.FC = () => {
               [] // Sin historial para respuesta limpia
             );
 
-            const axisMessage: ChatMessage = {
-              id: `axis-${Date.now()}`,
-              role: 'axis',
+            const hankMessage: ChatMessage = {
+              id: `hank-${Date.now()}`,
+              role: 'hank',
               content: naturalResponse.message || toolResultContext,
               timestamp: new Date(),
             };
-            setMessages((prev) => [...prev, axisMessage]);
+            setMessages((prev) => [...prev, hankMessage]);
           } else {
             // Mostrar respuesta de Gemini si no hubo resultados de herramientas
-            const axisMessage: ChatMessage = {
-              id: `axis-${Date.now()}`,
-              role: 'axis',
+            const hankMessage: ChatMessage = {
+              id: `hank-${Date.now()}`,
+              role: 'hank',
               content: result.message || 'Información obtenida.',
               timestamp: new Date(),
             };
-            setMessages((prev) => [...prev, axisMessage]);
+            setMessages((prev) => [...prev, hankMessage]);
           }
         } else {
           // Es solo una pregunta, mostrar respuesta directamente
-          const axisMessage: ChatMessage = {
-            id: `axis-${Date.now()}`,
-            role: 'axis',
+          const hankMessage: ChatMessage = {
+            id: `hank-${Date.now()}`,
+            role: 'hank',
             content: result.message || 'No entendí tu comando.',
             timestamp: new Date(),
           };
-          setMessages((prev) => [...prev, axisMessage]);
+          setMessages((prev) => [...prev, hankMessage]);
         }
       } catch (error) {
         console.error('Error analizando comando:', error);
         const errorMessage: ChatMessage = {
           id: `error-${Date.now()}`,
-          role: 'axis',
+          role: 'hank',
           content: '❌ Error al procesar tu comando.',
           timestamp: new Date(),
         };
@@ -864,7 +864,7 @@ export const AxisOverlay: React.FC = () => {
     await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
     // Ejecutar cada tool call
-    const results: AxisToolResult[] = [];
+    const results: HankToolResult[] = [];
     for (const toolCall of pendingExecution.toolCalls) {
       const result = await executeTool(toolCall);
       results.push(result);
@@ -873,7 +873,7 @@ export const AxisOverlay: React.FC = () => {
     // Agregar resultado
     const resultMessage: ChatMessage = {
       id: `result-${Date.now()}`,
-      role: 'axis',
+      role: 'hank',
       content: results.every((r) => r.success) ? '✅ ¡Ejecutado!' : '⚠️ Algunas acciones fallaron.',
       timestamp: new Date(),
       results,
@@ -896,7 +896,7 @@ export const AxisOverlay: React.FC = () => {
 
     const cancelMessage: ChatMessage = {
       id: `cancel-${Date.now()}`,
-      role: 'axis',
+      role: 'hank',
       content: '🚫 Acción cancelada.',
       timestamp: new Date(),
     };
@@ -911,7 +911,7 @@ export const AxisOverlay: React.FC = () => {
   return (
     <>
       {/* FAB Button - Always visible */}
-      <AxisFAB
+      <HankFAB
         onPress={handleOpen}
         onLongPressStart={handleLongPressStart}
         onLongPressEnd={handleLongPressEnd}
@@ -954,7 +954,7 @@ export const AxisOverlay: React.FC = () => {
                     <Bot size={22} color="#DC2626" />
                   </View>
                   <View>
-                    <Text className="text-white font-bold text-lg">AXIS</Text>
+                    <Text className="text-white font-bold text-lg">HANK</Text>
                     <Text className="text-zinc-500 text-xs font-mono">
                       {screenContext.module.toUpperCase()} • {sportMode || 'MODO'}
                     </Text>
@@ -1058,4 +1058,4 @@ export const AxisOverlay: React.FC = () => {
   );
 };
 
-export default AxisOverlay;
+export default HankOverlay;

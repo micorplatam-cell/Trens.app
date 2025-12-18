@@ -43,7 +43,7 @@ import Animated, {
   runOnJS,
 } from 'react-native-reanimated';
 import Slider from '@react-native-community/slider';
-import { useAxis } from '../../../context/AxisContext';
+import { useHank } from '../../../context/HankContext';
 
 // ============================================================================
 // HELPERS
@@ -216,7 +216,7 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 export default function GymScreen() {
   const { user } = useAuth();
   const isFocused = useIsFocused(); // Detecta si esta pantalla está activa
-  const { setActiveAsset, setScreenContext, refreshTrigger } = useAxis();
+  const { setActiveAsset, setScreenContext, refreshTrigger } = useHank();
   const [viewMode, setViewMode] = useState<ViewMode>('LOADING');
   const [exercises, setExercises] = useState<Exercise[]>([]); // Ejercicios del día actual
   const [allUserExercises, setAllUserExercises] = useState<{ name: string; image_url: string }[]>(
@@ -234,7 +234,7 @@ export default function GymScreen() {
 
   // Modals State
   const [spotifyModalVisible, setSpotifyModalVisible] = useState(false);
-  const [axisModalVisible, setAxisModalVisible] = useState(false);
+  const [hankModalVisible, setHankModalVisible] = useState(false);
   const [notesModalVisible, setNotesModalVisible] = useState(false);
   const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
 
@@ -307,10 +307,10 @@ export default function GymScreen() {
   const exerciseListRef = useRef<FlatList>(null);
 
   // -------------------------------------------------------------------------
-  // SYNC ACTIVE EXERCISE WITH AXIS CONTEXT
+  // SYNC ACTIVE EXERCISE WITH HANK CONTEXT
   // -------------------------------------------------------------------------
   useEffect(() => {
-    // Sincronizar módulo actual con AXIS (incluyendo día de entrenamiento)
+    // Sincronizar módulo actual con HANK (incluyendo día de entrenamiento)
     if (isFocused) {
       setScreenContext({
         module: 'gym',
@@ -322,7 +322,7 @@ export default function GymScreen() {
   }, [isFocused, viewMode, activeExerciseIndex, selectedDayIndex, setScreenContext]);
 
   useEffect(() => {
-    // Sincronizar ejercicio activo con AXIS (considerando alternativas)
+    // Sincronizar ejercicio activo con HANK (considerando alternativas)
     const currentExercise = exercises[activeExerciseIndex];
     if (currentExercise && isFocused) {
       const altIndex = activeAlternatives[activeExerciseIndex] || 0;
@@ -336,7 +336,7 @@ export default function GymScreen() {
         // Usar el ID de la alternativa, marcando que ES alternativa
         const alternativeId = currentExercise.alternatives[altIndex - 1].id;
         const alternativeName = currentExercise.alternatives[altIndex - 1].name;
-        console.log('🔄 AXIS: Cambiando a alternativa:', alternativeName);
+        console.log('🔄 HANK: Cambiando a alternativa:', alternativeName);
         setActiveAsset(alternativeId, {
           isAlternative: true,
           parentExerciseName: currentExercise.name,
@@ -599,13 +599,13 @@ export default function GymScreen() {
     }
   }, [selectedDayIndex, user]);
 
-  // Recargar ejercicios cuando AXIS modifica datos (mantener posición)
+  // Recargar ejercicios cuando HANK modifica datos (mantener posición)
   useEffect(() => {
     console.warn('🔄 refreshTrigger cambió a:', refreshTrigger);
     if (user && refreshTrigger > 0) {
       const previousIndex = activeExerciseIndex;
       console.warn(
-        '🔄 AXIS modificó datos, recargando ejercicios del día:',
+        '🔄 HANK modificó datos, recargando ejercicios del día:',
         selectedDayIndex,
         'manteniendo índice:',
         previousIndex
@@ -2338,18 +2338,18 @@ export default function GymScreen() {
     </Modal>
   );
 
-  const renderAxisModal = () => (
+  const renderHankModal = () => (
     <Modal
-      visible={axisModalVisible}
+      visible={hankModalVisible}
       animationType="slide"
       transparent={true}
-      onRequestClose={() => setAxisModalVisible(false)}
+      onRequestClose={() => setHankModalVisible(false)}
     >
       <View className="flex-1 bg-black/95">
         <View className="flex-1 px-6 pt-16">
           <View className="flex-row justify-between items-center mb-6">
-            <Text className="text-savage-red text-2xl font-bold">AXIS IA</Text>
-            <TouchableOpacity onPress={() => setAxisModalVisible(false)}>
+            <Text className="text-savage-red text-2xl font-bold">HANK IA</Text>
+            <TouchableOpacity onPress={() => setHankModalVisible(false)}>
               <X color="#DC2626" size={24} />
             </TouchableOpacity>
           </View>
@@ -2359,7 +2359,7 @@ export default function GymScreen() {
               Contexto: {exercises[currentExerciseIndex]?.name}
             </Text>
             <Text className="text-zinc-600">
-              Hola, soy AXIS. ¿En qué puedo ayudarte con este ejercicio?
+              Hola, soy HANK. ¿En qué puedo ayudarte con este ejercicio?
             </Text>
           </View>
 
@@ -2880,9 +2880,9 @@ export default function GymScreen() {
           <Music color="#1DB954" size={24} />
         </TouchableOpacity>
 
-        {/* AXIS */}
+        {/* HANK */}
         <TouchableOpacity
-          onPress={() => setAxisModalVisible(true)}
+          onPress={() => setHankModalVisible(true)}
           className="bg-black/80 p-4 rounded-full border border-savage-red"
         >
           <Sparkles color="#DC2626" size={24} />
@@ -3150,7 +3150,7 @@ export default function GymScreen() {
       {/* MODALS */}
       {renderNotesModal()}
       {renderSpotifyModal()}
-      {renderAxisModal()}
+      {renderHankModal()}
       {renderVideoViewer()}
       {renderHistorialModal()}
       {renderStructureModal()}

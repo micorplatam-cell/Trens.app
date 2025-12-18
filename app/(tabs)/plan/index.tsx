@@ -18,13 +18,13 @@ import { TimePickerModal } from '../../../components/plan/TimePickerModal';
 import { StackManagerModal } from '../../../components/plan/StackManagerModal';
 import { AddOptionModal } from '../../../components/plan/AddOptionModal';
 import { supabase } from '../../../lib/supabase';
-import { useAxis } from '../../../context/AxisContext';
+import { useHank } from '../../../context/HankContext';
 import {
   calculateMacrosWithAI,
   calculateUserDailyMacros,
   recalculateAllMealsForNewCount,
   calculateMealWithUserMacros,
-} from '../../../services/axis/nutrition';
+} from '../../../services/hank/nutrition';
 
 // ============================================================================
 // TYPES
@@ -109,7 +109,7 @@ const getMealName = (index: number, total: number): string => {
 // ============================================================================
 export default function PlanScreen() {
   const router = useRouter();
-  const { refreshTrigger } = useAxis();
+  const { refreshTrigger } = useHank();
 
   // State
   const [planName, setPlanName] = useState('MI PLAN');
@@ -408,7 +408,7 @@ export default function PlanScreen() {
     fetchData();
   }, [fetchData]);
 
-  // RefreshTrigger from AXIS
+  // RefreshTrigger from HANK
   useEffect(() => {
     if (refreshTrigger > 0) {
       console.log('🔄 PLAN: refreshTrigger cambió, recargando datos...');
@@ -740,7 +740,7 @@ export default function PlanScreen() {
   const handleAddMeal = async (
     ingredients: { name: string; quantity: string; portion: string }[],
     time: string,
-    useAxisAI: boolean
+    useHankAI: boolean
   ) => {
     try {
       const {
@@ -814,7 +814,7 @@ export default function PlanScreen() {
 
       // Calcular macros con IA si está activado
       let finalIngredients = ingredients;
-      if (useAxisAI) {
+      if (useHankAI) {
         try {
           const ingredientsWithIds = ingredients.map((ing, i) => ({
             id: `temp-${i}`,

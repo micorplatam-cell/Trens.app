@@ -1,6 +1,6 @@
 // ============================================================================
 // EDIT MEAL MODAL - Modal para editar comidas existentes
-// Con integración AXIS AI y análisis inteligente de ingredientes
+// Con integración HANK AI y análisis inteligente de ingredientes
 // ============================================================================
 
 import React, { useState, useEffect } from 'react';
@@ -20,7 +20,7 @@ import { X, Plus, Trash2, Zap, AlertTriangle, CheckCircle } from 'lucide-react-n
 import {
   analyzeIngredientsSmart,
   IngredientAnalysis,
-} from '../../services/axis/ingredientAnalyzer';
+} from '../../services/hank/ingredientAnalyzer';
 
 // ============================================================================
 // TYPES
@@ -85,7 +85,7 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [isCalculating, setIsCalculating] = useState(false);
-  const [axisAI, setAxisAI] = useState(true);
+  const [hankAI, setHankAI] = useState(true);
   const [analysis, setAnalysis] = useState<IngredientAnalysis | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
@@ -94,14 +94,14 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
     if (meal && meal.options.length > 0) {
       const currentOption = meal.options[meal.selectedOption] || meal.options[0];
       setIngredients(currentOption.ingredients.map((ing) => ({ ...ing })));
-      setAxisAI(true);
+      setHankAI(true);
       setAnalysis(null);
     }
   }, [meal]);
 
-  // Analizar ingredientes cuando cambian - solo si AXIS AI activo
+  // Analizar ingredientes cuando cambian - solo si HANK AI activo
   useEffect(() => {
-    if (!axisAI) {
+    if (!hankAI) {
       setAnalysis(null);
       return;
     }
@@ -127,12 +127,12 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
     }, 600);
 
     return () => clearTimeout(timeoutId);
-  }, [ingredients, axisAI, meal?.targetMacros]);
+  }, [ingredients, hankAI, meal?.targetMacros]);
 
-  const toggleAxisAI = async () => {
+  const toggleHankAI = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    const newValue = !axisAI;
-    setAxisAI(newValue);
+    const newValue = !hankAI;
+    setHankAI(newValue);
 
     if (newValue && onCalculateMacros && ingredients.length > 0) {
       setIsCalculating(true);
@@ -185,7 +185,7 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
     try {
       let finalIngredients = validIngredients;
 
-      if (axisAI && onCalculateMacros) {
+      if (hankAI && onCalculateMacros) {
         setIsCalculating(true);
         try {
           finalIngredients = await onCalculateMacros(validIngredients, meal?.targetMacros);
@@ -251,7 +251,7 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
             </View>
 
             <ScrollView className="p-4" showsVerticalScrollIndicator={false}>
-              {/* AXIS AI Toggle */}
+              {/* HANK AI Toggle */}
               {onCalculateMacros && (
                 <View className="flex-row items-center justify-between bg-purple-900/10 p-4 rounded-xl border border-purple-500/20 mb-4">
                   <View className="flex-row items-center gap-3">
@@ -263,30 +263,30 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
                       )}
                     </View>
                     <View>
-                      <Text className="text-purple-300 font-bold">AXIS AI</Text>
+                      <Text className="text-purple-300 font-bold">HANK AI</Text>
                       <Text className="text-purple-400/60 text-xs">
                         {isCalculating ? 'Calculando gramos...' : 'Cálculo automático de gramos'}
                       </Text>
                     </View>
                   </View>
                   <Pressable
-                    onPress={toggleAxisAI}
+                    onPress={toggleHankAI}
                     disabled={isCalculating}
                     className={`w-12 h-6 rounded-full justify-center ${
-                      axisAI ? 'bg-purple-500' : 'bg-zinc-700'
+                      hankAI ? 'bg-purple-500' : 'bg-zinc-700'
                     }`}
                   >
                     <View
                       className={`w-4 h-4 bg-white rounded-full mx-1 ${
-                        axisAI ? 'self-end' : 'self-start'
+                        hankAI ? 'self-end' : 'self-start'
                       }`}
                     />
                   </Pressable>
                 </View>
               )}
 
-              {/* Analysis Alert - Solo visible si AXIS AI está activo */}
-              {axisAI && analysis && (
+              {/* Analysis Alert - Solo visible si HANK AI está activo */}
+              {hankAI && analysis && (
                 <View
                   className={`p-4 rounded-xl mb-4 border ${
                     analysis.isBalanced
@@ -398,7 +398,7 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
                     placeholderTextColor="#666"
                     className="bg-transparent border-b border-zinc-700 text-white py-2 mb-2"
                   />
-                  {!axisAI && (
+                  {!hankAI && (
                     <View className="flex-row gap-2 mt-2">
                       <TextInput
                         value={ing.quantity}
@@ -416,7 +416,7 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
                       />
                     </View>
                   )}
-                  {axisAI && ing.quantity && (
+                  {hankAI && ing.quantity && (
                     <View className="mt-2 bg-purple-500/10 p-2 rounded-lg border border-purple-500/20">
                       <Text className="text-purple-300 text-sm">
                         {ing.quantity}

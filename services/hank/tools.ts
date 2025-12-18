@@ -1,10 +1,10 @@
 // ============================================================================
-// AXIS TOOLS - Las 'manos' de la IA (Conexión con Supabase)
-// Sistema completo de herramientas para el Agente AXIS
+// HANK TOOLS - Las 'manos' de la IA (Conexión con Supabase)
+// Sistema completo de herramientas para el Agente HANK
 // ============================================================================
 
 import { supabase } from '../../lib/supabase';
-import type { AxisToolResult, ToolDefinition } from '../../types/axis';
+import type { HankToolResult, ToolDefinition } from '../../types/hank';
 
 // ============================================================================
 // TIPOS INTERNOS
@@ -108,7 +108,7 @@ export async function gymAddExercise(
   exerciseName: string,
   trainingDay: number,
   customSeries?: Array<{ reps: number; weight: number; type: string }>
-): Promise<AxisToolResult> {
+): Promise<HankToolResult> {
   try {
     // Buscar template del ejercicio
     const { data: template, error: templateError } = await supabase
@@ -211,7 +211,7 @@ export async function gymRemoveExercise(
   exerciseName: string,
   trainingDay?: number,
   deleteCompletely = false
-): Promise<AxisToolResult> {
+): Promise<HankToolResult> {
   try {
     const { data: exercise, error } = await supabase
       .from('user_assets')
@@ -295,7 +295,7 @@ export async function gymReplaceExercise(
   oldExerciseName: string,
   newExerciseName: string,
   trainingDay?: number
-): Promise<AxisToolResult> {
+): Promise<HankToolResult> {
   try {
     // 1. Buscar el ejercicio original para obtener su día y orden
     const { data: oldExercise, error: findError } = await supabase
@@ -429,7 +429,7 @@ export async function gymReplaceExercise(
 export async function gymListExercises(
   userId: string,
   trainingDay?: number
-): Promise<AxisToolResult> {
+): Promise<HankToolResult> {
   try {
     const { data, error } = await supabase
       .from('user_assets')
@@ -474,7 +474,7 @@ export async function gymListExercises(
 // ============================================================================
 // ASSET TOOL: Leer Schema de Templates (LIQUID DATA)
 // ============================================================================
-export async function assetGetSchema(assetType: string): Promise<AxisToolResult> {
+export async function assetGetSchema(assetType: string): Promise<HankToolResult> {
   try {
     const { data: template, error } = await supabase
       .from('asset_templates')
@@ -521,7 +521,7 @@ export async function assetUpdateField(
   fieldPath: string,
   newValue: unknown,
   operation: 'set' | 'increment' | 'decrement' = 'set'
-): Promise<AxisToolResult> {
+): Promise<HankToolResult> {
   try {
     // Buscar asset
     let query = supabase
@@ -660,7 +660,7 @@ export async function assetRemoveSeries(
   assetName: string,
   seriesIndex: number | 'last' | 'first',
   trainingDay: number = 0
-): Promise<AxisToolResult> {
+): Promise<HankToolResult> {
   try {
     // Buscar el asset
     const { data: asset, error: assetError } = await supabase
@@ -757,7 +757,7 @@ export async function assetAddSeries(
   seriesType: 'WARMUP' | 'APPROACH' | 'EFFECTIVE' | 'FAILURE' = 'EFFECTIVE',
   position: 'end' | 'start' | number = 'end',
   trainingDay: number = 0
-): Promise<AxisToolResult> {
+): Promise<HankToolResult> {
   try {
     // Buscar el asset
     const { data: asset, error: assetError } = await supabase
@@ -839,7 +839,7 @@ export async function assetReplaceSeries(
   weight: number = 0,
   seriesType: 'WARMUP' | 'APPROACH' | 'EFFECTIVE' | 'FAILURE' = 'EFFECTIVE',
   trainingDay: number = 0
-): Promise<AxisToolResult> {
+): Promise<HankToolResult> {
   try {
     // Buscar el asset
     const { data: asset, error: assetError } = await supabase
@@ -937,7 +937,7 @@ export async function assetSetSeries(
   assetName: string,
   series: SeriesConfig[],
   trainingDay: number = 0
-): Promise<AxisToolResult> {
+): Promise<HankToolResult> {
   try {
     if (!series || series.length === 0) {
       return { success: false, message: 'Debes proporcionar al menos una serie.' };
@@ -1011,7 +1011,7 @@ export async function assetRead(
   assetId?: string,
   assetName?: string,
   assetType?: string
-): Promise<AxisToolResult> {
+): Promise<HankToolResult> {
   try {
     let query = supabase
       .from('user_assets')
@@ -1045,7 +1045,7 @@ export async function dietAddCalories(
   userId: string,
   mealName: string,
   caloriesChange: number
-): Promise<AxisToolResult> {
+): Promise<HankToolResult> {
   try {
     const { data: meal, error } = await supabase
       .from('user_assets')
@@ -1095,7 +1095,7 @@ export async function logWorkoutSet(
   sessionId: string,
   assetId: string,
   setDetails: { weight: number; reps: number; rir?: number }
-): Promise<AxisToolResult> {
+): Promise<HankToolResult> {
   try {
     const { error } = await supabase.from('workout_logs').insert({
       session_id: sessionId,
@@ -1121,7 +1121,7 @@ export async function logWorkoutSet(
 /**
  * Obtiene el perfil completo del atleta (TRENS ID + medidas corporales)
  */
-export async function adnGetProfile(userId: string): Promise<AxisToolResult> {
+export async function adnGetProfile(userId: string): Promise<HankToolResult> {
   try {
     // Obtener perfil
     const { data: profile, error: profileError } = await supabase
@@ -1188,7 +1188,7 @@ ${dominantMuscle ? `\n🏆 MÚSCULO DOMINANTE: ${dominantMuscle.name} (${dominan
 /**
  * Obtiene los récords personales del atleta
  */
-export async function adnGetRecords(userId: string): Promise<AxisToolResult> {
+export async function adnGetRecords(userId: string): Promise<HankToolResult> {
   try {
     const { data: records, error } = await supabase
       .from('personal_records')
@@ -1237,7 +1237,7 @@ export async function adnUpdateProfile(
   userId: string,
   field: 'goal' | 'weight' | 'height' | 'injuries' | 'allergies' | 'display_name',
   value: string
-): Promise<AxisToolResult> {
+): Promise<HankToolResult> {
   try {
     const fieldLabels: Record<string, string> = {
       goal: 'Objetivo',
@@ -1277,7 +1277,7 @@ export async function adnAddMeasurement(
   name: string,
   value: string,
   isDominant: boolean = false
-): Promise<AxisToolResult> {
+): Promise<HankToolResult> {
   try {
     const { error } = await supabase.from('body_measurements').insert({
       user_id: userId,
@@ -1308,7 +1308,7 @@ export async function adnAddMeasurement(
 export async function adnRemoveMeasurement(
   userId: string,
   measurementName: string
-): Promise<AxisToolResult> {
+): Promise<HankToolResult> {
   try {
     const { data, error } = await supabase
       .from('body_measurements')
@@ -1351,7 +1351,7 @@ export async function planAddMeal(
   userId: string,
   time: string,
   ingredients: Array<{ name: string; quantity?: string; portion?: string }>
-): Promise<AxisToolResult> {
+): Promise<HankToolResult> {
   try {
     // Get or create active plan
     let { data: plan } = await supabase
@@ -1431,7 +1431,7 @@ export async function planAddMeal(
 export async function planRemoveMeal(
   userId: string,
   options: { mealId?: string; time?: string; position?: string }
-): Promise<AxisToolResult> {
+): Promise<HankToolResult> {
   try {
     let mealId = options.mealId;
 
@@ -1486,7 +1486,7 @@ export async function planUpdateMealTime(
   userId: string,
   newTime: string,
   options: { mealId?: string; position?: string }
-): Promise<AxisToolResult> {
+): Promise<HankToolResult> {
   try {
     let mealId = options.mealId;
 
@@ -1533,7 +1533,7 @@ export async function planUpdateIngredients(
   userId: string,
   mealId: string,
   ingredients: Array<{ name: string; quantity?: string; portion?: string }>
-): Promise<AxisToolResult> {
+): Promise<HankToolResult> {
   try {
     // Get the meal's option
     const { data: options } = await supabase
@@ -1577,7 +1577,7 @@ export async function planUpdateIngredients(
 /**
  * Obtiene todas las comidas del día
  */
-export async function planGetMeals(userId: string): Promise<AxisToolResult> {
+export async function planGetMeals(userId: string): Promise<HankToolResult> {
   try {
     const { data: meals, error } = await supabase
       .from('meals')
@@ -1658,7 +1658,7 @@ export async function planAddSupplement(
     isPreWorkout?: boolean;
     isPostWorkout?: boolean;
   }
-): Promise<AxisToolResult> {
+): Promise<HankToolResult> {
   try {
     const { error } = await supabase.from('supplement_stack').insert({
       user_id: userId,
@@ -1691,7 +1691,7 @@ export async function planAddSupplement(
 /**
  * Elimina un suplemento del stack
  */
-export async function planRemoveSupplement(userId: string, name: string): Promise<AxisToolResult> {
+export async function planRemoveSupplement(userId: string, name: string): Promise<HankToolResult> {
   try {
     const { data, error } = await supabase
       .from('supplement_stack')
@@ -1720,7 +1720,7 @@ export async function planRemoveSupplement(userId: string, name: string): Promis
 /**
  * Obtiene el stack de suplementos
  */
-export async function planGetStack(userId: string): Promise<AxisToolResult> {
+export async function planGetStack(userId: string): Promise<HankToolResult> {
   try {
     const { data: stack, error } = await supabase
       .from('supplement_stack')

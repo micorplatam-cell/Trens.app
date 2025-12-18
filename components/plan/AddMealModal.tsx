@@ -1,6 +1,6 @@
 // ============================================================================
 // ADD MEAL MODAL - Modal para agregar comidas
-// Con toggle AXIS AI y análisis inteligente de ingredientes
+// Con toggle HANK AI y análisis inteligente de ingredientes
 // ============================================================================
 
 import React, { useState, useEffect } from 'react';
@@ -20,7 +20,7 @@ import { X, Plus, Zap, Trash2, AlertTriangle, CheckCircle } from 'lucide-react-n
 import {
   analyzeIngredientsSmart,
   IngredientAnalysis,
-} from '../../services/axis/ingredientAnalyzer';
+} from '../../services/hank/ingredientAnalyzer';
 
 // ============================================================================
 // TYPES
@@ -42,7 +42,7 @@ interface AddMealModalProps {
   visible: boolean;
   targetMacros?: TargetMacros;
   onClose: () => void;
-  onSave: (ingredients: Ingredient[], time: string, useAxisAI: boolean) => void;
+  onSave: (ingredients: Ingredient[], time: string, useHankAI: boolean) => void;
 }
 
 // ============================================================================
@@ -54,7 +54,7 @@ export const AddMealModal: React.FC<AddMealModalProps> = ({
   onClose,
   onSave,
 }) => {
-  const [axisAI, setAxisAI] = useState(true);
+  const [hankAI, setHankAI] = useState(true);
   const [hour, setHour] = useState('12');
   const [minute, setMinute] = useState('00');
   const [period, setPeriod] = useState<'AM' | 'PM'>('PM');
@@ -67,7 +67,7 @@ export const AddMealModal: React.FC<AddMealModalProps> = ({
   // Reset cuando se abre
   useEffect(() => {
     if (visible) {
-      setAxisAI(true);
+      setHankAI(true);
       setHour('12');
       setMinute('00');
       setPeriod('PM');
@@ -76,9 +76,9 @@ export const AddMealModal: React.FC<AddMealModalProps> = ({
     }
   }, [visible]);
 
-  // Analizar ingredientes cuando cambian (con debounce) - solo si AXIS AI activo
+  // Analizar ingredientes cuando cambian (con debounce) - solo si HANK AI activo
   useEffect(() => {
-    if (!axisAI) {
+    if (!hankAI) {
       setAnalysis(null);
       return;
     }
@@ -104,7 +104,7 @@ export const AddMealModal: React.FC<AddMealModalProps> = ({
     }, 600);
 
     return () => clearTimeout(timeoutId);
-  }, [ingredients, axisAI, targetMacros]);
+  }, [ingredients, hankAI, targetMacros]);
 
   const addIngredient = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -141,7 +141,7 @@ export const AddMealModal: React.FC<AddMealModalProps> = ({
       return;
     }
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    onSave(validIngredients, getTime24h(), axisAI);
+    onSave(validIngredients, getTime24h(), hankAI);
     setIngredients([{ name: '', quantity: '', portion: '' }]);
     setHour('12');
     setMinute('00');
@@ -149,9 +149,9 @@ export const AddMealModal: React.FC<AddMealModalProps> = ({
     onClose();
   };
 
-  const toggleAxisAI = () => {
+  const toggleHankAI = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setAxisAI(!axisAI);
+    setHankAI(!hankAI);
   };
 
   const togglePeriod = () => {
@@ -190,33 +190,33 @@ export const AddMealModal: React.FC<AddMealModalProps> = ({
             </View>
 
             <ScrollView className="p-4" showsVerticalScrollIndicator={false}>
-              {/* AXIS AI Toggle */}
+              {/* HANK AI Toggle */}
               <View className="flex-row items-center justify-between bg-purple-900/10 p-4 rounded-xl border border-purple-500/20 mb-4">
                 <View className="flex-row items-center gap-3">
                   <View className="bg-purple-500 p-2 rounded-lg">
                     <Zap size={16} color="#FFF" />
                   </View>
                   <View>
-                    <Text className="text-purple-300 font-bold">AXIS AI</Text>
+                    <Text className="text-purple-300 font-bold">HANK AI</Text>
                     <Text className="text-purple-400/60 text-xs">Cálculo automático de gramos</Text>
                   </View>
                 </View>
                 <Pressable
-                  onPress={toggleAxisAI}
+                  onPress={toggleHankAI}
                   className={`w-12 h-6 rounded-full justify-center ${
-                    axisAI ? 'bg-purple-500' : 'bg-zinc-700'
+                    hankAI ? 'bg-purple-500' : 'bg-zinc-700'
                   }`}
                 >
                   <View
                     className={`w-4 h-4 bg-white rounded-full mx-1 ${
-                      axisAI ? 'self-end' : 'self-start'
+                      hankAI ? 'self-end' : 'self-start'
                     }`}
                   />
                 </Pressable>
               </View>
 
-              {/* Analysis Alert - Solo visible si AXIS AI está activo */}
-              {axisAI && analysis && (
+              {/* Analysis Alert - Solo visible si HANK AI está activo */}
+              {hankAI && analysis && (
                 <View
                   className={`p-4 rounded-xl mb-4 border ${
                     analysis.isBalanced
@@ -377,7 +377,7 @@ export const AddMealModal: React.FC<AddMealModalProps> = ({
                     placeholderTextColor="#666"
                     className="bg-transparent border-b border-zinc-700 text-white py-2 mb-2"
                   />
-                  {!axisAI && (
+                  {!hankAI && (
                     <View className="flex-row gap-2 mt-2">
                       <TextInput
                         value={ing.quantity}

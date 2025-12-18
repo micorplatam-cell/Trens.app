@@ -5,8 +5,8 @@ import { View } from 'react-native';
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
-import { AxisProvider } from '../context/AxisContext';
-import { AxisOverlay } from '../components/axis/AxisOverlay';
+import { HankProvider } from '../context/HankContext';
+import { HankOverlay } from '../components/hank/HankOverlay';
 import '../global.css';
 
 // ============================================================================
@@ -60,29 +60,29 @@ const SportProvider = ({ children }: { children: React.ReactNode }) => {
 };
 
 // ============================================================================
-// 3. AXIS PROVIDER - Importado desde context/AxisContext.tsx
-// Re-exportamos useAxis para acceso global
+// 3. HANK PROVIDER - Importado desde context/HankContext.tsx
+// Re-exportamos useHank para acceso global
 // ============================================================================
-export { useAxis } from '../context/AxisContext';
+export { useHank } from '../context/HankContext';
 
 // ============================================================================
-// 4. AXIS WRAPPER - Conecta AxisProvider con userId del Auth
-// Solo renderiza AxisProvider y AxisOverlay cuando hay usuario autenticado
+// 4. HANK WRAPPER - Conecta HankProvider con userId del Auth
+// Solo renderiza HankProvider y HankOverlay cuando hay usuario autenticado
 // ============================================================================
-const AxisWrapper = ({ children }: { children: React.ReactNode }) => {
+const HankWrapper = ({ children }: { children: React.ReactNode }) => {
   const { user, loading } = useAuth();
 
-  // Si está cargando o no hay usuario, no montar AxisProvider
+  // Si está cargando o no hay usuario, no montar HankProvider
   if (loading || !user) {
     return <>{children}</>;
   }
 
   return (
-    <AxisProvider userId={user.id}>
+    <HankProvider userId={user.id}>
       {children}
-      {/* AXIS Overlay - Solo visible cuando hay usuario autenticado */}
-      <AxisOverlay />
-    </AxisProvider>
+      {/* HANK Overlay - Solo visible cuando hay usuario autenticado */}
+      <HankOverlay />
+    </HankProvider>
   );
 };
 
@@ -91,12 +91,12 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <AuthProvider>
         <SportProvider>
-          <AxisWrapper>
+          <HankWrapper>
             <View className="flex-1 bg-savage-black">
               <Slot />
               <StatusBar style="light" />
             </View>
-          </AxisWrapper>
+          </HankWrapper>
         </SportProvider>
       </AuthProvider>
     </GestureHandlerRootView>

@@ -1,5 +1,5 @@
 // ============================================================================
-// AXIS NUTRITION SERVICE - Cálculo de macros con Gemini AI
+// HANK NUTRITION SERVICE - Cálculo de macros con Gemini AI
 // ============================================================================
 
 const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
@@ -31,7 +31,7 @@ interface CalculatedIngredient extends Ingredient {
 // ============================================================================
 // SYSTEM PROMPT FOR NUTRITION CALCULATIONS
 // ============================================================================
-const NUTRITION_SYSTEM_PROMPT = `Eres AXIS, un experto nutricionista deportivo de élite. Tu objetivo es calcular gramos precisos y macros para atletas.
+const NUTRITION_SYSTEM_PROMPT = `Eres HANK, un experto nutricionista deportivo de élite. Tu objetivo es calcular gramos precisos y macros para atletas.
 
 REGLAS:
 1. Para cada ingrediente, estima los gramos óptimos basándote en una comida balanceada de atleta (150-250g proteína, moderados carbos)
@@ -891,7 +891,7 @@ async function calculateWithAI(
   }
 
   try {
-    const prompt = `Eres AXIS, nutricionista deportivo. Calcula gramos EXACTOS para CUMPLIR estos macros.
+    const prompt = `Eres HANK, nutricionista deportivo. Calcula gramos EXACTOS para CUMPLIR estos macros.
 
 MACROS OBJETIVO (OBLIGATORIO):
 • Proteína: ${mealMacros.protein}g
