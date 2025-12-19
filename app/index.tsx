@@ -1,9 +1,10 @@
 import { Redirect } from 'expo-router';
-import { useAuth } from './_layout';
+import type { Href } from 'expo-router';
+import { useUserRoleContext } from '../context/UserRoleContext';
 import { View, ActivityIndicator } from 'react-native';
 
 export default function Index() {
-  const { user, loading } = useAuth();
+  const { loading } = useUserRoleContext();
 
   // Mientras carga la sesión, mostrar loading
   if (loading) {
@@ -14,11 +15,8 @@ export default function Index() {
     );
   }
 
-  // Si hay usuario autenticado, ir a tabs
-  if (user) {
-    return <Redirect href="/(tabs)/nucleo" />;
-  }
-
-  // Si no hay sesión, ir a login
-  return <Redirect href="/(auth)/login" />;
+  // TRENS NO pide login para usar la app
+  // El contenido público es accesible sin cuenta
+  // Feed es la pantalla principal
+  return <Redirect href={'/(tabs)/feed' as Href} />;
 }

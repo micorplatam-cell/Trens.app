@@ -9,18 +9,36 @@ import {
   ActivityIndicator,
   Modal,
   Dimensions,
+  Alert,
+  Share,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Grid, Lock, Plus, Play, Eye, EyeOff, Edit2, X, Music } from 'lucide-react-native';
+import {
+  Grid,
+  Lock,
+  Plus,
+  Play,
+  Eye,
+  EyeOff,
+  X,
+  Music,
+  Trash2,
+  Share2,
+  MoreVertical,
+} from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { supabase } from '../../../lib/supabase';
-import { useAuth } from '../../_layout';
+import { useUserRoleContext } from '../../../context/UserRoleContext';
 import { useHank } from '../../../context/HankContext';
 import TrensID from '../../../components/adn/TrensID';
 import RecordCard from '../../../components/adn/RecordCard';
 import AddRecordModal from '../../../components/adn/AddRecordModal';
+import { ProUpgradeModal } from '../../../components/pro/ProUpgradeModal';
 
+// ============================================================================
+// TIPOS
+// ============================================================================
 interface UserProfile {
   id: string;
   user_id: string;
@@ -58,8 +76,10 @@ interface Video {
   is_public: boolean;
   views?: number;
   created_at: string;
-  source: 'asset' | 'pro'; // Origen del video
+  source: 'asset' | 'pro';
   exercise_name?: string;
+  weight_kg?: number;
+  reps?: number;
   spotify?: {
     enabled: boolean;
     trackName?: string;
@@ -68,7 +88,7 @@ interface Video {
 }
 
 // ============================================================================
-// VIDEO THUMBNAIL - Muestra el primer frame del video
+// VIDEO THUMBNAIL
 // ============================================================================
 const VideoThumbnail = ({ videoUrl, size }: { videoUrl: string; size: number }) => {
   const player = useVideoPlayer(videoUrl, (p) => {
@@ -87,19 +107,27 @@ const VideoThumbnail = ({ videoUrl, size }: { videoUrl: string; size: number }) 
   );
 };
 
+// ============================================================================
+// MAIN COMPONENT
+// ============================================================================
 export default function AdnScreen() {
-  const { user } = useAuth();
+  const { user, isPro, isAuthenticated } = useUserRoleContext();
   const { refreshTrigger } = useHank();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'legacy' | 'vault'>('legacy');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
   // Video viewer state
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
   const [videoViewerVisible, setVideoViewerVisible] = useState(false);
   const { width: screenWidth } = Dimensions.get('window');
   const videoTileSize = screenWidth / 3;
+
+  // Video options modal
+  const [videoOptionsVisible, setVideoOptionsVisible] = useState(false);
+  const [selectedVideoForEdit, setSelectedVideoForEdit] = useState<Video | null>(null);
 
   // Video player para el viewer
   const videoSource = selectedVideo?.video_url || '';
@@ -124,10 +152,16 @@ export default function AdnScreen() {
   const [videos, setVideos] = useState<Video[]>([]);
   const [followersCount, setFollowersCount] = useState(0);
 
-  const isOwner = true; // TODO: Implementar lógica de visitante vs dueño
+  const isOwner = true; // Para perfiles de otros usuarios, esto cambiaría
 
+  // -------------------------------------------------------------------------
+  // FETCH DATA
+  // -------------------------------------------------------------------------
   const fetchData = useCallback(async () => {
-    if (!user) return;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
 
     try {
       // Fetch profile
@@ -168,7 +202,7 @@ export default function AdnScreen() {
 
       setMeasurements(measurementsData || []);
 
-      // Fetch records
+      // Fetch records - SOLO de videos públicos según MASTER
       const { data: recordsData } = await supabase
         .from('personal_records')
         .select('*')
@@ -193,7 +227,7 @@ export default function AdnScreen() {
         .is('deleted_at', null)
         .order('created_at', { ascending: false });
 
-      // Fetch videos from pro_videos (nuevos videos PRO)
+      // Fetch videos from pro_videos
       const { data: proVideosData } = await supabase
         .from('pro_videos')
         .select('*')
@@ -220,6 +254,8 @@ export default function AdnScreen() {
         created_at: video.created_at,
         source: 'pro' as const,
         exercise_name: video.exercise_name,
+        weight_kg: video.weight_kg,
+        reps: video.reps,
         spotify: video.spotify,
       }));
 
@@ -244,7 +280,6 @@ export default function AdnScreen() {
   // Refrescar cuando HANK modifica datos
   useEffect(() => {
     if (refreshTrigger > 0) {
-      console.log('🔄 ADN: refreshTrigger cambió, recargando datos...');
       fetchData();
     }
   }, [refreshTrigger, fetchData]);
@@ -254,6 +289,110 @@ export default function AdnScreen() {
     fetchData();
   }, [fetchData]);
 
+  // -------------------------------------------------------------------------
+  // VIDEO VISIBILITY TOGGLE - Público ↔ Privado según MASTER
+  // -------------------------------------------------------------------------
+  const toggleVideoVisibility = async (video: Video) => {
+    if (!user || !isPro) {
+      setShowUpgradeModal(true);
+      return;
+    }
+
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    try {
+      const newIsPublic = !video.is_public;
+
+      if (video.source === 'pro') {
+        const { error } = await supabase
+          .from('pro_videos')
+          .update({ is_public: newIsPublic })
+          .eq('id', video.id);
+
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('user_assets')
+          .update({ is_public: newIsPublic })
+          .eq('id', video.id);
+
+        if (error) throw error;
+      }
+
+      // Si el video sale de público, eliminar del Top 3 según MASTER
+      if (!newIsPublic) {
+        // Eliminar de personal_records si está vinculado
+        await supabase.from('personal_records').delete().eq('video_id', video.id);
+      }
+
+      // Actualizar estado local
+      setVideos((prev) =>
+        prev.map((v) => (v.id === video.id ? { ...v, is_public: newIsPublic } : v))
+      );
+
+      setVideoOptionsVisible(false);
+      setSelectedVideoForEdit(null);
+
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (error) {
+      console.error('Error toggling visibility:', error);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // DELETE VIDEO
+  // -------------------------------------------------------------------------
+  const deleteVideo = async (video: Video) => {
+    if (!user) return;
+
+    Alert.alert(
+      'Eliminar video',
+      '¿Estás seguro de que quieres eliminar este video? Esta acción no se puede deshacer.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: async () => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+
+            try {
+              if (video.source === 'pro') {
+                const { error } = await supabase.from('pro_videos').delete().eq('id', video.id);
+
+                if (error) throw error;
+              } else {
+                // Soft delete para assets
+                const { error } = await supabase
+                  .from('user_assets')
+                  .update({ deleted_at: new Date().toISOString() })
+                  .eq('id', video.id);
+
+                if (error) throw error;
+              }
+
+              // Eliminar de personal_records si está vinculado
+              await supabase.from('personal_records').delete().eq('video_id', video.id);
+
+              setVideos((prev) => prev.filter((v) => v.id !== video.id));
+              setVideoOptionsVisible(false);
+              setSelectedVideoForEdit(null);
+
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            } catch (error) {
+              console.error('Error deleting video:', error);
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // -------------------------------------------------------------------------
+  // ADD RECORD - Solo desde videos públicos según MASTER
+  // -------------------------------------------------------------------------
   const handleAddRecord = async (recordData: {
     exercise_id: string;
     exercise_name: string;
@@ -263,6 +402,18 @@ export default function AdnScreen() {
     video_id?: string;
   }) => {
     if (!user) return;
+
+    // Verificar que el video sea público si se proporciona
+    if (recordData.video_id) {
+      const video = videos.find((v) => v.id === recordData.video_id);
+      if (video && !video.is_public) {
+        Alert.alert(
+          'Video privado',
+          'Solo puedes agregar récords desde videos públicos. Primero hazlo público desde la Bóveda.'
+        );
+        return;
+      }
+    }
 
     try {
       const { data, error } = await supabase
@@ -277,7 +428,7 @@ export default function AdnScreen() {
       if (error) {
         if (error.message.includes('Maximum of 3')) {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-          console.log('Máximo 3 récords permitidos');
+          Alert.alert('Límite alcanzado', 'Máximo 3 récords permitidos');
         }
         throw error;
       }
@@ -289,20 +440,24 @@ export default function AdnScreen() {
     }
   };
 
+  // -------------------------------------------------------------------------
+  // HELPERS
+  // -------------------------------------------------------------------------
   const formatFollowers = (count: number): string => {
     if (count >= 1000000) return `${(count / 1000000).toFixed(1)}M`;
     if (count >= 1000) return `${(count / 1000).toFixed(1)}K`;
     return count.toString();
   };
 
-  const displayVideos = activeTab === 'legacy' ? videos.filter((v) => v.is_public) : videos;
+  // Videos públicos para el tab "Legado" (perfil público)
+  const publicVideos = videos.filter((v) => v.is_public);
 
-  const getGridClass = () => {
-    if (records.length === 1) return 'flex-row';
-    if (records.length === 2) return 'flex-row';
-    return 'flex-row';
-  };
+  // Videos privados para la "Bóveda"
+  const vaultVideos = videos.filter((v) => !v.is_public);
 
+  // -------------------------------------------------------------------------
+  // RENDER: Loading
+  // -------------------------------------------------------------------------
   if (loading) {
     return (
       <View className="flex-1 bg-black items-center justify-center">
@@ -311,6 +466,35 @@ export default function AdnScreen() {
     );
   }
 
+  // -------------------------------------------------------------------------
+  // RENDER: No autenticado
+  // -------------------------------------------------------------------------
+  if (!isAuthenticated) {
+    return (
+      <View className="flex-1 bg-black items-center justify-center px-6">
+        <View className="bg-zinc-900 rounded-3xl p-8 items-center">
+          <Lock color="#DC2626" size={48} />
+          <Text className="text-white text-xl font-bold mt-4 mb-2">TU ADN</Text>
+          <Text className="text-zinc-500 text-center mb-6">
+            Inicia sesión para ver tu perfil, récords y bóveda privada
+          </Text>
+          <TouchableOpacity
+            onPress={() => {
+              // Navegar a login
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            }}
+            className="bg-savage-red py-3 px-8 rounded-xl"
+          >
+            <Text className="text-white font-bold">INICIAR SESIÓN</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // RENDER: Main
+  // -------------------------------------------------------------------------
   return (
     <View className="flex-1 bg-black">
       <ScrollView
@@ -322,7 +506,6 @@ export default function AdnScreen() {
       >
         {/* HEADER (PÚBLICO) */}
         <View className="relative pt-16 pb-20 px-6 items-center">
-          {/* Degradado radial de fondo */}
           <LinearGradient
             colors={['#1a1a1a', '#000000']}
             start={{ x: 0.5, y: 0 }}
@@ -356,6 +539,15 @@ export default function AdnScreen() {
           <Text className="text-xs font-bold text-zinc-500 uppercase tracking-widest">
             SEGUIDORES: <Text className="text-zinc-300">{formatFollowers(followersCount)}</Text>
           </Text>
+
+          {/* Badge PRO/FREE */}
+          <View
+            className={`mt-3 px-3 py-1 rounded-full ${isPro ? 'bg-savage-red' : 'bg-zinc-800'}`}
+          >
+            <Text className={`text-xs font-bold ${isPro ? 'text-white' : 'text-zinc-500'}`}>
+              {isPro ? '⚡ PRO' : '🔒 FREE'}
+            </Text>
+          </View>
         </View>
 
         {/* TRENS ID (Solo visible para el dueño) */}
@@ -376,28 +568,34 @@ export default function AdnScreen() {
           )}
         </View>
 
-        {/* RECORDS (PÚBLICO) */}
+        {/* RECORDS (PÚBLICO) - Solo de videos públicos según MASTER */}
         <View className={`px-4 ${!isOwner ? 'mt-8' : ''}`}>
           <View className="flex-row justify-between items-center mb-3 border-b border-zinc-900 pb-2">
             <View className="flex-row items-center gap-2">
               <View className="w-1.5 h-1.5 bg-savage-red rounded-sm" />
               <Text className="text-white font-bold uppercase tracking-widest text-xs">
-                Records Verificados
+                Top 3 Récords
               </Text>
             </View>
+            <Text className="text-zinc-600 text-xs">Solo videos públicos</Text>
           </View>
 
           <View className="flex-row gap-2">
-            {records.map((rec) => (
+            {records.slice(0, 3).map((rec) => (
               <View key={rec.id} className="flex-1">
                 <RecordCard record={rec} />
               </View>
             ))}
 
-            {/* Botón añadir (solo dueño y si hay espacio) */}
-            {isOwner && records.length < 3 && (
+            {/* Botón añadir (solo dueño y si hay espacio) - NO manual según MASTER */}
+            {/* Los récords solo se eligen desde videos públicos, no ingreso manual */}
+            {isOwner && records.length < 3 && publicVideos.length > 0 && (
               <TouchableOpacity
                 onPress={() => {
+                  if (!isPro) {
+                    setShowUpgradeModal(true);
+                    return;
+                  }
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                   setShowAddModal(true);
                 }}
@@ -407,7 +605,7 @@ export default function AdnScreen() {
                   <Plus size={18} color="#71717a" />
                 </View>
                 <Text className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest">
-                  Añadir
+                  Elegir
                 </Text>
               </TouchableOpacity>
             )}
@@ -417,6 +615,7 @@ export default function AdnScreen() {
         {/* TABS */}
         <View className="mt-12 border-t border-zinc-900">
           <View className="flex-row">
+            {/* LEGADO (Videos públicos) */}
             <TouchableOpacity
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -434,11 +633,19 @@ export default function AdnScreen() {
               >
                 Legado
               </Text>
+              <View className="bg-zinc-800 px-1.5 py-0.5 rounded">
+                <Text className="text-zinc-500 text-[9px] font-bold">{publicVideos.length}</Text>
+              </View>
             </TouchableOpacity>
 
+            {/* BÓVEDA (Todos los videos, para gestión) - Solo dueño */}
             {isOwner && (
               <TouchableOpacity
                 onPress={() => {
+                  if (!isPro) {
+                    setShowUpgradeModal(true);
+                    return;
+                  }
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                   setActiveTab('vault');
                 }}
@@ -446,7 +653,7 @@ export default function AdnScreen() {
                   activeTab === 'vault' ? 'border-t-2 border-savage-red bg-red-900/10' : ''
                 }`}
               >
-                <Lock size={14} color={activeTab === 'vault' ? '#fff' : '#52525b'} />
+                <Lock size={14} color={activeTab === 'vault' ? '#DC2626' : '#52525b'} />
                 <Text
                   className={`text-[10px] font-bold uppercase tracking-[0.2em] ${
                     activeTab === 'vault' ? 'text-white' : 'text-zinc-600'
@@ -454,23 +661,30 @@ export default function AdnScreen() {
                 >
                   Bóveda
                 </Text>
+                <View className="bg-zinc-800 px-1.5 py-0.5 rounded">
+                  <Text className="text-zinc-500 text-[9px] font-bold">{vaultVideos.length}</Text>
+                </View>
               </TouchableOpacity>
             )}
           </View>
 
           {/* CONTENIDO TABS */}
           <View className="bg-[#050505] min-h-[300px]">
+            {/* LEGADO - Grid de videos públicos */}
             {activeTab === 'legacy' && (
               <View className="flex-row flex-wrap">
-                {displayVideos.length === 0 ? (
+                {publicVideos.length === 0 ? (
                   <View className="flex-1 items-center justify-center py-20">
                     <Grid size={40} color="#27272a" />
                     <Text className="text-zinc-600 text-xs uppercase tracking-widest mt-4">
                       Sin contenido público
                     </Text>
+                    <Text className="text-zinc-700 text-xs text-center mt-2 px-8">
+                      Graba videos y hazlos públicos para mostrar tu legado
+                    </Text>
                   </View>
                 ) : (
-                  displayVideos.map((vid) => (
+                  publicVideos.map((vid) => (
                     <TouchableOpacity
                       key={vid.id}
                       className="w-1/3 aspect-[9/16] bg-zinc-900 relative overflow-hidden"
@@ -482,7 +696,6 @@ export default function AdnScreen() {
                         }
                       }}
                     >
-                      {/* Video Thumbnail - muestra primer frame del video */}
                       {vid.video_url ? (
                         <View className="w-full h-full opacity-80">
                           <VideoThumbnail videoUrl={vid.video_url} size={videoTileSize} />
@@ -494,15 +707,10 @@ export default function AdnScreen() {
                           resizeMode="cover"
                         />
                       )}
-                      {/* Overlay con icono play */}
                       <View className="absolute inset-0 items-center justify-center bg-black/20">
                         <View className="w-8 h-8 rounded-full bg-black/50 items-center justify-center">
                           <Play size={14} color="#fff" fill="#fff" />
                         </View>
-                      </View>
-                      <View className="absolute bottom-1 left-1 flex-row items-center gap-1">
-                        <Play size={8} color="#fff" fill="#fff" />
-                        <Text className="text-[9px] font-bold text-white">{vid.views || 0}</Text>
                       </View>
                       {vid.spotify?.enabled && (
                         <View className="absolute top-1 right-1">
@@ -515,15 +723,17 @@ export default function AdnScreen() {
               </View>
             )}
 
+            {/* BÓVEDA - Lista de todos los videos con gestión */}
             {activeTab === 'vault' && isOwner && (
               <View className="p-2">
                 {/* Info box */}
                 <View className="p-3 bg-zinc-900/30 border border-zinc-800 rounded flex-row gap-3 mb-4">
-                  <Lock size={16} color="#52525b" />
+                  <Lock size={16} color="#DC2626" />
                   <View className="flex-1">
-                    <Text className="text-white text-xs font-bold mb-1">ARCHIVO MAESTRO</Text>
+                    <Text className="text-white text-xs font-bold mb-1">BÓVEDA PRIVADA</Text>
                     <Text className="text-zinc-400 text-[10px] leading-relaxed">
-                      Gestiona la visibilidad de tu contenido.
+                      Gestiona la visibilidad de tu contenido. Los videos privados solo tú puedes
+                      verlos.
                     </Text>
                   </View>
                 </View>
@@ -534,49 +744,116 @@ export default function AdnScreen() {
                     <Text className="text-zinc-600 text-xs uppercase tracking-widest mt-4">
                       Bóveda vacía
                     </Text>
+                    <Text className="text-zinc-700 text-xs text-center mt-2 px-8">
+                      Graba tu primer video con el botón PRO
+                    </Text>
                   </View>
                 ) : (
                   videos.map((vid) => (
                     <View
                       key={vid.id}
-                      className="flex-row gap-3 p-2 bg-[#0a0a0a] border border-zinc-900 rounded mb-2"
+                      className="flex-row gap-3 p-3 bg-[#0a0a0a] border border-zinc-900 rounded-xl mb-2"
                     >
-                      <View className="w-16 h-16 bg-zinc-800 rounded overflow-hidden">
-                        <Image
-                          source={{ uri: vid.thumbnail_url }}
-                          className="w-full h-full opacity-60"
-                          resizeMode="cover"
-                        />
-                      </View>
+                      {/* Thumbnail */}
+                      <TouchableOpacity
+                        onPress={() => {
+                          if (vid.video_url) {
+                            setSelectedVideo(vid);
+                            setVideoViewerVisible(true);
+                          }
+                        }}
+                        className="w-20 h-28 bg-zinc-800 rounded-lg overflow-hidden"
+                      >
+                        {vid.video_url ? (
+                          <VideoThumbnail videoUrl={vid.video_url} size={80} />
+                        ) : (
+                          <Image
+                            source={{ uri: vid.thumbnail_url }}
+                            className="w-full h-full opacity-60"
+                            resizeMode="cover"
+                          />
+                        )}
+                        <View className="absolute inset-0 items-center justify-center">
+                          <Play size={16} color="#fff" fill="#fff" />
+                        </View>
+                      </TouchableOpacity>
+
+                      {/* Info */}
                       <View className="flex-1 justify-center">
-                        <Text className="text-xs font-bold text-white mb-1">{vid.title}</Text>
+                        <Text className="text-sm font-bold text-white mb-1" numberOfLines={1}>
+                          {vid.title}
+                        </Text>
+
+                        {/* Métricas si existen */}
+                        {vid.weight_kg && vid.reps && (
+                          <Text className="text-savage-red text-xs font-mono mb-1">
+                            {vid.weight_kg}kg × {vid.reps} reps
+                          </Text>
+                        )}
+
+                        {/* Estado + Fecha */}
                         <View className="flex-row items-center gap-2">
                           {vid.is_public ? (
-                            <View className="flex-row items-center gap-1 border border-green-900 bg-green-900/10 px-1 rounded">
-                              <Eye size={8} color="#22c55e" />
-                              <Text className="text-[9px] text-green-500 font-bold uppercase">
+                            <View className="flex-row items-center gap-1 border border-green-900 bg-green-900/10 px-2 py-0.5 rounded-full">
+                              <Eye size={10} color="#22c55e" />
+                              <Text className="text-[10px] text-green-500 font-bold uppercase">
                                 Público
                               </Text>
                             </View>
                           ) : (
-                            <View className="flex-row items-center gap-1 border border-zinc-800 px-1 rounded">
-                              <EyeOff size={8} color="#71717a" />
-                              <Text className="text-[9px] text-zinc-500 font-bold uppercase">
-                                Privado
+                            <View className="flex-row items-center gap-1 border border-zinc-800 bg-zinc-900/50 px-2 py-0.5 rounded-full">
+                              <Lock size={10} color="#71717a" />
+                              <Text className="text-[10px] text-zinc-500 font-bold uppercase">
+                                Bóveda
                               </Text>
                             </View>
                           )}
-                          <Text className="text-[9px] text-zinc-600">
+                          <Text className="text-[10px] text-zinc-600">
                             {new Date(vid.created_at).toLocaleDateString('es', {
                               day: '2-digit',
                               month: 'short',
                             })}
                           </Text>
                         </View>
+
+                        {/* Spotify */}
+                        {vid.spotify?.enabled && (
+                          <View className="flex-row items-center gap-1 mt-1">
+                            <Music size={10} color="#1DB954" />
+                            <Text className="text-[10px] text-zinc-500" numberOfLines={1}>
+                              {vid.spotify.trackName}
+                            </Text>
+                          </View>
+                        )}
                       </View>
-                      <TouchableOpacity className="px-2 justify-center">
-                        <Edit2 size={14} color="#52525b" />
-                      </TouchableOpacity>
+
+                      {/* Acciones */}
+                      <View className="justify-center gap-2">
+                        {/* Toggle visibilidad */}
+                        <TouchableOpacity
+                          onPress={() => toggleVideoVisibility(vid)}
+                          className={`w-10 h-10 rounded-full items-center justify-center ${
+                            vid.is_public ? 'bg-green-900/20' : 'bg-zinc-800'
+                          }`}
+                        >
+                          {vid.is_public ? (
+                            <Eye size={16} color="#22c55e" />
+                          ) : (
+                            <EyeOff size={16} color="#71717a" />
+                          )}
+                        </TouchableOpacity>
+
+                        {/* Más opciones */}
+                        <TouchableOpacity
+                          onPress={() => {
+                            setSelectedVideoForEdit(vid);
+                            setVideoOptionsVisible(true);
+                          }}
+                          className="w-10 h-10 rounded-full bg-zinc-800 items-center justify-center"
+                        >
+                          <MoreVertical size={16} color="#71717a" />
+                        </TouchableOpacity>
+                      </View>
                     </View>
                   ))
                 )}
@@ -624,9 +901,9 @@ export default function AdnScreen() {
                 <Text className="text-white font-bold text-sm text-center" numberOfLines={1}>
                   {selectedVideo?.title || 'Video'}
                 </Text>
-                {selectedVideo?.exercise_name && (
-                  <Text className="text-zinc-400 text-xs text-center mt-0.5">
-                    {selectedVideo.exercise_name}
+                {selectedVideo?.weight_kg && selectedVideo?.reps && (
+                  <Text className="text-savage-red text-xs text-center font-mono mt-0.5">
+                    {selectedVideo.weight_kg}kg × {selectedVideo.reps}
                   </Text>
                 )}
               </View>
@@ -664,6 +941,84 @@ export default function AdnScreen() {
           )}
         </View>
       </Modal>
+
+      {/* Modal Video Options */}
+      <Modal
+        visible={videoOptionsVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => {
+          setVideoOptionsVisible(false);
+          setSelectedVideoForEdit(null);
+        }}
+      >
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={() => {
+            setVideoOptionsVisible(false);
+            setSelectedVideoForEdit(null);
+          }}
+          className="flex-1 bg-black/80 justify-end"
+        >
+          <View className="bg-zinc-950 rounded-t-3xl p-6 pb-10">
+            <View className="w-12 h-1 bg-zinc-700 rounded-full self-center mb-6" />
+
+            <Text className="text-white text-lg font-bold mb-4">{selectedVideoForEdit?.title}</Text>
+
+            {/* Toggle Visibilidad */}
+            <TouchableOpacity
+              onPress={() => selectedVideoForEdit && toggleVideoVisibility(selectedVideoForEdit)}
+              className="flex-row items-center p-4 bg-zinc-900 rounded-xl mb-3"
+            >
+              {selectedVideoForEdit?.is_public ? (
+                <>
+                  <Lock size={20} color="#71717a" />
+                  <Text className="text-white ml-3 flex-1">Mover a la Bóveda</Text>
+                  <Text className="text-zinc-500 text-xs">Privado</Text>
+                </>
+              ) : (
+                <>
+                  <Eye size={20} color="#22c55e" />
+                  <Text className="text-white ml-3 flex-1">Hacer Público</Text>
+                  <Text className="text-green-500 text-xs">Feed</Text>
+                </>
+              )}
+            </TouchableOpacity>
+
+            {/* Compartir */}
+            <TouchableOpacity
+              onPress={async () => {
+                if (selectedVideoForEdit?.video_url) {
+                  await Share.share({
+                    url: selectedVideoForEdit.video_url,
+                    message: `🏋️ ${selectedVideoForEdit.title}\n#TRENS`,
+                  });
+                }
+              }}
+              className="flex-row items-center p-4 bg-zinc-900 rounded-xl mb-3"
+            >
+              <Share2 size={20} color="#DC2626" />
+              <Text className="text-white ml-3 flex-1">Compartir</Text>
+            </TouchableOpacity>
+
+            {/* Eliminar */}
+            <TouchableOpacity
+              onPress={() => selectedVideoForEdit && deleteVideo(selectedVideoForEdit)}
+              className="flex-row items-center p-4 bg-red-900/20 border border-red-900/30 rounded-xl"
+            >
+              <Trash2 size={20} color="#EF4444" />
+              <Text className="text-red-400 ml-3 flex-1">Eliminar</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* PRO Upgrade Modal */}
+      <ProUpgradeModal
+        visible={showUpgradeModal}
+        onClose={() => setShowUpgradeModal(false)}
+        feature="vault"
+      />
     </View>
   );
 }

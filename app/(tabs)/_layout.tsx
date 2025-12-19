@@ -1,6 +1,6 @@
 import { Tabs } from 'expo-router';
 import { View } from 'react-native';
-import { Home, User, Crosshair, Dumbbell, Calendar } from 'lucide-react-native';
+import { Home, User, Crosshair, Dumbbell, Play } from 'lucide-react-native';
 
 export default function TabsLayout() {
   return (
@@ -20,18 +20,23 @@ export default function TabsLayout() {
         tabBarShowLabel: false,
       }}
     >
+      {/* FEED - Pantalla principal según MASTER */}
+      <Tabs.Screen
+        name="feed/index"
+        options={{
+          tabBarIcon: ({ color }) => <Play color={color} size={28} fill={color} />,
+        }}
+      />
+
+      {/* NUCLEO - Selección de arena */}
       <Tabs.Screen
         name="nucleo/index"
         options={{
           tabBarIcon: ({ color }) => <Home color={color} size={28} />,
         }}
       />
-      <Tabs.Screen
-        name="adn/index"
-        options={{
-          tabBarIcon: ({ color }) => <User color={color} size={28} />,
-        }}
-      />
+
+      {/* PRO - Botón central de cámara */}
       <Tabs.Screen
         name="pro/index"
         options={{
@@ -52,16 +57,28 @@ export default function TabsLayout() {
           ),
         }}
       />
+
+      {/* GYM - Ejercicios */}
       <Tabs.Screen
         name="gym/index"
         options={{
           tabBarIcon: ({ color }) => <Dumbbell color={color} size={28} />,
         }}
       />
+
+      {/* ADN - Perfil + Bóveda */}
+      <Tabs.Screen
+        name="adn/index"
+        options={{
+          tabBarIcon: ({ color }) => <User color={color} size={28} />,
+        }}
+      />
+
+      {/* PLAN - Oculto por ahora */}
       <Tabs.Screen
         name="plan/index"
         options={{
-          tabBarIcon: ({ color }) => <Calendar color={color} size={28} />,
+          href: null, // Ocultar del tab bar
         }}
       />
     </Tabs>

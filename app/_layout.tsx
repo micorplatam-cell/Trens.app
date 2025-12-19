@@ -8,10 +8,13 @@ import { supabase } from '../lib/supabase';
 import { HankProvider } from '../context/HankContext';
 import { HankOverlay } from '../components/hank/HankOverlay';
 import { ProContextProvider, useProContext } from '../context/ProContext';
+import { UserRoleProvider, useUserRoleContext } from '../context/UserRoleContext';
 import '../global.css';
 
 // ============================================================================
-// 1. AUTH PROVIDER
+// 1. AUTH PROVIDER (LEGACY - Mantener para compatibilidad)
+// El nuevo UserRoleContext maneja auth + roles, pero mantenemos esto para
+// no romper componentes existentes
 // ============================================================================
 interface AuthContextType {
   session: Session | null;
@@ -48,6 +51,9 @@ const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     </AuthContext.Provider>
   );
 };
+
+// Re-export del nuevo contexto de roles
+export { useUserRoleContext } from '../context/UserRoleContext';
 
 // ============================================================================
 // 2. SPORT PROVIDER (Placeholder - Conectar con lógica real)
@@ -96,18 +102,20 @@ const HankWrapper = ({ children }: { children: React.ReactNode }) => {
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <AuthProvider>
-        <SportProvider>
-          <ProContextProvider>
-            <HankWrapper>
-              <View className="flex-1 bg-savage-black">
-                <Slot />
-                <StatusBar style="light" />
-              </View>
-            </HankWrapper>
-          </ProContextProvider>
-        </SportProvider>
-      </AuthProvider>
+      <UserRoleProvider>
+        <AuthProvider>
+          <SportProvider>
+            <ProContextProvider>
+              <HankWrapper>
+                <View className="flex-1 bg-savage-black">
+                  <Slot />
+                  <StatusBar style="light" />
+                </View>
+              </HankWrapper>
+            </ProContextProvider>
+          </SportProvider>
+        </AuthProvider>
+      </UserRoleProvider>
     </GestureHandlerRootView>
   );
 }

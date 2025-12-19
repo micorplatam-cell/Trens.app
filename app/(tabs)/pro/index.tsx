@@ -5,12 +5,10 @@ import {
   Modal,
   TextInput,
   ActivityIndicator,
-  useWindowDimensions,
   ScrollView,
   Share,
   Switch,
 } from 'react-native';
-import { Image } from 'expo-image';
 import {
   X,
   RotateCcw,
@@ -19,19 +17,19 @@ import {
   Scissors,
   Palette,
   Type,
-  Check,
   Eye,
-  EyeOff,
   Share2,
   Crosshair,
   Music,
+  Volume2,
+  Lock,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { CameraView, useCameraPermissions, FlashMode } from 'expo-camera';
 import { Audio } from 'expo-av';
 import { VideoView, useVideoPlayer } from 'expo-video';
-import { GestureHandlerRootView, PanGestureHandler } from 'react-native-gesture-handler';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
   useSharedValue,
@@ -40,13 +38,14 @@ import Animated, {
   withTiming,
   withSequence,
   Easing,
-  runOnJS,
 } from 'react-native-reanimated';
 import * as FileSystem from 'expo-file-system/legacy';
 import { decode } from 'base64-arraybuffer';
 import { supabase } from '../../../lib/supabase';
-import { useAuth, useProContext } from '../../_layout';
-import spotify, { SpotifyTrack } from '../../../services/spotify/spotify';
+import { useUserRoleContext } from '../../../context/UserRoleContext';
+import { useProContext } from '../../../context/ProContext';
+import { ProUpgradeModal } from '../../../components/pro/ProUpgradeModal';
+import spotify from '../../../services/spotify/spotify';
 
 // ============================================================================
 // TIPOS
@@ -87,9 +86,12 @@ const FILTERS: { id: FilterType; name: string; style: object }[] = [
 // MAIN COMPONENT
 // ============================================================================
 export default function ProScreen() {
-  const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = useWindowDimensions();
-  const { user } = useAuth();
+  const { user, isPro, isFree, permissions, spotifyPremium, spotifyConnected } =
+    useUserRoleContext();
   const { context: proContext, clearContext } = useProContext();
+
+  // Upgrade Modal (para usuarios FREE)
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
   // Camera State
   const [permission, requestPermission] = useCameraPermissions();
@@ -103,8 +105,8 @@ export default function ProScreen() {
   // Video Data
   const [capturedVideo, setCapturedVideo] = useState<VideoData | null>(null);
 
-  // The Lab State (Editor)
-  const [labVisible, setLabVisible] = useState(false);
+  // Post-Recording Overlay State
+  const [overlayVisible, setOverlayVisible] = useState(false);
   const [selectedFilter, setSelectedFilter] = useState<FilterType>('RAW');
   const [trimRange, setTrimRange] = useState<TrimRange>({ start: 0, end: 100 });
   const [showTrimTool, setShowTrimTool] = useState(false);
@@ -117,14 +119,18 @@ export default function ProScreen() {
   const [freeText, setFreeText] = useState('');
   const [showTextInput, setShowTextInput] = useState(false);
 
-  // Publicación
-  const [isPublic, setIsPublic] = useState(true); // Default: Visible en TRENS
+  // Publicación - Switch principal según MASTER
+  // true = Publicar en TRENS (Público)
+  // false = Guardar en la Bóveda (Privado)
+  const [isPublic, setIsPublic] = useState(true);
   const [saving, setSaving] = useState(false);
 
   // Spotify State
-  const [spotifyConnected, setSpotifyConnected] = useState(false);
   const [spotifyMetadata, setSpotifyMetadata] = useState<SpotifyMetadata | null>(null);
-  const [attachSpotify, setAttachSpotify] = useState(true); // Toggle para adjuntar música
+  const [attachSpotify, setAttachSpotify] = useState(true);
+
+  // Audio Mode: 'spotify' | 'ambient'
+  const [audioMode, setAudioMode] = useState<'spotify' | 'ambient'>('spotify');
 
   // Timer ref
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -143,7 +149,6 @@ export default function ProScreen() {
   // -------------------------------------------------------------------------
   useEffect(() => {
     if (isRecording) {
-      // Breathing animation
       shutterScale.value = withRepeat(
         withSequence(
           withTiming(1.1, { duration: 800, easing: Easing.inOut(Easing.ease) }),
@@ -172,36 +177,26 @@ export default function ProScreen() {
   }));
 
   // -------------------------------------------------------------------------
-  // AUDIO NON-STOP + SPOTIFY CHECK
+  // AUDIO SETUP - NO grabar audio de Spotify, SOLO video + audio ambiente
   // -------------------------------------------------------------------------
   useEffect(() => {
-    // Configurar audio para NO interrumpir música del sistema
     const setupAudio = async () => {
       try {
         await Audio.setAudioModeAsync({
           allowsRecordingIOS: true,
           playsInSilentModeIOS: true,
           staysActiveInBackground: false,
-          // MixWithOthers permite que la música siga sonando
-          interruptionModeIOS: 1, // DoNotMix = 0, DuckOthers = 1, MixWithOthers = 2
+          interruptionModeIOS: 1, // DuckOthers - permite que música siga
           shouldDuckAndroid: true,
-          interruptionModeAndroid: 1, // DoNotMix = 0, DuckOthers = 1
+          interruptionModeAndroid: 1,
           playThroughEarpieceAndroid: false,
         });
-        console.warn('🎧 PRO: Audio configurado para no interrumpir música');
       } catch (error) {
         console.error('Error configurando audio:', error);
       }
     };
 
-    // Verificar conexión de Spotify
-    const checkSpotify = async () => {
-      const connected = await spotify.loadStoredTokens();
-      setSpotifyConnected(connected);
-    };
-
     setupAudio();
-    checkSpotify();
   }, []);
 
   // Cleanup timer
@@ -214,17 +209,62 @@ export default function ProScreen() {
   }, []);
 
   // -------------------------------------------------------------------------
-  // CAMERA HANDLERS
+  // BUTTON PRO HANDLER - CRÍTICO según MASTER
+  // Tap PRO → Cámara activa → Grabación
+  // Si NO es PRO → Modal upgrade
   // -------------------------------------------------------------------------
-  const openCamera = useCallback(async () => {
+  const handleProButtonPress = useCallback(async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    // Si es FREE, mostrar modal de upgrade
+    if (isFree || !permissions.canUseCamera) {
+      setShowUpgradeModal(true);
+      return;
+    }
+
+    // Si es PRO, abrir cámara INMEDIATAMENTE
     if (!permission?.granted) {
       const result = await requestPermission();
       if (!result.granted) return;
     }
-    setCameraVisible(true);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-  }, [permission, requestPermission]);
 
+    // Capturar metadata de Spotify si está conectado
+    if (spotifyConnected && spotifyPremium) {
+      try {
+        const currentTrack = await spotify.getCurrentTrack();
+        if (currentTrack) {
+          setSpotifyMetadata({
+            enabled: true,
+            trackUri: currentTrack.uri,
+            positionMs: currentTrack.positionMs,
+            trackName: currentTrack.name,
+            artist: currentTrack.artist,
+            albumArt: currentTrack.albumArt,
+          });
+        }
+      } catch (error) {
+        console.warn('No se pudo capturar metadata de Spotify:', error);
+      }
+    }
+
+    setCameraVisible(true);
+
+    // Auto-iniciar grabación después de un pequeño delay para que la cámara esté lista
+    setTimeout(() => {
+      startRecording();
+    }, 500);
+  }, [
+    isFree,
+    permissions.canUseCamera,
+    permission,
+    requestPermission,
+    spotifyConnected,
+    spotifyPremium,
+  ]);
+
+  // -------------------------------------------------------------------------
+  // CAMERA HANDLERS
+  // -------------------------------------------------------------------------
   const closeCamera = () => {
     if (isRecording) {
       stopRecording();
@@ -254,26 +294,6 @@ export default function ProScreen() {
     setIsRecording(true);
     setRecordingTime(0);
 
-    // 🎧 CAPTURAR METADATA DE SPOTIFY AL INICIAR GRABACIÓN
-    if (spotifyConnected) {
-      try {
-        const currentTrack = await spotify.getCurrentTrack();
-        if (currentTrack) {
-          setSpotifyMetadata({
-            enabled: true,
-            trackUri: currentTrack.uri,
-            positionMs: currentTrack.positionMs,
-            trackName: currentTrack.name,
-            artist: currentTrack.artist,
-            albumArt: currentTrack.albumArt,
-          });
-          console.warn('🎵 PRO: Capturada metadata de Spotify:', currentTrack.name);
-        }
-      } catch (error) {
-        console.warn('No se pudo capturar metadata de Spotify:', error);
-      }
-    }
-
     // Timer
     timerRef.current = setInterval(() => {
       setRecordingTime((prev) => prev + 1);
@@ -294,7 +314,7 @@ export default function ProScreen() {
         timestamp: new Date(),
       });
       setCameraVisible(false);
-      setLabVisible(true);
+      setOverlayVisible(true); // Mostrar overlay post-grabación
       setIsRecording(false);
     } catch (error) {
       console.error('Error recording:', error);
@@ -314,11 +334,11 @@ export default function ProScreen() {
   };
 
   // -------------------------------------------------------------------------
-  // LAB HANDLERS
+  // OVERLAY HANDLERS
   // -------------------------------------------------------------------------
   const discardVideo = () => {
     setCapturedVideo(null);
-    setLabVisible(false);
+    setOverlayVisible(false);
     setSelectedFilter('RAW');
     setTrimRange({ start: 0, end: 100 });
     setWeight('');
@@ -326,19 +346,16 @@ export default function ProScreen() {
     setFreeText('');
     setShowTrimTool(false);
     setShowTextInput(false);
-    setSpotifyMetadata(null); // Limpiar metadata de Spotify
-    setAttachSpotify(true); // Reset toggle
-    clearContext(); // Limpiar contexto táctico
+    setSpotifyMetadata(null);
+    setAttachSpotify(true);
+    setIsPublic(true);
+    clearContext();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
-  const retryRecording = () => {
-    discardVideo();
-    openCamera();
-  };
-
   // -------------------------------------------------------------------------
-  // SAVE HANDLERS
+  // SAVE/SHARE HANDLERS - Según MASTER
+  // Al compartir: El video se guarda + respeta Público/Bóveda
   // -------------------------------------------------------------------------
   const saveVideo = async (share: boolean = false) => {
     if (!capturedVideo || !user) return;
@@ -362,7 +379,7 @@ export default function ProScreen() {
 
       const fileName = `${user.id}/${Date.now()}.mp4`;
 
-      const { data: uploadData, error: uploadError } = await supabase.storage
+      const { error: uploadError } = await supabase.storage
         .from('pro-videos')
         .upload(fileName, decode(base64), {
           contentType: 'video/mp4',
@@ -376,16 +393,15 @@ export default function ProScreen() {
 
       // 3. OBTENER URL PÚBLICA
       const { data: urlData } = supabase.storage.from('pro-videos').getPublicUrl(fileName);
-
       const videoUrl = urlData.publicUrl;
 
       // 4. GUARDAR EN TABLA pro_videos
-      const { data: insertData, error: insertError } = await supabase
+      const { error: insertError } = await supabase
         .from('pro_videos')
         .insert({
           user_id: user.id,
           video_url: videoUrl,
-          thumbnail_url: videoUrl, // Usar video URL como thumbnail (el player mostrará el primer frame)
+          thumbnail_url: videoUrl,
           duration_seconds: Math.round(capturedVideo.duration),
           context_type: proContext.type,
           exercise_id: proContext.type === 'tactical' ? proContext.exerciseId : null,
@@ -405,7 +421,7 @@ export default function ProScreen() {
                 }
               : { enabled: false },
           ambient_audio: true,
-          is_public: isPublic,
+          is_public: isPublic, // Según switch: Público o Bóveda
           trim_start_percent: Math.round(trimRange.start),
           trim_end_percent: Math.round(trimRange.end),
         })
@@ -417,20 +433,34 @@ export default function ProScreen() {
         throw insertError;
       }
 
-      console.warn('📹 PRO: Video guardado exitosamente:', insertData);
-
       // 5. COMPARTIR SI SE SOLICITA
+      // El video se guarda Y se comparte, respetando Público/Bóveda
       if (share) {
+        // Generar mensaje con metadata quemada
+        const exerciseInfo =
+          proContext.type === 'tactical' && proContext.exerciseName
+            ? proContext.exerciseName
+            : 'Entrenamiento';
+        const weightInfo = weight ? `${weight}kg` : '';
+        const repsInfo = reps ? `x${reps}` : '';
+        const dateInfo = new Date().toLocaleDateString('es-ES', {
+          day: '2-digit',
+          month: 'short',
+          year: 'numeric',
+        });
         const spotifyInfo =
           attachSpotify && spotifyMetadata
             ? `\n🎵 ${spotifyMetadata.trackName} – ${spotifyMetadata.artist}`
             : '';
+
+        const shareMessage =
+          proContext.type === 'tactical'
+            ? `🏋️ ${exerciseInfo} ${weightInfo} ${repsInfo}\n📅 ${dateInfo}${spotifyInfo}\n\n#TRENS`
+            : `💪 ${freeText || 'Día de entreno'}\n📅 ${dateInfo}${spotifyInfo}\n\n#TRENS`;
+
         await Share.share({
-          message:
-            proContext.type === 'tactical'
-              ? `🏋️ ${proContext.exerciseName || 'Entrenamiento'} - ${weight}kg x ${reps} reps${spotifyInfo}`
-              : `💪 ${freeText || 'Check de entrenamiento'}${spotifyInfo}`,
-          url: videoUrl, // URL pública de Supabase
+          message: shareMessage,
+          url: videoUrl,
         });
       }
 
@@ -481,7 +511,7 @@ export default function ProScreen() {
   // RENDER: CAMERA (VIEWFINDER)
   // -------------------------------------------------------------------------
   const renderCamera = () => (
-    <Modal visible={cameraVisible} animationType="slide" presentationStyle="fullScreen">
+    <Modal visible={cameraVisible} animationType="none" presentationStyle="fullScreen">
       <View className="flex-1 bg-black">
         <CameraView
           ref={cameraRef}
@@ -531,7 +561,7 @@ export default function ProScreen() {
             </View>
           )}
 
-          {/* 🎧 SPOTIFY INDICATOR (Solo si hay música capturada durante grabación) */}
+          {/* SPOTIFY INDICATOR (Solo si hay música capturada) */}
           {isRecording && spotifyMetadata && (
             <View className="absolute top-44 left-4 right-4">
               <View className="bg-black/70 rounded-xl p-3 flex-row items-center border border-green-500/30">
@@ -565,7 +595,6 @@ export default function ProScreen() {
                 onPress={isRecording ? stopRecording : startRecording}
                 activeOpacity={0.8}
               >
-                {/* Anillo Exterior */}
                 <View
                   className="w-24 h-24 rounded-full items-center justify-center"
                   style={{
@@ -577,12 +606,9 @@ export default function ProScreen() {
                     shadowRadius: 12,
                   }}
                 >
-                  {/* Centro */}
                   {isRecording ? (
-                    // Estado Grabando: Cuadrado rojo sólido
                     <View className="w-8 h-8 bg-savage-red rounded-md" />
                   ) : (
-                    // Estado Reposo: Centro transparente
                     <View className="w-16 h-16 rounded-full border-2 border-savage-red/50" />
                   )}
                 </View>
@@ -595,10 +621,10 @@ export default function ProScreen() {
   );
 
   // -------------------------------------------------------------------------
-  // RENDER: THE LAB (POST-PRODUCCIÓN)
+  // RENDER: POST-RECORDING OVERLAY (No pantalla nueva, es OVERLAY)
   // -------------------------------------------------------------------------
-  const renderLab = () => (
-    <Modal visible={labVisible} animationType="fade" presentationStyle="fullScreen">
+  const renderOverlay = () => (
+    <Modal visible={overlayVisible} animationType="fade" presentationStyle="fullScreen">
       <View className="flex-1 bg-black">
         {/* VIDEO PREVIEW */}
         <View className="flex-1">
@@ -611,7 +637,7 @@ export default function ProScreen() {
             />
           )}
 
-          {/* DATA OVERLAY */}
+          {/* DATA OVERLAY - Metadata quemada sobre el video */}
           <View className="absolute inset-0 pointer-events-box-none">
             {/* Logo TRENS + Fecha (Esquina superior izquierda) */}
             <View className="absolute top-14 left-4">
@@ -623,15 +649,9 @@ export default function ProScreen() {
 
             {/* INPUTS CONTEXTUALES */}
             {proContext.type === 'tactical' ? (
-              // CASO GYM: Peso y Reps
               <View className="absolute bottom-48 left-0 right-0 flex-row justify-center gap-6 pointer-events-auto">
                 {/* PESO */}
-                <TouchableOpacity
-                  className="bg-black/70 border-2 border-savage-red rounded-xl px-6 py-4 items-center min-w-[120px]"
-                  onPress={() => {
-                    /* Abrir teclado */
-                  }}
-                >
+                <View className="bg-black/70 border-2 border-savage-red rounded-xl px-6 py-4 items-center min-w-[120px]">
                   <Text className="text-zinc-500 text-xs mb-1">PESO</Text>
                   <TextInput
                     value={weight}
@@ -643,15 +663,10 @@ export default function ProScreen() {
                     style={{ minWidth: 60 }}
                   />
                   <Text className="text-zinc-500 text-xs mt-1">kg</Text>
-                </TouchableOpacity>
+                </View>
 
                 {/* REPS */}
-                <TouchableOpacity
-                  className="bg-black/70 border-2 border-savage-red rounded-xl px-6 py-4 items-center min-w-[120px]"
-                  onPress={() => {
-                    /* Abrir teclado */
-                  }}
-                >
+                <View className="bg-black/70 border-2 border-savage-red rounded-xl px-6 py-4 items-center min-w-[120px]">
                   <Text className="text-zinc-500 text-xs mb-1">REPS</Text>
                   <TextInput
                     value={reps}
@@ -662,10 +677,9 @@ export default function ProScreen() {
                     className="text-savage-red text-3xl font-bold font-mono text-center"
                     style={{ minWidth: 60 }}
                   />
-                </TouchableOpacity>
+                </View>
               </View>
             ) : (
-              // CASO LIBRE: Texto
               showTextInput && (
                 <View className="absolute bottom-48 left-4 right-4 pointer-events-auto">
                   <TextInput
@@ -682,7 +696,7 @@ export default function ProScreen() {
             )}
           </View>
 
-          {/* BOTÓN DESCARTAR (Esquina superior derecha) */}
+          {/* BOTÓN DESCARTAR */}
           <TouchableOpacity
             onPress={discardVideo}
             className="absolute top-14 right-4 bg-black/60 p-3 rounded-full"
@@ -738,7 +752,6 @@ export default function ProScreen() {
           {showTrimTool && (
             <View className="mb-4">
               <View className="h-12 bg-zinc-800 rounded-lg overflow-hidden relative">
-                {/* Timeline visual simplificada */}
                 <View
                   className="absolute top-0 bottom-0 bg-savage-red/30"
                   style={{
@@ -746,7 +759,6 @@ export default function ProScreen() {
                     right: `${100 - trimRange.end}%`,
                   }}
                 />
-                {/* Manijas */}
                 <View
                   className="absolute top-0 bottom-0 w-1 bg-savage-red"
                   style={{ left: `${trimRange.start}%` }}
@@ -763,9 +775,9 @@ export default function ProScreen() {
           )}
         </View>
 
-        {/* FOOTER DE PUBLICACIÓN */}
+        {/* FOOTER DE PUBLICACIÓN - Según MASTER */}
         <View className="bg-zinc-950 border-t border-zinc-800 px-4 py-4 pb-8">
-          {/* 🎧 TOGGLE ADJUNTAR MÚSICA (Solo si hay metadata de Spotify) */}
+          {/* SPOTIFY TOGGLE (Si hay metadata) */}
           {spotifyMetadata && (
             <View className="bg-black/50 rounded-xl p-3 mb-4 border border-zinc-800">
               <View className="flex-row items-center justify-between">
@@ -795,64 +807,72 @@ export default function ProScreen() {
             </View>
           )}
 
-          {/* CONTROL DE PRIVACIDAD */}
+          {/* SWITCH PRINCIPAL: Público / Bóveda */}
+          <View className="bg-zinc-900 rounded-xl p-4 mb-4">
+            <View className="flex-row items-center justify-between">
+              <View className="flex-row items-center flex-1">
+                {isPublic ? <Eye color="#DC2626" size={24} /> : <Lock color="#71717A" size={24} />}
+                <View className="ml-3 flex-1">
+                  <Text className={`font-bold ${isPublic ? 'text-white' : 'text-zinc-500'}`}>
+                    {isPublic ? 'PUBLICAR EN TRENS' : 'GUARDAR EN LA BÓVEDA'}
+                  </Text>
+                  <Text className="text-zinc-500 text-xs mt-1">
+                    {isPublic ? 'Visible en el feed público' : 'Solo tú puedes verlo'}
+                  </Text>
+                </View>
+              </View>
+              <Switch
+                value={isPublic}
+                onValueChange={setIsPublic}
+                trackColor={{ false: '#3f3f46', true: '#DC2626' }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
+          </View>
+
+          {/* BOTÓN COMPARTIR - Según MASTER */}
           <TouchableOpacity
-            onPress={() => setIsPublic(!isPublic)}
-            className="flex-row items-center mb-4"
+            onPress={() => saveVideo(true)}
+            disabled={saving}
+            className="bg-savage-red p-4 rounded-xl flex-row items-center justify-center mb-3"
+            style={{
+              shadowColor: '#DC2626',
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.5,
+              shadowRadius: 8,
+            }}
           >
-            <View
-              className={`w-6 h-6 rounded border-2 items-center justify-center mr-3 ${
-                isPublic ? 'bg-savage-red border-savage-red' : 'border-zinc-600'
-              }`}
-            >
-              {isPublic && <Check color="#FFFFFF" size={14} />}
-            </View>
-            <View className="flex-row items-center">
-              {isPublic ? <Eye color="#FFFFFF" size={16} /> : <EyeOff color="#71717A" size={16} />}
-              <Text className={`ml-2 font-bold ${isPublic ? 'text-white' : 'text-zinc-500'}`}>
-                VISIBLE EN [ TRENS ]
-              </Text>
-            </View>
+            {saving ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <>
+                <Share2 color="#FFFFFF" size={20} />
+                <Text className="text-white font-bold text-lg ml-2 tracking-wider">COMPARTIR</Text>
+              </>
+            )}
           </TouchableOpacity>
 
-          {/* BOTONES DE ACCIÓN */}
-          <View className="flex-row gap-3">
-            {/* REGISTRAR */}
-            <TouchableOpacity
-              onPress={() => saveVideo(false)}
-              disabled={saving}
-              className="flex-1 bg-zinc-800 border border-savage-red/30 p-4 rounded-xl items-center"
-            >
-              {saving ? (
-                <ActivityIndicator color="#DC2626" />
-              ) : (
-                <Text className="text-white font-bold">REGISTRAR</Text>
-              )}
-            </TouchableOpacity>
-
-            {/* REGISTRAR Y COMPARTIR */}
-            <TouchableOpacity
-              onPress={() => saveVideo(true)}
-              disabled={saving}
-              className="flex-1 bg-savage-red p-4 rounded-xl flex-row items-center justify-center"
-            >
-              {saving ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <>
-                  <Share2 color="#FFFFFF" size={18} />
-                  <Text className="text-white font-bold ml-2">COMPARTIR</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          </View>
+          {/* Botón secundario: Solo guardar */}
+          <TouchableOpacity
+            onPress={() => saveVideo(false)}
+            disabled={saving}
+            className="bg-zinc-800 border border-zinc-700 p-3 rounded-xl items-center"
+          >
+            {saving ? (
+              <ActivityIndicator color="#DC2626" size="small" />
+            ) : (
+              <Text className="text-zinc-400 font-bold text-sm">
+                {isPublic ? 'PUBLICAR SIN COMPARTIR' : 'GUARDAR EN BÓVEDA'}
+              </Text>
+            )}
+          </TouchableOpacity>
         </View>
       </View>
     </Modal>
   );
 
   // -------------------------------------------------------------------------
-  // RENDER: MAIN SCREEN
+  // RENDER: MAIN SCREEN - Botón PRO central que abre cámara directamente
   // -------------------------------------------------------------------------
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -884,8 +904,8 @@ export default function ProScreen() {
             <Text className="text-zinc-400 text-sm">🔴 {getContextLabel()}</Text>
           </View>
 
-          {/* SHUTTER BUTTON - Central */}
-          <TouchableOpacity onPress={openCamera} activeOpacity={0.8} className="mb-8">
+          {/* BOTÓN PRO - Abre cámara directamente */}
+          <TouchableOpacity onPress={handleProButtonPress} activeOpacity={0.8} className="mb-8">
             <View
               className="w-32 h-32 rounded-full items-center justify-center"
               style={{
@@ -902,15 +922,77 @@ export default function ProScreen() {
             </View>
           </TouchableOpacity>
 
-          <Text className="text-white text-lg font-bold mb-2">DISPARAR</Text>
-          <Text className="text-zinc-500 text-center text-sm">
-            Toca para abrir la cámara{'\n'}y empezar a grabar
+          <Text className="text-white text-lg font-bold mb-2">
+            {isPro ? 'GRABAR' : 'DESBLOQUEAR PRO'}
           </Text>
+          <Text className="text-zinc-500 text-center text-sm">
+            {isPro
+              ? 'Toca para abrir la cámara\ny empezar a grabar'
+              : 'Activa PRO para grabar\ny publicar tus levantamientos'}
+          </Text>
+
+          {/* Badge de rol */}
+          <View
+            className={`mt-6 px-4 py-2 rounded-full ${isPro ? 'bg-savage-red' : 'bg-zinc-800'}`}
+          >
+            <Text
+              className={`text-xs font-bold tracking-widest ${isPro ? 'text-white' : 'text-zinc-500'}`}
+            >
+              {isPro ? '⚡ PRO' : '🔒 FREE'}
+            </Text>
+          </View>
+        </View>
+
+        {/* Audio Mode Switch - Visible para TODOS según MASTER */}
+        <View className="absolute bottom-32 left-0 right-0 px-6">
+          <View className="bg-zinc-900/80 border border-zinc-800 rounded-2xl p-4">
+            <Text className="text-zinc-500 text-xs text-center mb-3 tracking-widest">AUDIO</Text>
+            <View className="flex-row items-center justify-center gap-4">
+              <TouchableOpacity
+                onPress={() => setAudioMode('spotify')}
+                className={`flex-row items-center px-4 py-2 rounded-full ${
+                  audioMode === 'spotify' ? 'bg-green-500' : 'bg-zinc-800'
+                }`}
+              >
+                <Music color={audioMode === 'spotify' ? '#000' : '#71717A'} size={16} />
+                <Text
+                  className={`ml-2 text-sm font-bold ${
+                    audioMode === 'spotify' ? 'text-black' : 'text-zinc-500'
+                  }`}
+                >
+                  Música
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => setAudioMode('ambient')}
+                className={`flex-row items-center px-4 py-2 rounded-full ${
+                  audioMode === 'ambient' ? 'bg-zinc-500' : 'bg-zinc-800'
+                }`}
+              >
+                <Volume2 color={audioMode === 'ambient' ? '#000' : '#71717A'} size={16} />
+                <Text
+                  className={`ml-2 text-sm font-bold ${
+                    audioMode === 'ambient' ? 'text-black' : 'text-zinc-500'
+                  }`}
+                >
+                  Ambiente
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
 
         {/* Modals */}
         {renderCamera()}
-        {renderLab()}
+        {renderOverlay()}
+
+        {/* PRO Upgrade Modal para usuarios FREE */}
+        <ProUpgradeModal
+          visible={showUpgradeModal}
+          onClose={() => setShowUpgradeModal(false)}
+          feature="camera"
+        />
       </View>
     </GestureHandlerRootView>
   );
