@@ -791,7 +791,9 @@ export const HankOverlay: React.FC = () => {
   const checkAndClearUIChat = useCallback(
     (results: HankToolResult[]) => {
       // Verificar si algún resultado tiene el flag clearUIChat
-      const shouldClear = results.some((r) => (r.data as { clearUIChat?: boolean })?.clearUIChat === true);
+      const shouldClear = results.some(
+        (r) => (r.data as { clearUIChat?: boolean })?.clearUIChat === true
+      );
       if (shouldClear) {
         console.warn('🧹 HANK UI: Limpiando chat visual...');
         // Resetear mensajes con solo bienvenida + notificación

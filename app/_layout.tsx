@@ -7,6 +7,7 @@ import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { HankProvider } from '../context/HankContext';
 import { HankOverlay } from '../components/hank/HankOverlay';
+import { ProContextProvider, useProContext } from '../context/ProContext';
 import '../global.css';
 
 // ============================================================================
@@ -66,6 +67,12 @@ const SportProvider = ({ children }: { children: React.ReactNode }) => {
 export { useHank } from '../context/HankContext';
 
 // ============================================================================
+// 4. PRO CONTEXT - Smart Trigger para el módulo PRO
+// Re-exportamos useProContext para acceso global
+// ============================================================================
+export { useProContext } from '../context/ProContext';
+
+// ============================================================================
 // 4. HANK WRAPPER - Conecta HankProvider con userId del Auth
 // Solo renderiza HankProvider y HankOverlay cuando hay usuario autenticado
 // ============================================================================
@@ -91,12 +98,14 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <AuthProvider>
         <SportProvider>
-          <HankWrapper>
-            <View className="flex-1 bg-savage-black">
-              <Slot />
-              <StatusBar style="light" />
-            </View>
-          </HankWrapper>
+          <ProContextProvider>
+            <HankWrapper>
+              <View className="flex-1 bg-savage-black">
+                <Slot />
+                <StatusBar style="light" />
+              </View>
+            </HankWrapper>
+          </ProContextProvider>
         </SportProvider>
       </AuthProvider>
     </GestureHandlerRootView>

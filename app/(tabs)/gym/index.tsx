@@ -4,30 +4,41 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   FlatList,
-  Dimensions,
+  useWindowDimensions,
   Modal,
   ScrollView,
   Pressable,
   PanResponder,
   AppState,
   TextInput,
+  RefreshControl,
+  Alert,
 } from 'react-native';
 import { Image } from 'expo-image';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useIsFocused } from '@react-navigation/native';
 import { supabase } from '../../../lib/supabase';
-import { useAuth } from '../../_layout';
+import { useAuth, useProContext } from '../../_layout';
 import {
   Sliders,
   Plus,
   Trash2,
   X,
   Music,
-  Sparkles,
   Timer,
   Edit3,
   Camera as CameraIcon,
   Video,
+  ChevronDown,
+  Play,
+  Pause,
+  SkipForward,
+  SkipBack,
+  Wifi,
+  WifiOff,
+  Eye,
+  EyeOff,
+  Share2,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -44,6 +55,9 @@ import Animated, {
 } from 'react-native-reanimated';
 import Slider from '@react-native-community/slider';
 import { useHank } from '../../../context/HankContext';
+import { LinearGradient } from 'expo-linear-gradient';
+import spotify, { SpotifyTrack, SpotifyPlaybackState } from '../../../services/spotify/spotify';
+import { useUserRole } from '../../../hooks/useUserRole';
 
 // ============================================================================
 // HELPERS
@@ -74,16 +88,46 @@ const getDayOfWeek = (): DayOfWeek => {
 };
 
 // ============================================================================
+// VIDEO THUMBNAIL - Muestra el primer frame del video
+// ============================================================================
+const VideoThumbnail = ({
+  videoUrl,
+  width = 96,
+  height = 128,
+}: {
+  videoUrl: string;
+  width?: number;
+  height?: number;
+}) => {
+  const player = useVideoPlayer(videoUrl, (p) => {
+    p.loop = false;
+    p.muted = true;
+    p.pause();
+  });
+
+  return (
+    <VideoView
+      player={player}
+      style={{ width, height }}
+      contentFit="cover"
+      nativeControls={false}
+    />
+  );
+};
+
+// ============================================================================
 // COMPONENTE: VIDEO HERO
 // ============================================================================
 const VideoHero = ({
   videoUrl,
   videoMuted,
   isActive,
+  screenWidth,
 }: {
   videoUrl: string;
   videoMuted: boolean;
   isActive: boolean;
+  screenWidth: number;
 }) => {
   const player = useVideoPlayer(videoUrl, (player) => {
     player.loop = true;
@@ -118,7 +162,7 @@ const VideoHero = ({
 
   return (
     <VideoView
-      style={{ width: SCREEN_WIDTH, aspectRatio: 1 }}
+      style={{ width: screenWidth, aspectRatio: 1 }}
       player={player}
       contentFit="cover"
       nativeControls={false}
@@ -166,13 +210,21 @@ interface SeriesConfig {
 
 interface VideoRecord {
   id: string;
-  exercise_id: string;
-  video_url: string;
-  thumbnail_url: string;
+  exercise_id?: string;
+  video_url?: string;
+  videoUrl?: string; // alias para compatibilidad
+  thumbnail_url?: string;
   weight: number;
   reps: number;
   date: string;
   is_public: boolean;
+  spotify?: {
+    enabled: boolean;
+    trackName?: string;
+    artist?: string;
+    trackUri?: string;
+    positionMs?: number;
+  };
 }
 
 interface Exercise {
@@ -208,13 +260,18 @@ interface AssetTemplate {
   };
 }
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
+// Altura del tab bar (aproximada)
+const TAB_BAR_HEIGHT = 80;
+
 export default function GymScreen() {
+  const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = useWindowDimensions();
+  const CONTENT_HEIGHT = SCREEN_HEIGHT - TAB_BAR_HEIGHT;
   const { user } = useAuth();
+  const { isPro, updateSpotifyStatus } = useUserRole(user?.id);
+  const { setTacticalContext } = useProContext();
   const isFocused = useIsFocused(); // Detecta si esta pantalla está activa
   const { setActiveAsset, setScreenContext, refreshTrigger } = useHank();
   const [viewMode, setViewMode] = useState<ViewMode>('LOADING');
@@ -238,20 +295,46 @@ export default function GymScreen() {
   const [notesModalVisible, setNotesModalVisible] = useState(false);
   const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
 
+  // Spotify State
+  const [spotifyConnected, setSpotifyConnected] = useState(false);
+  const [spotifyLoading, setSpotifyLoading] = useState(false);
+  const [spotifyPlayback, setSpotifyPlayback] = useState<SpotifyPlaybackState | null>(null);
+  const [currentTrack, setCurrentTrack] = useState<SpotifyTrack | null>(null);
+
   // Video State
   const [videoViewerVisible, setVideoViewerVisible] = useState(false);
   const [selectedVideo, setSelectedVideo] = useState<VideoRecord | null>(null);
+
+  // Video Player para historial
+  const historialVideoSource = selectedVideo?.videoUrl || selectedVideo?.video_url || '';
+  const historialPlayer = useVideoPlayer(historialVideoSource, (player) => {
+    player.loop = true;
+  });
+
+  // Controlar play/pause del video cuando abre/cierra el viewer
+  useEffect(() => {
+    if (videoViewerVisible && historialPlayer) {
+      historialPlayer.play();
+    } else if (historialPlayer) {
+      historialPlayer.pause();
+    }
+  }, [videoViewerVisible, historialPlayer]);
 
   // Modal State
   const [historialModalVisible, setHistorialModalVisible] = useState(false);
   const [structureModalVisible, setStructureModalVisible] = useState(false);
   const [modalExercise, setModalExercise] = useState<Exercise | null>(null);
+  const [exerciseVideos, setExerciseVideos] = useState<VideoRecord[]>([]);
+  const [loadingVideos, setLoadingVideos] = useState(false);
 
   // Camera State
   const [cameraModalVisible, setCameraModalVisible] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<any>(null);
   const [captureProcessing, setCaptureProcessing] = useState(false);
+
+  // Ref para evitar loops en sincronización de contexto
+  const lastSyncedExerciseId = useRef<string | null>(null);
 
   // Editor State
   const [editorVisible, setEditorVisible] = useState(false);
@@ -307,6 +390,36 @@ export default function GymScreen() {
   const exerciseListRef = useRef<FlatList>(null);
 
   // -------------------------------------------------------------------------
+  // SPOTIFY: Cargar estado inicial
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    const initSpotify = async () => {
+      const connected = await spotify.loadStoredTokens();
+      setSpotifyConnected(connected);
+      if (connected) {
+        const playback = await spotify.getPlaybackState();
+        setSpotifyPlayback(playback);
+        setCurrentTrack(playback?.track || null);
+      }
+    };
+    initSpotify();
+  }, []);
+
+  // SPOTIFY: Polling del estado de reproducción cuando está conectado
+  useEffect(() => {
+    if (!spotifyConnected || !spotifyModalVisible) return;
+
+    const pollPlayback = async () => {
+      const playback = await spotify.getPlaybackState();
+      setSpotifyPlayback(playback);
+      setCurrentTrack(playback?.track || null);
+    };
+
+    const interval = setInterval(pollPlayback, 2000);
+    return () => clearInterval(interval);
+  }, [spotifyConnected, spotifyModalVisible]);
+
+  // -------------------------------------------------------------------------
   // SYNC ACTIVE EXERCISE WITH HANK CONTEXT
   // -------------------------------------------------------------------------
   useEffect(() => {
@@ -323,9 +436,14 @@ export default function GymScreen() {
 
   useEffect(() => {
     // Sincronizar ejercicio activo con HANK (considerando alternativas)
+    // Y actualizar ProContext para Smart Trigger
     const currentExercise = exercises[activeExerciseIndex];
-    if (currentExercise && isFocused) {
+    if (currentExercise && isFocused && viewMode === 'FOCUS') {
       const altIndex = activeAlternatives[activeExerciseIndex] || 0;
+
+      // Determinar nombre del ejercicio actual (principal o alternativa)
+      let exerciseName = currentExercise.name;
+      let exerciseId = currentExercise.id;
 
       // Si altIndex > 0, estamos en una alternativa
       if (
@@ -336,17 +454,31 @@ export default function GymScreen() {
         // Usar el ID de la alternativa, marcando que ES alternativa
         const alternativeId = currentExercise.alternatives[altIndex - 1].id;
         const alternativeName = currentExercise.alternatives[altIndex - 1].name;
-        console.log('🔄 HANK: Cambiando a alternativa:', alternativeName);
-        setActiveAsset(alternativeId, {
-          isAlternative: true,
-          parentExerciseName: currentExercise.name,
-        });
-      } else {
-        // Usar el ejercicio principal (no es alternativa)
-        setActiveAsset(currentExercise.id);
+        exerciseId = alternativeId;
+        exerciseName = alternativeName;
+      }
+
+      // Solo actualizar si el exerciseId realmente cambió (evitar loops)
+      if (lastSyncedExerciseId.current !== exerciseId) {
+        lastSyncedExerciseId.current = exerciseId;
+
+        // Actualizar HANK context
+        if (altIndex > 0 && currentExercise.alternatives?.[altIndex - 1]) {
+          console.log('🔄 HANK: Cambiando a alternativa:', exerciseName);
+          setActiveAsset(exerciseId, {
+            isAlternative: true,
+            parentExerciseName: currentExercise.name,
+          });
+        } else {
+          setActiveAsset(currentExercise.id);
+        }
+
+        // Actualizar ProContext para Smart Trigger (Contexto Táctico)
+        setTacticalContext(exerciseId, exerciseName);
       }
     }
-  }, [activeExerciseIndex, exercises, isFocused, setActiveAsset, activeAlternatives]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeExerciseIndex, exercises, isFocused, activeAlternatives, viewMode]);
 
   // Modal drag state
   const translateYHistorial = useSharedValue(0);
@@ -412,6 +544,135 @@ export default function GymScreen() {
       }, 300);
     }
   }, [historialModalVisible, structureModalVisible]);
+
+  // Cargar videos del ejercicio cuando se abre el historial
+  useEffect(() => {
+    const fetchExerciseVideos = async () => {
+      if (!historialModalVisible || !modalExercise) return;
+
+      setLoadingVideos(true);
+      try {
+        const { data, error } = await supabase
+          .from('pro_videos')
+          .select('*')
+          .eq('exercise_id', modalExercise.id)
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        // Mapear a formato VideoRecord
+        const mappedVideos: VideoRecord[] = (data || []).map((v: any) => ({
+          id: v.id,
+          date: new Date(v.created_at).toLocaleDateString('es-ES', {
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric',
+          }),
+          weight: v.weight_kg || 0,
+          reps: v.reps || 0,
+          is_public: v.is_public,
+          videoUrl: v.video_url,
+          video_url: v.video_url,
+          thumbnail_url: v.thumbnail_url || v.video_url,
+          spotify: v.spotify,
+        }));
+
+        setExerciseVideos(mappedVideos);
+      } catch (err) {
+        console.error('Error fetching exercise videos:', err);
+        setExerciseVideos([]);
+      } finally {
+        setLoadingVideos(false);
+      }
+    };
+
+    fetchExerciseVideos();
+  }, [historialModalVisible, modalExercise]);
+
+  // ============================================================================
+  // VIDEO ACTIONS
+  // ============================================================================
+
+  // Eliminar video de pro_videos
+  const handleDeleteVideo = async () => {
+    if (!selectedVideo) return;
+
+    Alert.alert(
+      '🗑️ ELIMINAR VIDEO',
+      '¿Estás seguro de que quieres eliminar este video? Esta acción no se puede deshacer.',
+      [
+        { text: 'CANCELAR', style: 'cancel' },
+        {
+          text: 'ELIMINAR',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+
+              // Eliminar de la base de datos
+              const { error } = await supabase
+                .from('pro_videos')
+                .delete()
+                .eq('id', selectedVideo.id);
+
+              if (error) throw error;
+
+              // Actualizar lista local
+              setExerciseVideos((prev) => prev.filter((v) => v.id !== selectedVideo.id));
+
+              // Cerrar viewer
+              setVideoViewerVisible(false);
+              setSelectedVideo(null);
+
+              await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            } catch (err) {
+              console.error('Error deleting video:', err);
+              await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // Toggle visibilidad pública del video
+  const handleToggleVisibility = async () => {
+    if (!selectedVideo) return;
+
+    try {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+      const newPublicState = !selectedVideo.is_public;
+
+      const { error } = await supabase
+        .from('pro_videos')
+        .update({ is_public: newPublicState })
+        .eq('id', selectedVideo.id);
+
+      if (error) throw error;
+
+      // Actualizar estado local
+      setSelectedVideo((prev) => (prev ? { ...prev, is_public: newPublicState } : null));
+      setExerciseVideos((prev) =>
+        prev.map((v) => (v.id === selectedVideo.id ? { ...v, is_public: newPublicState } : v))
+      );
+
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (err) {
+      console.error('Error toggling visibility:', err);
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    }
+  };
+
+  // Compartir - mostrar instrucción para screen record
+  const handleShareVideo = async () => {
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    Alert.alert(
+      '📱 COMPARTIR CON BRANDING',
+      'Graba tu pantalla mientras reproduces este video para compartirlo con los overlays de TRENS.\n\n• Logo TRENS\n• Datos del ejercicio\n• Peso × Reps\n• Tu track de Spotify',
+      [{ text: 'ENTENDIDO', style: 'default' }]
+    );
+  };
 
   // ============================================================================
   // TRAINING DAY LOGIC
@@ -1979,26 +2240,31 @@ export default function GymScreen() {
               <TouchableOpacity
                 onPress={() => openSeriesConfigModal(item)}
                 disabled={adding}
-                className="flex-row bg-savage-dark border border-zinc-800 rounded-lg p-4 mb-3 items-center"
+                className="flex-row bg-zinc-900/50 border border-zinc-800 rounded-xl p-3 mb-2 items-center"
               >
                 {/* IMAGE */}
                 <Image
                   source={{ uri: imageUrl }}
-                  style={{ width: 80, height: 80 }}
-                  className="rounded-lg mr-4"
+                  className="w-16 h-16 rounded-lg mr-3"
                   contentFit="cover"
                 />
 
                 {/* INFO */}
                 <View className="flex-1">
-                  <Text className="text-savage-text font-bold text-lg mb-1">{item.name}</Text>
-                  <Text className="text-zinc-500 text-sm mb-2">{item.description}</Text>
-                  <View className="flex-row gap-2">
-                    <View className="bg-zinc-900 px-2 py-1 rounded">
-                      <Text className="text-zinc-400 text-xs font-mono">{item.category}</Text>
+                  <Text className="text-white font-bold text-sm mb-0.5" numberOfLines={1}>
+                    {item.name}
+                  </Text>
+                  <Text className="text-zinc-500 text-xs mb-1.5" numberOfLines={1}>
+                    {item.description}
+                  </Text>
+                  <View className="flex-row gap-1.5">
+                    <View className="bg-zinc-800 px-1.5 py-0.5 rounded">
+                      <Text className="text-zinc-400 text-[10px] font-mono">{item.category}</Text>
                     </View>
-                    <View className="bg-savage-red/20 px-2 py-1 rounded">
-                      <Text className="text-savage-red text-xs font-bold">{item.difficulty}</Text>
+                    <View className="bg-savage-red/20 px-1.5 py-0.5 rounded">
+                      <Text className="text-savage-red text-[10px] font-bold">
+                        {item.difficulty}
+                      </Text>
                     </View>
                   </View>
                 </View>
@@ -2007,7 +2273,9 @@ export default function GymScreen() {
                 {adding ? (
                   <ActivityIndicator color="#DC2626" size="small" />
                 ) : (
-                  <Text className="text-savage-red text-2xl font-bold">→</Text>
+                  <View className="bg-savage-red/20 p-2 rounded-full">
+                    <Plus color="#DC2626" size={16} />
+                  </View>
                 )}
               </TouchableOpacity>
             );
@@ -2018,21 +2286,41 @@ export default function GymScreen() {
   );
 
   // ============================================================================
-  // RENDER STRUCTURE MODE
+  // RENDER STRUCTURE MODE - Estilo ADN
   // ============================================================================
   if (viewMode === 'STRUCTURE') {
     return (
-      <View className="flex-1 bg-savage-black">
-        {/* HEADER CON WHEEL ENGRANAJE */}
-        <View className="px-6 pt-16 pb-4 border-b border-zinc-800">
-          <Text className="text-savage-text text-4xl font-bold italic mb-4">STRUCTURE</Text>
+      <View className="flex-1 bg-black">
+        {/* HEADER - Estilo ADN */}
+        <View className="relative pt-14 pb-4 px-4">
+          <LinearGradient
+            colors={['#1a1a1a', '#000000']}
+            start={{ x: 0.5, y: 0 }}
+            end={{ x: 0.5, y: 1 }}
+            className="absolute inset-0 opacity-30"
+          />
 
-          {/* WHEEL SELECTOR DÍAS - AHORA HORIZONTAL */}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ paddingRight: 24 }}
-          >
+          <View className="flex-row items-center justify-between mb-4">
+            <View>
+              <Text className="text-white text-2xl font-bold tracking-tight">ESTRUCTURA</Text>
+              <Text className="text-zinc-500 text-xs uppercase tracking-widest">
+                Configura tu rutina
+              </Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => exercises.length > 0 && setViewMode('FOCUS')}
+              className={`px-4 py-2 rounded-lg ${exercises.length > 0 ? 'bg-savage-red' : 'bg-zinc-800'}`}
+            >
+              <Text
+                className={`font-bold text-sm ${exercises.length > 0 ? 'text-white' : 'text-zinc-500'}`}
+              >
+                ENTRENAR
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* WHEEL SELECTOR DÍAS */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             {trainingProgram.days.map((day, index) => {
               const isActive = selectedDayIndex === index;
               const isCurrent = trainingProgram.currentDayIndex === index;
@@ -2045,60 +2333,58 @@ export default function GymScreen() {
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                   }}
                   onLongPress={() => {
-                    // Abrir modal para editar nombre del día
                     setEditingDayIndex(index);
                     setEditingDayName(day.muscleGroups);
                     setDayNameModalVisible(true);
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
                   }}
-                  className={`mr-3 px-4 py-3 rounded-lg border-2 ${
-                    isActive ? 'bg-savage-red border-savage-red' : 'bg-zinc-900/50 border-zinc-800'
+                  className={`mr-2 px-3 py-2 rounded-lg ${
+                    isActive ? 'bg-savage-red' : 'bg-zinc-900 border border-zinc-800'
                   }`}
                 >
-                  <View className="flex-row items-center gap-2">
+                  <View className="flex-row items-center gap-1.5">
                     {isCurrent && (
                       <View
-                        className={`w-2 h-2 rounded-full ${isActive ? 'bg-white' : 'bg-green-500'}`}
+                        className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-white' : 'bg-green-500'}`}
                       />
                     )}
                     <Text
-                      className={`font-bold text-xs uppercase tracking-wider ${
+                      className={`font-bold text-[10px] uppercase tracking-wider ${
                         isActive ? 'text-white' : 'text-zinc-400'
                       }`}
+                      numberOfLines={1}
                     >
                       {day.muscleGroups}
                     </Text>
-                    <Edit3 size={12} color={isActive ? '#FFF' : '#71717A'} />
                   </View>
                 </TouchableOpacity>
               );
             })}
           </ScrollView>
-          <Text className="text-zinc-600 text-xs mt-2">
-            Mantén presionado un día para renombrarlo
-          </Text>
+          <Text className="text-zinc-600 text-[10px] mt-1.5">Mantén presionado para renombrar</Text>
         </View>
 
-        {/* EXERCISES LIST */}
+        {/* EXERCISES LIST - Estilo ADN */}
         <FlatList
           data={exercises}
           keyExtractor={(item) => item.id}
-          className="flex-1 px-6 pt-4"
+          className="flex-1 px-4 pt-2"
+          showsVerticalScrollIndicator={false}
           ListEmptyComponent={
-            <View className="flex-1 justify-center items-center py-20">
-              <Text className="text-zinc-700 text-center mb-8 text-lg font-mono">
-                NO HAY EJERCICIOS CONFIGURADOS
+            <View className="flex-1 justify-center items-center py-16">
+              <View className="w-16 h-16 rounded-full bg-zinc-900 items-center justify-center mb-4">
+                <Plus size={28} color="#71717A" />
+              </View>
+              <Text className="text-zinc-600 text-center mb-6 text-sm">
+                Sin ejercicios configurados
               </Text>
               <TouchableOpacity
                 onPress={() => setModalVisible(true)}
-                className="bg-savage-red px-8 py-6 rounded-lg"
+                className="bg-savage-red px-6 py-3 rounded-lg"
               >
-                <View className="flex-row items-center">
-                  <Plus color="#FFFFFF" size={32} strokeWidth={3} />
-                  <Text className="text-savage-text font-bold text-xl ml-3 tracking-widest">
-                    AGREGAR PRIMER EJERCICIO
-                  </Text>
-                </View>
+                <Text className="text-white font-bold text-sm tracking-wider">
+                  + AGREGAR EJERCICIO
+                </Text>
               </TouchableOpacity>
             </View>
           }
@@ -2136,27 +2422,28 @@ export default function GymScreen() {
                   setSeriesConfigModalVisible(true);
                 }
               }}
-              className="bg-savage-dark border border-zinc-800 rounded-lg p-4 mb-3 flex-row items-center"
+              className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-3 mb-2 flex-row items-center"
             >
               {/* ORDER NUMBER */}
-              <View className="bg-savage-red rounded px-3 py-1 mr-4">
-                <Text className="text-savage-text font-bold font-mono">{index + 1}</Text>
+              <View className="bg-savage-red rounded-full w-6 h-6 items-center justify-center mr-2">
+                <Text className="text-white font-bold text-xs font-mono">{index + 1}</Text>
               </View>
 
               {/* IMAGE */}
               <Image
                 source={{ uri: item.image_url }}
-                style={{ width: 60, height: 60 }}
-                className="rounded-lg mr-4"
+                className="w-12 h-12 rounded-lg mr-3"
                 contentFit="cover"
               />
 
               {/* INFO */}
               <View className="flex-1">
-                <Text className="text-savage-text font-bold text-lg mb-1">{item.name}</Text>
+                <Text className="text-white font-bold text-sm mb-1" numberOfLines={1}>
+                  {item.name}
+                </Text>
                 {/* RESUMEN DE ESTRUCTURA */}
                 {item.series && item.series.length > 0 && (
-                  <View className="flex-row flex-wrap gap-1 mt-2">
+                  <View className="flex-row flex-wrap gap-0.5">
                     {item.series
                       .filter((s) => s && typeof s === 'object')
                       .map((s, idx) => {
@@ -2170,16 +2457,11 @@ export default function GymScreen() {
                         return (
                           <View
                             key={String(idx)}
-                            className={`${colorClass} w-8 h-8 rounded-full items-center justify-center`}
+                            className={`${colorClass} w-5 h-5 rounded-full items-center justify-center`}
                           >
-                            <Text className="text-white text-[10px] font-bold leading-tight">
+                            <Text className="text-white text-[8px] font-bold">
                               {String(s.reps || 0)}
                             </Text>
-                            {s.weight && Number(s.weight) > 0 ? (
-                              <Text className="text-white text-[7px] leading-none">
-                                {Number(s.weight)}kg
-                              </Text>
-                            ) : null}
                           </View>
                         );
                       })}
@@ -2189,32 +2471,24 @@ export default function GymScreen() {
 
               <TouchableOpacity
                 onPress={() => deleteExercise(item.id)}
-                className="p-3 bg-zinc-900 rounded"
+                className="p-2 bg-zinc-800 rounded-lg"
               >
-                <Trash2 color="#DC2626" size={20} />
+                <Trash2 color="#DC2626" size={16} />
               </TouchableOpacity>
             </TouchableOpacity>
           )}
         />
 
-        {/* FOOTER */}
-        <View className="border-t border-zinc-800 p-6 bg-savage-dark">
-          {exercises.length > 0 && (
-            <TouchableOpacity
-              onPress={saveAndTrain}
-              className="bg-savage-red p-5 rounded-lg items-center mb-3"
-            >
-              <Text className="text-savage-text font-bold text-lg tracking-widest">
-                GUARDAR Y ENTRENAR →
-              </Text>
-            </TouchableOpacity>
-          )}
-
+        {/* FOOTER - Estilo ADN */}
+        <View className="border-t border-zinc-800 p-4 bg-black">
           <TouchableOpacity
             onPress={() => setModalVisible(true)}
-            className="border border-savage-red p-4 rounded-lg items-center"
+            className="border border-zinc-700 p-3 rounded-lg items-center flex-row justify-center gap-2"
           >
-            <Text className="text-savage-red font-bold tracking-wider">+ AGREGAR EJERCICIO</Text>
+            <Plus color="#DC2626" size={18} />
+            <Text className="text-zinc-300 font-bold text-sm tracking-wider">
+              AGREGAR EJERCICIO
+            </Text>
           </TouchableOpacity>
         </View>
 
@@ -2230,15 +2504,15 @@ export default function GymScreen() {
           onRequestClose={() => setDayNameModalVisible(false)}
         >
           <Pressable
-            className="flex-1 bg-black/80 justify-center items-center p-6"
+            className="flex-1 bg-black/80 justify-center items-center p-4"
             onPress={() => setDayNameModalVisible(false)}
           >
             <Pressable
-              className="bg-zinc-900 rounded-2xl p-6 w-full border border-zinc-800"
+              className="bg-zinc-900 rounded-xl p-5 w-full border border-zinc-800"
               onPress={(e) => e.stopPropagation()}
             >
-              <Text className="text-white text-xl font-bold mb-4">
-                RENOMBRAR DÍA {editingDayIndex !== null ? editingDayIndex + 1 : ''}
+              <Text className="text-white text-lg font-bold mb-3">
+                Renombrar día {editingDayIndex !== null ? editingDayIndex + 1 : ''}
               </Text>
               <TextInput
                 value={editingDayName}
@@ -2246,15 +2520,15 @@ export default function GymScreen() {
                 placeholder="Ej: PECHO + ESPALDA"
                 placeholderTextColor="#71717A"
                 autoCapitalize="characters"
-                className="bg-black border border-zinc-700 rounded-lg px-4 py-3 text-white text-lg font-bold mb-4"
+                className="bg-black border border-zinc-700 rounded-lg px-3 py-2.5 text-white text-sm font-bold mb-3"
                 autoFocus
               />
-              <View className="flex-row gap-3">
+              <View className="flex-row gap-2">
                 <TouchableOpacity
                   onPress={() => setDayNameModalVisible(false)}
-                  className="flex-1 py-3 rounded-lg border border-zinc-700"
+                  className="flex-1 py-2.5 rounded-lg border border-zinc-700"
                 >
-                  <Text className="text-zinc-400 text-center font-bold">CANCELAR</Text>
+                  <Text className="text-zinc-400 text-center font-bold text-sm">Cancelar</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   onPress={() => {
@@ -2263,9 +2537,9 @@ export default function GymScreen() {
                     }
                     setDayNameModalVisible(false);
                   }}
-                  className="flex-1 py-3 rounded-lg bg-savage-red"
+                  className="flex-1 py-2.5 rounded-lg bg-savage-red"
                 >
-                  <Text className="text-white text-center font-bold">GUARDAR</Text>
+                  <Text className="text-white text-center font-bold text-sm">Guardar</Text>
                 </TouchableOpacity>
               </View>
             </Pressable>
@@ -2307,36 +2581,223 @@ export default function GymScreen() {
     </Modal>
   );
 
-  const renderSpotifyModal = () => (
-    <Modal
-      visible={spotifyModalVisible}
-      animationType="fade"
-      transparent={true}
-      onRequestClose={() => setSpotifyModalVisible(false)}
-    >
-      <View className="flex-1 bg-black/90 justify-center px-6">
-        <View className="bg-glass-strong rounded-savage p-6 border border-green-500">
-          <View className="flex-row justify-between items-center mb-6">
-            <Text className="text-savage-text text-2xl font-bold tracking-wider">SPOTIFY</Text>
-            <TouchableOpacity onPress={() => setSpotifyModalVisible(false)}>
-              <X color="#FFFFFF" size={24} />
-            </TouchableOpacity>
-          </View>
+  const renderSpotifyModal = () => {
+    const handleConnect = async () => {
+      setSpotifyLoading(true);
+      const success = await spotify.authenticate();
+      setSpotifyConnected(success);
+      if (success) {
+        const playback = await spotify.getPlaybackState();
+        setSpotifyPlayback(playback);
+        setCurrentTrack(playback?.track || null);
+        // Guardar estado de conexión en Supabase (asumimos Premium si conecta)
+        await updateSpotifyStatus(true, true);
+      }
+      setSpotifyLoading(false);
+    };
 
-          <View className="items-center py-8">
-            <Music color="#1DB954" size={64} />
-            <Text className="text-zinc-500 text-center mt-4">
-              Conecta tu cuenta de Spotify{'\n'}para controlar la música
-            </Text>
-          </View>
+    const handleDisconnect = async () => {
+      await spotify.disconnect();
+      setSpotifyConnected(false);
+      setSpotifyPlayback(null);
+      setCurrentTrack(null);
+      // Actualizar estado en Supabase
+      await updateSpotifyStatus(false, false);
+    };
 
-          <TouchableOpacity className="bg-green-500 p-4 rounded-lg items-center">
-            <Text className="text-black font-bold">CONECTAR SPOTIFY</Text>
-          </TouchableOpacity>
+    const handlePlayPause = async () => {
+      await spotify.togglePlayPause();
+      const playback = await spotify.getPlaybackState();
+      setSpotifyPlayback(playback);
+    };
+
+    const handleNext = async () => {
+      await spotify.next();
+      setTimeout(async () => {
+        const playback = await spotify.getPlaybackState();
+        setSpotifyPlayback(playback);
+        setCurrentTrack(playback?.track || null);
+      }, 500);
+    };
+
+    const handlePrevious = async () => {
+      await spotify.previous();
+      setTimeout(async () => {
+        const playback = await spotify.getPlaybackState();
+        setSpotifyPlayback(playback);
+        setCurrentTrack(playback?.track || null);
+      }, 500);
+    };
+
+    return (
+      <Modal
+        visible={spotifyModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setSpotifyModalVisible(false)}
+      >
+        <View className="flex-1 bg-black/95 justify-end">
+          <View className="bg-zinc-900 rounded-t-3xl p-6 border-t border-green-500/50">
+            {/* HEADER */}
+            <View className="flex-row justify-between items-center mb-6">
+              <View className="flex-row items-center gap-3">
+                <View className="w-10 h-10 bg-green-500 rounded-full items-center justify-center">
+                  <Music color="#000" size={20} />
+                </View>
+                <View>
+                  <Text className="text-white text-lg font-bold">SPOTIFY</Text>
+                  <View className="flex-row items-center gap-1">
+                    {spotifyConnected ? (
+                      <>
+                        <Wifi color="#1DB954" size={12} />
+                        <Text className="text-green-500 text-xs">Conectado</Text>
+                      </>
+                    ) : (
+                      <>
+                        <WifiOff color="#71717A" size={12} />
+                        <Text className="text-zinc-500 text-xs">Desconectado</Text>
+                      </>
+                    )}
+                  </View>
+                </View>
+              </View>
+              <TouchableOpacity
+                onPress={() => setSpotifyModalVisible(false)}
+                className="bg-zinc-800 p-2 rounded-full"
+              >
+                <X color="#71717A" size={20} />
+              </TouchableOpacity>
+            </View>
+
+            {spotifyConnected ? (
+              <>
+                {/* REPRODUCTOR */}
+                <View className="bg-black/50 rounded-2xl p-4 mb-4 border border-zinc-800">
+                  {currentTrack ? (
+                    <View className="flex-row items-center gap-4">
+                      {/* ALBUM ART */}
+                      <View className="w-16 h-16 bg-zinc-800 rounded-lg overflow-hidden">
+                        {currentTrack.albumArt ? (
+                          <Image
+                            source={{ uri: currentTrack.albumArt }}
+                            style={{ width: 64, height: 64 }}
+                            contentFit="cover"
+                          />
+                        ) : (
+                          <View className="w-full h-full items-center justify-center">
+                            <Music color="#1DB954" size={24} />
+                          </View>
+                        )}
+                      </View>
+                      {/* TRACK INFO */}
+                      <View className="flex-1">
+                        <Text className="text-white font-bold text-base" numberOfLines={1}>
+                          {currentTrack.name}
+                        </Text>
+                        <Text className="text-zinc-400 text-sm" numberOfLines={1}>
+                          {currentTrack.artist}
+                        </Text>
+                        <Text className="text-zinc-600 text-xs mt-1">{currentTrack.album}</Text>
+                      </View>
+                    </View>
+                  ) : (
+                    <View className="items-center py-4">
+                      <Music color="#71717A" size={32} />
+                      <Text className="text-zinc-500 text-sm mt-2">No hay reproducción activa</Text>
+                      <Text className="text-zinc-600 text-xs mt-1">
+                        Abre Spotify y reproduce algo
+                      </Text>
+                    </View>
+                  )}
+                </View>
+
+                {/* CONTROLES - SOLO PRO */}
+                {isPro ? (
+                  <View className="flex-row items-center justify-center gap-6 mb-6">
+                    <TouchableOpacity
+                      onPress={handlePrevious}
+                      className="bg-zinc-800 p-3 rounded-full"
+                    >
+                      <SkipBack color="#FFFFFF" size={24} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={handlePlayPause}
+                      className="bg-green-500 p-4 rounded-full"
+                    >
+                      {spotifyPlayback?.isPlaying ? (
+                        <Pause color="#000000" size={28} />
+                      ) : (
+                        <Play color="#000000" size={28} />
+                      )}
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={handleNext} className="bg-zinc-800 p-3 rounded-full">
+                      <SkipForward color="#FFFFFF" size={24} />
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <View className="mb-6 p-4 bg-zinc-800/50 rounded-xl border border-zinc-700">
+                    <Text className="text-white font-bold text-center mb-1">
+                      Modo Ambiente Activo
+                    </Text>
+                    <Text className="text-zinc-400 text-xs text-center mb-3">
+                      Tu música sigue sonando mientras entrenas
+                    </Text>
+                    <View className="bg-savage-red/20 border border-savage-red/50 rounded-lg p-3">
+                      <Text className="text-savage-red text-xs text-center font-bold">
+                        🔥 PRO: Desbloquea controles de reproducción
+                      </Text>
+                    </View>
+                  </View>
+                )}
+
+                {/* DESCONECTAR */}
+                <TouchableOpacity
+                  onPress={handleDisconnect}
+                  className="border border-zinc-700 p-3 rounded-lg items-center"
+                >
+                  <Text className="text-zinc-500 text-sm">Desconectar Spotify</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                {/* ESTADO NO CONECTADO */}
+                <View className="items-center py-8">
+                  <View className="w-20 h-20 bg-zinc-800 rounded-full items-center justify-center mb-4">
+                    <Music color="#1DB954" size={40} />
+                  </View>
+                  <Text className="text-white text-lg font-bold mb-2">Conecta Spotify Premium</Text>
+                  <Text className="text-zinc-500 text-center text-sm mb-6">
+                    Controla tu música mientras entrenas{'\n'}
+                    sin salir de TRENS
+                  </Text>
+                </View>
+
+                {/* BOTÓN CONECTAR */}
+                <TouchableOpacity
+                  onPress={handleConnect}
+                  disabled={spotifyLoading}
+                  className={`p-4 rounded-xl items-center ${
+                    spotifyLoading ? 'bg-green-500/50' : 'bg-green-500'
+                  }`}
+                >
+                  {spotifyLoading ? (
+                    <ActivityIndicator color="#000" />
+                  ) : (
+                    <Text className="text-black font-bold text-base">CONECTAR CON SPOTIFY</Text>
+                  )}
+                </TouchableOpacity>
+
+                {/* NOTA LEGAL */}
+                <Text className="text-zinc-600 text-xs text-center mt-4">
+                  Requiere Spotify Premium instalado en tu dispositivo
+                </Text>
+              </>
+            )}
+          </View>
         </View>
-      </View>
-    </Modal>
-  );
+      </Modal>
+    );
+  };
 
   const renderHankModal = () => (
     <Modal
@@ -2405,30 +2866,18 @@ export default function GymScreen() {
         </View>
 
         {/* Preview cuadrado centrado */}
-        <View className="flex-1 justify-center items-center">
+        <View className="flex-1 justify-center items-center px-4">
           {imageToEdit && (
-            <Image
-              source={{ uri: imageToEdit }}
-              style={{
-                width: SCREEN_WIDTH * 0.9,
-                height: SCREEN_WIDTH * 0.9,
-              }}
-              className="rounded-lg"
-              contentFit="cover"
-            />
+            <View className="w-full aspect-square max-w-[90%]">
+              <Image
+                source={{ uri: imageToEdit }}
+                className="w-full h-full rounded-lg"
+                contentFit="cover"
+              />
+              {/* Overlay con guías de recorte */}
+              <View className="absolute inset-0 border-2 border-dashed border-savage-red rounded-lg" />
+            </View>
           )}
-
-          {/* Overlay con guías de recorte */}
-          <View
-            style={{
-              position: 'absolute',
-              width: SCREEN_WIDTH * 0.9,
-              height: SCREEN_WIDTH * 0.9,
-              borderWidth: 2,
-              borderColor: '#DC2626',
-              borderStyle: 'dashed',
-            }}
-          />
         </View>
 
         {/* Info */}
@@ -2465,7 +2914,7 @@ export default function GymScreen() {
               <X color="#FFFFFF" size={28} />
             </TouchableOpacity>
             <Text className="text-savage-text font-bold text-lg tracking-wider">CAPTURAR FOTO</Text>
-            <View style={{ width: 28 }} />
+            <View className="w-7" />
           </View>
           <Text className="text-zinc-500 text-center text-sm">
             {exercises[currentExerciseIndex]?.name}
@@ -2474,15 +2923,9 @@ export default function GymScreen() {
 
         {/* CAMERA VIEW - FORMATO CUADRADO */}
         <View className="flex-1 justify-center items-center bg-black">
-          <CameraView
-            ref={cameraRef}
-            style={{
-              width: SCREEN_WIDTH,
-              height: SCREEN_WIDTH,
-              overflow: 'hidden',
-            }}
-            facing="back"
-          />
+          <View className="w-full aspect-square overflow-hidden">
+            <CameraView ref={cameraRef} className="flex-1" facing="back" />
+          </View>
         </View>
 
         {/* PROCESSING INDICATOR */}
@@ -2494,7 +2937,11 @@ export default function GymScreen() {
         )}
 
         {/* CONTROLS */}
-        <View className="absolute bottom-0 left-0 right-0 pb-10 pt-6 bg-gradient-to-t from-black via-black/90 to-transparent">
+        <View className="absolute bottom-0 left-0 right-0 pb-10 pt-6">
+          <LinearGradient
+            colors={['transparent', 'rgba(0,0,0,0.9)', '#000']}
+            className="absolute inset-0"
+          />
           {/* BOTÓN GALERÍA */}
           <View className="flex-row justify-center mb-6">
             <TouchableOpacity
@@ -2526,77 +2973,161 @@ export default function GymScreen() {
     </Modal>
   );
 
-  const renderVideoViewer = () => (
-    <Modal
-      visible={videoViewerVisible}
-      animationType="fade"
-      transparent={false}
-      onRequestClose={() => setVideoViewerVisible(false)}
-    >
-      <View className="flex-1 bg-savage-black">
-        {/* HEADER */}
-        <View className="absolute top-0 left-0 right-0 z-50 bg-black/90 px-6 pt-14 pb-4 flex-row justify-between items-center">
-          <TouchableOpacity onPress={() => setVideoViewerVisible(false)}>
-            <X color="#FFFFFF" size={24} />
-          </TouchableOpacity>
-          <Text className="text-savage-text font-bold">HISTORIAL</Text>
-          <View style={{ width: 24 }} />
-        </View>
-
-        {/* VIDEO PREVIEW */}
-        {selectedVideo && (
-          <View className="flex-1 justify-center items-center">
-            <Image
-              source={{ uri: selectedVideo.thumbnail_url }}
-              style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT * 0.6 }}
-              contentFit="cover"
-            />
-
-            {/* DATA OVERLAY */}
-            <View className="absolute bottom-40 left-0 right-0 bg-black/90 p-6">
-              <View className="flex-row justify-around mb-4">
-                <View className="items-center">
-                  <Text className="text-zinc-500 text-xs mb-1">PESO</Text>
-                  <Text className="text-savage-red text-3xl font-bold font-mono">
-                    {selectedVideo.weight}kg
-                  </Text>
+  const renderVideoViewer = () => {
+    return (
+      <Modal
+        visible={videoViewerVisible}
+        animationType="fade"
+        transparent={false}
+        onRequestClose={() => {
+          setVideoViewerVisible(false);
+        }}
+      >
+        <View className="flex-1 bg-savage-black">
+          {/* VIDEO FULLSCREEN CON OVERLAYS */}
+          {selectedVideo && (
+            <View className="flex-1">
+              {/* VIDEO */}
+              {historialVideoSource ? (
+                <VideoView
+                  player={historialPlayer}
+                  style={{ flex: 1, width: '100%', height: '100%' }}
+                  contentFit="cover"
+                  nativeControls={false}
+                />
+              ) : (
+                <View className="flex-1 bg-zinc-900 justify-center items-center">
+                  <Text className="text-zinc-500">Video no disponible</Text>
                 </View>
-                <View className="items-center">
-                  <Text className="text-zinc-500 text-xs mb-1">REPS</Text>
-                  <Text className="text-savage-red text-3xl font-bold font-mono">
-                    {selectedVideo.reps}
-                  </Text>
-                </View>
+              )}
+
+              {/* === OVERLAY BRANDING === */}
+
+              {/* TOP BAR - Logo + Fecha */}
+              <View className="absolute top-0 left-0 right-0 z-50">
+                <LinearGradient
+                  colors={['rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
+                  className="px-6 pt-14 pb-10"
+                >
+                  <View className="flex-row justify-between items-center">
+                    {/* Close Button */}
+                    <TouchableOpacity
+                      onPress={() => setVideoViewerVisible(false)}
+                      className="bg-black/50 p-2 rounded-full"
+                    >
+                      <X color="#FFFFFF" size={24} />
+                    </TouchableOpacity>
+
+                    {/* TRENS Logo */}
+                    <View className="flex-row items-center gap-2">
+                      <View className="w-8 h-8 bg-savage-red rounded-lg items-center justify-center">
+                        <Text className="text-white font-black text-sm">T</Text>
+                      </View>
+                      <Text className="text-white font-bold tracking-wider">TRENS</Text>
+                    </View>
+
+                    {/* Visibility Badge */}
+                    <View
+                      className={`px-3 py-1 rounded-full ${selectedVideo.is_public ? 'bg-green-500/20' : 'bg-zinc-800'}`}
+                    >
+                      <Text
+                        className={`text-xs font-bold ${selectedVideo.is_public ? 'text-green-500' : 'text-zinc-500'}`}
+                      >
+                        {selectedVideo.is_public ? 'PÚBLICO' : 'PRIVADO'}
+                      </Text>
+                    </View>
+                  </View>
+                </LinearGradient>
               </View>
 
-              <Text className="text-zinc-500 text-center text-sm">{selectedVideo.date}</Text>
+              {/* BOTTOM BAR - Datos del ejercicio */}
+              <View className="absolute bottom-0 left-0 right-0 z-50">
+                <LinearGradient
+                  colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.95)']}
+                  className="px-6 pt-20 pb-10"
+                >
+                  {/* Ejercicio Name (si está disponible) */}
+                  {modalExercise && (
+                    <Text className="text-white text-2xl font-bold mb-4 tracking-wide">
+                      {modalExercise.name}
+                    </Text>
+                  )}
+
+                  {/* Datos: Peso x Reps */}
+                  <View className="flex-row items-baseline mb-4">
+                    <Text className="text-savage-red text-5xl font-black font-mono">
+                      {selectedVideo.weight}
+                    </Text>
+                    <Text className="text-white text-xl font-bold ml-1">KG</Text>
+                    <Text className="text-zinc-500 text-3xl mx-3">×</Text>
+                    <Text className="text-savage-red text-5xl font-black font-mono">
+                      {selectedVideo.reps}
+                    </Text>
+                    <Text className="text-white text-xl font-bold ml-1">REPS</Text>
+                  </View>
+
+                  {/* Spotify Track (si tiene) */}
+                  {selectedVideo.spotify?.enabled && (
+                    <View className="flex-row items-center bg-black/50 rounded-full px-4 py-2 self-start mb-4">
+                      <Music color="#1DB954" size={16} />
+                      <Text className="text-green-500 text-sm font-bold ml-2">
+                        {selectedVideo.spotify.trackName}
+                      </Text>
+                      <Text className="text-zinc-500 text-sm ml-1">
+                        – {selectedVideo.spotify.artist}
+                      </Text>
+                    </View>
+                  )}
+
+                  {/* Fecha */}
+                  <Text className="text-zinc-500 text-sm">{selectedVideo.date}</Text>
+
+                  {/* ACTIONS */}
+                  <View className="flex-row justify-around mt-6 pt-4 border-t border-zinc-800">
+                    {/* Delete */}
+                    <TouchableOpacity className="items-center" onPress={handleDeleteVideo}>
+                      <View className="bg-zinc-900 p-3 rounded-full border border-zinc-800 mb-1">
+                        <Trash2 color="#DC2626" size={20} />
+                      </View>
+                      <Text className="text-zinc-600 text-[10px]">ELIMINAR</Text>
+                    </TouchableOpacity>
+
+                    {/* Toggle Visibility */}
+                    <TouchableOpacity className="items-center" onPress={handleToggleVisibility}>
+                      <View
+                        className={`p-3 rounded-full border mb-1 ${
+                          selectedVideo.is_public
+                            ? 'bg-green-500/20 border-green-500/50'
+                            : 'bg-zinc-900 border-zinc-800'
+                        }`}
+                      >
+                        {selectedVideo.is_public ? (
+                          <Eye color="#22C55E" size={20} />
+                        ) : (
+                          <EyeOff color="#71717A" size={20} />
+                        )}
+                      </View>
+                      <Text className="text-zinc-600 text-[10px]">
+                        {selectedVideo.is_public ? 'EN TRENS' : 'OCULTO'}
+                      </Text>
+                    </TouchableOpacity>
+
+                    {/* Share - Screen Record Hint */}
+                    <TouchableOpacity className="items-center" onPress={handleShareVideo}>
+                      <View className="bg-savage-red p-3 rounded-full mb-1">
+                        <Share2 color="#FFFFFF" size={20} />
+                      </View>
+                      <Text className="text-zinc-600 text-[10px]">COMPARTIR</Text>
+                    </TouchableOpacity>
+                  </View>
+                </LinearGradient>
+              </View>
             </View>
-
-            {/* ACTIONS */}
-            <View className="absolute bottom-10 left-6 right-6 flex-row justify-around">
-              <TouchableOpacity className="bg-zinc-900 p-4 rounded-full border border-zinc-800">
-                <Trash2 color="#DC2626" size={24} />
-              </TouchableOpacity>
-
-              <TouchableOpacity className="bg-zinc-900 p-4 rounded-full border border-zinc-800">
-                <Text className="text-savage-text font-bold">📤</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                className={`${
-                  selectedVideo.is_public ? 'bg-savage-red' : 'bg-zinc-900'
-                } p-4 rounded-full border ${
-                  selectedVideo.is_public ? 'border-savage-red' : 'border-zinc-800'
-                }`}
-              >
-                <Text className="text-savage-text font-bold text-xs">TRENS</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
-      </View>
-    </Modal>
-  );
+          )}
+        </View>
+      </Modal>
+    );
+  };
 
   const renderHistorialModal = () => {
     if (!modalExercise) return null;
@@ -2608,43 +3139,48 @@ export default function GymScreen() {
         transparent={true}
         onRequestClose={() => setHistorialModalVisible(false)}
       >
-        <View className="flex-1 bg-transparent">
+        <View className="flex-1 bg-transparent justify-end">
           <Animated.View
-            className="bg-black"
-            style={[{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT * 0.85 }, animatedStyleHistorial]}
+            className="bg-black rounded-t-3xl"
+            style={[{ height: '85%' }, animatedStyleHistorial]}
           >
             {/* Drag Handle + Header (Área para arrastrar) */}
             <Animated.View
-              className="items-center pt-6 pb-4 border-b border-zinc-800"
+              className="items-center pt-4 pb-4 border-b border-zinc-800"
               {...panResponderHistorial.panHandlers}
             >
-              <View className="w-16 h-1.5 bg-zinc-600 rounded-full mb-6" />
+              <View className="w-12 h-1 bg-zinc-600 rounded-full mb-4" />
 
               {/* Header */}
               <View className="px-6 pb-2 w-full">
-                <Text className="text-savage-text text-2xl font-bold text-center">
+                <Text className="text-savage-text text-xl font-bold text-center">
                   {modalExercise.name}
                 </Text>
-                <Text className="text-zinc-500 text-sm mt-2 tracking-wider text-center">
-                  HISTORIAL DE VIDEOS
+                <Text className="text-zinc-500 text-xs mt-1 tracking-wider text-center uppercase">
+                  Historial de Videos
                 </Text>
               </View>
             </Animated.View>
 
             {/* Lista de Videos */}
-            <ScrollView className="flex-1 px-6 py-6" showsVerticalScrollIndicator={true}>
-              {modalExercise.videos.length === 0 ? (
+            <ScrollView className="flex-1 px-4 py-4" showsVerticalScrollIndicator={false}>
+              {loadingVideos ? (
                 <View className="flex-1 justify-center items-center py-20">
-                  <CameraIcon color="#3F3F46" size={64} />
-                  <Text className="text-zinc-600 text-center mt-4 text-lg">
+                  <ActivityIndicator color="#DC2626" size="large" />
+                  <Text className="text-zinc-500 text-center mt-4 text-sm">Cargando videos...</Text>
+                </View>
+              ) : exerciseVideos.length === 0 ? (
+                <View className="flex-1 justify-center items-center py-20">
+                  <CameraIcon color="#3F3F46" size={48} />
+                  <Text className="text-zinc-600 text-center mt-4 text-base">
                     Sin videos registrados
                   </Text>
-                  <Text className="text-zinc-700 text-center mt-2 text-sm">
+                  <Text className="text-zinc-700 text-center mt-2 text-xs">
                     Graba tu primer set desde el botón PRO
                   </Text>
                 </View>
               ) : (
-                modalExercise.videos.map((video) => (
+                exerciseVideos.map((video) => (
                   <TouchableOpacity
                     key={video.id}
                     onPress={() => {
@@ -2652,38 +3188,55 @@ export default function GymScreen() {
                       setVideoViewerVisible(true);
                       setHistorialModalVisible(false);
                     }}
-                    className="flex-row bg-zinc-900 rounded-xl mb-4 border border-zinc-800 overflow-hidden"
+                    className="flex-row bg-zinc-900 rounded-xl mb-3 border border-zinc-800 overflow-hidden"
                   >
-                    {/* Thumbnail */}
-                    <View className="bg-zinc-800" style={{ width: 120, height: 160 }}>
-                      <View className="flex-1 justify-center items-center">
-                        <Text className="text-zinc-600 text-4xl">▶</Text>
+                    {/* Thumbnail - usa VideoView pausado para mostrar primer frame */}
+                    <View className="bg-zinc-800 w-24 aspect-[3/4] justify-center items-center overflow-hidden">
+                      {video.videoUrl || video.video_url ? (
+                        <VideoThumbnail
+                          videoUrl={video.videoUrl || video.video_url || ''}
+                          width={96}
+                          height={128}
+                        />
+                      ) : (
+                        <Play color="#52525b" size={28} fill="#52525b" />
+                      )}
+                      <View className="absolute inset-0 items-center justify-center bg-black/30">
+                        <Play color="#fff" size={20} fill="#fff" />
                       </View>
                     </View>
 
                     {/* Datos */}
-                    <View className="flex-1 p-4 justify-center">
-                      <View className="flex-row items-baseline mb-2">
-                        <Text className="text-white font-bold text-3xl font-mono">
+                    <View className="flex-1 p-3 justify-center">
+                      <View className="flex-row items-baseline mb-1">
+                        <Text className="text-white font-bold text-2xl font-mono">
                           {video.weight}
                         </Text>
-                        <Text className="text-zinc-500 text-sm ml-1">kg</Text>
-                        <Text className="text-zinc-700 text-2xl mx-2">×</Text>
-                        <Text className="text-white font-bold text-3xl font-mono">
+                        <Text className="text-zinc-500 text-xs ml-1">kg</Text>
+                        <Text className="text-zinc-700 text-xl mx-1">×</Text>
+                        <Text className="text-white font-bold text-2xl font-mono">
                           {video.reps}
                         </Text>
-                        <Text className="text-zinc-500 text-sm ml-1">reps</Text>
+                        <Text className="text-zinc-500 text-xs ml-1">reps</Text>
                       </View>
-                      <Text className="text-zinc-600 text-sm">{video.date}</Text>
-                      <View className="flex-row items-center mt-2">
+                      <Text className="text-zinc-600 text-xs">{video.date}</Text>
+                      <View className="flex-row items-center mt-1">
                         <View
-                          className={`w-2 h-2 rounded-full mr-2 ${
+                          className={`w-1.5 h-1.5 rounded-full mr-1.5 ${
                             video.is_public ? 'bg-green-500' : 'bg-zinc-700'
                           }`}
                         />
-                        <Text className="text-zinc-600 text-xs">
-                          {video.is_public ? 'PÚBLICO' : 'PRIVADO'}
+                        <Text className="text-zinc-600 text-[10px] uppercase tracking-wider">
+                          {video.is_public ? 'Público' : 'Privado'}
                         </Text>
+                        {video.spotify?.enabled && (
+                          <View className="flex-row items-center ml-2">
+                            <Music color="#1DB954" size={10} />
+                            <Text className="text-green-500 text-[10px] ml-1">
+                              {video.spotify.trackName}
+                            </Text>
+                          </View>
+                        )}
                       </View>
                     </View>
                   </TouchableOpacity>
@@ -2706,31 +3259,31 @@ export default function GymScreen() {
         transparent={true}
         onRequestClose={() => setStructureModalVisible(false)}
       >
-        <View className="flex-1 bg-transparent">
+        <View className="flex-1 bg-transparent justify-end">
           <Animated.View
-            className="bg-black"
-            style={[{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT * 0.85 }, animatedStyleStructure]}
+            className="bg-black rounded-t-3xl"
+            style={[{ height: '85%' }, animatedStyleStructure]}
           >
             {/* Drag Handle + Header (Área para arrastrar) */}
             <Animated.View
-              className="items-center pt-6 pb-4 border-b border-zinc-800"
+              className="items-center pt-4 pb-4 border-b border-zinc-800"
               {...panResponderStructure.panHandlers}
             >
-              <View className="w-16 h-1.5 bg-zinc-600 rounded-full mb-6" />
+              <View className="w-12 h-1 bg-zinc-600 rounded-full mb-4" />
 
               {/* Header */}
               <View className="px-6 pb-2 w-full">
-                <Text className="text-savage-text text-2xl font-bold text-center">
+                <Text className="text-savage-text text-xl font-bold text-center">
                   {modalExercise.name}
                 </Text>
-                <Text className="text-zinc-500 text-sm mt-2 tracking-wider text-center">
-                  ESTRUCTURA DE SERIES
+                <Text className="text-zinc-500 text-xs mt-1 tracking-wider text-center uppercase">
+                  Estructura de Series
                 </Text>
               </View>
             </Animated.View>
 
             {/* Lista de Series */}
-            <ScrollView className="flex-1 px-6 py-6" showsVerticalScrollIndicator={true}>
+            <ScrollView className="flex-1 px-4 py-4" showsVerticalScrollIndicator={false}>
               {(modalExercise.series || [])
                 .filter((serie) => serie && typeof serie === 'object')
                 .map((serie, idx) => {
@@ -2748,45 +3301,45 @@ export default function GymScreen() {
                   return (
                     <View
                       key={serie.id || String(idx)}
-                      className="flex-row items-center mb-4 bg-zinc-900/50 p-5 rounded-xl border border-zinc-800"
+                      className="flex-row items-center mb-3 bg-zinc-900/50 p-4 rounded-xl border border-zinc-800"
                     >
                       {/* Número de Serie */}
-                      <View className="bg-savage-red rounded-full w-10 h-10 justify-center items-center mr-4">
-                        <Text className="text-white font-bold text-lg font-mono">{idx + 1}</Text>
+                      <View className="bg-savage-red rounded-full w-8 h-8 justify-center items-center mr-3">
+                        <Text className="text-white font-bold text-sm font-mono">{idx + 1}</Text>
                       </View>
 
-                      {/* Color Tag - Esfera más grande */}
+                      {/* Color Tag - Esfera */}
                       <View
-                        className="w-8 h-8 rounded-full mr-4 items-center justify-center"
+                        className="w-7 h-7 rounded-full mr-3 items-center justify-center"
                         style={{ backgroundColor: info.color }}
                       >
-                        <Text className="text-white text-xs font-bold">
+                        <Text className="text-white text-[10px] font-bold">
                           {String(serie.reps || 0)}
                         </Text>
                       </View>
 
                       {/* Info */}
                       <View className="flex-1">
-                        <View className="flex-row items-baseline mb-1">
-                          <Text className="text-savage-text font-bold text-xl">
+                        <View className="flex-row items-baseline mb-0.5">
+                          <Text className="text-savage-text font-bold text-lg">
                             {String(serie.reps || 0)}
                           </Text>
-                          <Text className="text-zinc-500 text-sm ml-1">REPS</Text>
+                          <Text className="text-zinc-500 text-xs ml-1">REPS</Text>
                           {serie.weight && Number(serie.weight) > 0 ? (
                             <>
-                              <Text className="text-zinc-700 text-lg mx-2">×</Text>
-                              <Text className="text-savage-red font-bold text-xl">
+                              <Text className="text-zinc-700 text-base mx-1">×</Text>
+                              <Text className="text-savage-red font-bold text-lg">
                                 {String(serie.weight)}
                               </Text>
-                              <Text className="text-zinc-500 text-sm ml-1">kg</Text>
+                              <Text className="text-zinc-500 text-xs ml-1">kg</Text>
                             </>
                           ) : null}
                         </View>
-                        <Text className="text-zinc-500 text-xs uppercase tracking-wider">
+                        <Text className="text-zinc-500 text-[10px] uppercase tracking-wider">
                           {String(info.label)}
                         </Text>
                         {serie.note ? (
-                          <Text className="text-zinc-600 text-sm mt-2 italic">
+                          <Text className="text-zinc-600 text-xs mt-1 italic">
                             "{String(serie.note)}"
                           </Text>
                         ) : null}
@@ -2805,69 +3358,76 @@ export default function GymScreen() {
   // RENDER FOCUS MODE (VERTICAL SCROLL - TIKTOK STYLE)
   // ============================================================================
   return (
-    <GestureHandlerRootView className="flex-1 bg-savage-black">
-      {/* HEADER FIJO */}
-      <View className="absolute top-0 left-0 right-0 z-50 bg-black/90 px-6 pt-14 pb-4 flex-row justify-between items-center">
-        <View className="flex-1 items-center">
-          <Text className="text-savage-text text-xl font-bold tracking-wider uppercase">
-            {trainingProgram.days[selectedDayIndex]?.muscleGroups || 'ENTRENAMIENTO'}
-          </Text>
-          <Text className="text-zinc-500 text-sm font-mono">{getCurrentTime()}</Text>
-        </View>
-        <TouchableOpacity
-          onPress={() => setViewMode('STRUCTURE')}
-          className="bg-zinc-900 p-3 rounded-lg ml-4"
+    <GestureHandlerRootView className="flex-1 bg-black">
+      {/* HEADER FIJO - Estilo ADN */}
+      <View className="absolute top-0 left-0 right-0 z-50">
+        <LinearGradient
+          colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'transparent']}
+          className="px-4 pt-14 pb-6"
         >
-          <Sliders color="#FFFFFF" size={20} />
-        </TouchableOpacity>
+          <View className="flex-row items-center justify-between">
+            <View className="flex-1">
+              <Text className="text-white text-lg font-bold tracking-wider uppercase">
+                {trainingProgram.days[selectedDayIndex]?.muscleGroups || 'ENTRENAMIENTO'}
+              </Text>
+              <Text className="text-zinc-500 text-xs font-mono mt-0.5">{getCurrentTime()}</Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => setViewMode('STRUCTURE')}
+              className="bg-zinc-900/80 p-2.5 rounded-lg border border-zinc-800"
+            >
+              <Sliders color="#DC2626" size={18} />
+            </TouchableOpacity>
+          </View>
+        </LinearGradient>
       </View>
 
-      {/* HUD TÁCTICO (Flotante Derecha) */}
-      <View className="absolute right-4 top-32 z-40 gap-4">
+      {/* HUD TÁCTICO (Flotante Derecha - Arriba de Hank) */}
+      <View className="absolute right-4 bottom-24 z-40 gap-2">
         {/* TIMER */}
         <View>
           {timerActive ? (
             // Cuenta regresiva activa
-            <View className="bg-black/90 p-4 rounded-full border-2 border-savage-red items-center justify-center">
-              <Text className="text-savage-red font-mono font-bold text-sm">
+            <View className="bg-black/90 p-3 rounded-full border-2 border-savage-red items-center justify-center">
+              <Text className="text-savage-red font-mono font-bold text-xs">
                 {formatTime(timeRemaining)}
               </Text>
             </View>
           ) : timerExpanded ? (
             // Burbujas desplegadas
-            <View className="flex-row gap-2 bg-black/90 px-3 py-2 rounded-full border border-zinc-800">
+            <View className="gap-2 bg-black/90 p-2 rounded-2xl border border-zinc-800">
               <TouchableOpacity
                 onPress={() => startTimer(1)}
-                className="bg-zinc-800 px-3 py-2 rounded-full"
+                className="bg-zinc-800 px-3 py-1.5 rounded-full"
               >
-                <Text className="text-savage-text text-xs font-bold">1m</Text>
+                <Text className="text-savage-text text-[10px] font-bold">1m</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => startTimer(2)}
-                className="bg-zinc-800 px-3 py-2 rounded-full"
+                className="bg-zinc-800 px-3 py-1.5 rounded-full"
               >
-                <Text className="text-savage-text text-xs font-bold">2m</Text>
+                <Text className="text-savage-text text-[10px] font-bold">2m</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => startTimer(3)}
-                className="bg-zinc-800 px-3 py-2 rounded-full"
+                className="bg-zinc-800 px-3 py-1.5 rounded-full"
               >
-                <Text className="text-savage-text text-xs font-bold">3m</Text>
+                <Text className="text-savage-text text-[10px] font-bold">3m</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => setTimerExpanded(false)}
-                className="bg-savage-red px-3 py-2 rounded-full"
+                className="bg-savage-red px-3 py-1.5 rounded-full"
               >
-                <Text className="text-savage-text text-xs font-bold">+</Text>
+                <X color="#FFF" size={12} />
               </TouchableOpacity>
             </View>
           ) : (
             // Icono normal
             <TouchableOpacity
               onPress={() => setTimerExpanded(true)}
-              className="bg-black/80 p-4 rounded-full border border-zinc-800"
+              className="bg-black/80 p-3 rounded-full border border-zinc-800"
             >
-              <Timer color="#FFFFFF" size={24} />
+              <Timer color="#FFFFFF" size={20} />
             </TouchableOpacity>
           )}
         </View>
@@ -2875,17 +3435,9 @@ export default function GymScreen() {
         {/* SPOTIFY */}
         <TouchableOpacity
           onPress={() => setSpotifyModalVisible(true)}
-          className="bg-black/80 p-4 rounded-full border border-zinc-800"
+          className="bg-black/80 p-3 rounded-full border border-zinc-800"
         >
-          <Music color="#1DB954" size={24} />
-        </TouchableOpacity>
-
-        {/* HANK */}
-        <TouchableOpacity
-          onPress={() => setHankModalVisible(true)}
-          className="bg-black/80 p-4 rounded-full border border-savage-red"
-        >
-          <Sparkles color="#DC2626" size={24} />
+          <Music color="#1DB954" size={20} />
         </TouchableOpacity>
       </View>
 
@@ -2896,8 +3448,8 @@ export default function GymScreen() {
         keyExtractor={(item) => item.id}
         pagingEnabled
         getItemLayout={(_, index) => ({
-          length: SCREEN_HEIGHT,
-          offset: SCREEN_HEIGHT * index,
+          length: CONTENT_HEIGHT,
+          offset: CONTENT_HEIGHT * index,
           index,
         })}
         showsVerticalScrollIndicator={false}
@@ -2912,6 +3464,23 @@ export default function GymScreen() {
           // Haptic Feedback al cambiar ejercicio
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         }}
+        ListEmptyComponent={
+          <View style={{ height: CONTENT_HEIGHT }} className="justify-center items-center px-6">
+            <View className="w-20 h-20 rounded-full bg-zinc-900 items-center justify-center mb-6">
+              <Plus size={32} color="#DC2626" />
+            </View>
+            <Text className="text-white text-xl font-bold text-center mb-2">SIN EJERCICIOS</Text>
+            <Text className="text-zinc-500 text-center text-sm mb-8">
+              Configura tu rutina para comenzar a entrenar
+            </Text>
+            <TouchableOpacity
+              onPress={() => setViewMode('STRUCTURE')}
+              className="bg-savage-red px-8 py-4 rounded-lg"
+            >
+              <Text className="text-white font-bold tracking-wider">CONFIGURAR RUTINA</Text>
+            </TouchableOpacity>
+          </View>
+        }
         renderItem={({ item, index }) => {
           // Preparar array de ejercicios: principal + alternativas
           const allVariations = [
@@ -2948,198 +3517,233 @@ export default function GymScreen() {
                 setActiveAlternatives((prev) => ({ ...prev, [index]: newIndex }));
               }}
               renderItem={({ item: variation }) => (
-                <View style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT }} className="bg-black">
-                  {/* IMAGEN/VIDEO HERO */}
-                  <View>
-                    {isVideoUrl(variation.image_url) ? (
-                      <VideoHero
-                        videoUrl={variation.image_url!}
-                        videoMuted={videoMuted}
-                        isActive={
-                          isFocused &&
-                          index === activeExerciseIndex &&
-                          activeAltIndex ===
-                            allVariations.findIndex((v) => v.id === variation.id) &&
-                          !editorVisible &&
-                          !cameraModalVisible &&
-                          !isPickingFromGallery
-                        }
-                      />
-                    ) : (
-                      <Image
-                        source={{ uri: variation.image_url }}
-                        style={{ width: SCREEN_WIDTH, height: SCREEN_HEIGHT * 0.5 }}
-                        contentFit="cover"
-                      />
-                    )}
+                <View style={{ width: SCREEN_WIDTH, height: CONTENT_HEIGHT }} className="bg-black">
+                  {/* CONTENEDOR PRINCIPAL */}
+                  <View className="flex-1">
+                    {/* IMAGEN/VIDEO HERO */}
+                    <View className="relative">
+                      {isVideoUrl(variation.image_url) ? (
+                        <VideoHero
+                          videoUrl={variation.image_url!}
+                          videoMuted={videoMuted}
+                          screenWidth={SCREEN_WIDTH}
+                          isActive={
+                            isFocused &&
+                            index === activeExerciseIndex &&
+                            activeAltIndex ===
+                              allVariations.findIndex((v) => v.id === variation.id) &&
+                            !editorVisible &&
+                            !cameraModalVisible &&
+                            !isPickingFromGallery
+                          }
+                        />
+                      ) : (
+                        <Image
+                          source={{ uri: variation.image_url }}
+                          style={{ width: SCREEN_WIDTH, height: SCREEN_WIDTH }}
+                          contentFit="cover"
+                        />
+                      )}
 
-                    {/* BOTÓN MUTE/AUDIO (solo para videos) */}
-                    {isVideoUrl(variation.image_url) && (
+                      {/* OVERLAY GRADIENTE SUPERIOR */}
+                      <LinearGradient
+                        colors={['rgba(0,0,0,0.8)', 'transparent']}
+                        className="absolute top-0 left-0 right-0 h-32"
+                      />
+
+                      {/* OVERLAY GRADIENTE INFERIOR */}
+                      <LinearGradient
+                        colors={['transparent', 'rgba(0,0,0,0.9)', '#000']}
+                        className="absolute bottom-0 left-0 right-0 h-24"
+                      />
+
+                      {/* TÍTULO EJERCICIO - Sobre la imagen */}
+                      <View className="absolute top-24 left-4 right-16">
+                        <Text
+                          className="text-white text-2xl font-bold uppercase tracking-wide"
+                          numberOfLines={2}
+                          adjustsFontSizeToFit
+                        >
+                          {variation.name}
+                        </Text>
+                        {!variation.isMain && (
+                          <View className="flex-row items-center mt-1">
+                            <View className="w-1.5 h-1.5 bg-savage-red rounded-sm mr-1.5" />
+                            <Text className="text-zinc-500 text-[10px] uppercase tracking-widest">
+                              Alternativa
+                            </Text>
+                          </View>
+                        )}
+
+                        {/* INDICADORES DE ALTERNATIVAS (DOTS) */}
+                        {allVariations.length > 1 && (
+                          <View className="flex-row gap-1.5 mt-2">
+                            {allVariations.map((_, dotIndex) => (
+                              <View
+                                key={dotIndex}
+                                className={`h-1.5 rounded-full ${
+                                  dotIndex === activeAltIndex
+                                    ? 'w-5 bg-savage-red'
+                                    : 'w-1.5 bg-zinc-600'
+                                }`}
+                              />
+                            ))}
+                          </View>
+                        )}
+                      </View>
+
+                      {/* BOTÓN NOTAS */}
                       <TouchableOpacity
                         onPress={() => {
-                          setVideoMuted(!videoMuted);
-                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                          setCurrentExerciseIndex(index);
+                          setNotesModalVisible(true);
                         }}
-                        className="absolute bottom-6 left-6 bg-black/70 p-3 rounded-full border border-zinc-700"
+                        className="absolute top-24 right-4 z-50 bg-black/70 p-2.5 rounded-full border border-zinc-700"
                       >
-                        <Text className="text-white text-xl">{videoMuted ? '🔇' : '🔊'}</Text>
+                        <Edit3 color="#FFFFFF" size={16} />
                       </TouchableOpacity>
-                    )}
 
-                    {/* BOTÓN CÁMARA (SOBRE LA IMAGEN) - Todas las variaciones */}
-                    <TouchableOpacity
-                      onPress={() => {
-                        setCurrentExerciseIndex(index);
-                        setCurrentVariationId(variation.id); // Guardar ID de la variación actual
-                        openCamera();
-                      }}
-                      className="absolute bottom-6 right-6 bg-savage-red p-4 rounded-full shadow-lg border-2 border-white"
-                      style={{
-                        shadowColor: '#DC2626',
-                        shadowOffset: { width: 0, height: 4 },
-                        shadowOpacity: 0.6,
-                        shadowRadius: 8,
-                        elevation: 8,
-                      }}
-                    >
-                      <CameraIcon color="#FFFFFF" size={28} strokeWidth={2.5} />
-                    </TouchableOpacity>
-                  </View>
+                      {/* BOTÓN MUTE/AUDIO (solo para videos) */}
+                      {isVideoUrl(variation.image_url) && (
+                        <TouchableOpacity
+                          onPress={() => {
+                            setVideoMuted(!videoMuted);
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                          }}
+                          className="absolute bottom-20 left-4 bg-black/70 p-2.5 rounded-full border border-zinc-700"
+                        >
+                          <Text className="text-white text-lg">{videoMuted ? '🔇' : '🔊'}</Text>
+                        </TouchableOpacity>
+                      )}
 
-                  {/* OVERLAY GRADIENTE */}
-                  <View className="absolute top-0 left-0 right-0 h-1/2 bg-gradient-to-b from-transparent to-black" />
+                      {/* BOTÓN CÁMARA */}
+                      <TouchableOpacity
+                        onPress={() => {
+                          setCurrentExerciseIndex(index);
+                          setCurrentVariationId(variation.id);
+                          openCamera();
+                        }}
+                        className="absolute bottom-20 right-4 bg-savage-red p-3 rounded-full shadow-lg border-2 border-white"
+                        style={{
+                          shadowColor: '#DC2626',
+                          shadowOffset: { width: 0, height: 4 },
+                          shadowOpacity: 0.6,
+                          shadowRadius: 8,
+                          elevation: 8,
+                        }}
+                      >
+                        <CameraIcon color="#FFFFFF" size={22} strokeWidth={2.5} />
+                      </TouchableOpacity>
+                    </View>
 
-                  {/* TÍTULO EJERCICIO */}
-                  <View className="absolute top-32 left-6 right-20">
-                    <Text className="text-savage-text text-4xl font-bold uppercase tracking-wide">
-                      {variation.name}
-                    </Text>
-                    {!variation.isMain && (
-                      <Text className="text-zinc-500 text-sm mt-1">ALTERNATIVA</Text>
-                    )}
-
-                    {/* INDICADORES DE ALTERNATIVAS (DOTS) */}
-                    {allVariations.length > 1 && (
-                      <View className="flex-row gap-2 mt-3">
-                        {allVariations.map((_, dotIndex) => (
-                          <View
-                            key={dotIndex}
-                            className={`h-2 rounded-full ${
-                              dotIndex === activeAltIndex ? 'w-6 bg-savage-red' : 'w-2 bg-zinc-600'
-                            }`}
-                          />
-                        ))}
-                      </View>
-                    )}
-                  </View>
-
-                  {/* BOTÓN NOTAS */}
-                  <TouchableOpacity
-                    onPress={() => {
-                      setCurrentExerciseIndex(index);
-                      setNotesModalVisible(true);
-                    }}
-                    className="absolute top-32 right-20 z-50 bg-black/70 p-3 rounded-full border border-zinc-700"
-                  >
-                    <Edit3 color="#FFFFFF" size={20} />
-                  </TouchableOpacity>
-
-                  {/* CARDS EN LA PARTE INFERIOR */}
-                  <View className="absolute bottom-20 left-0 right-0 px-6 pb-6 bg-gradient-to-t from-black via-black/95 to-transparent pt-12">
-                    {/* CARD HISTORIAL */}
-                    <TouchableOpacity
-                      onPress={() => {
-                        setModalExercise(item);
-                        setHistorialModalVisible(true);
-                      }}
-                      className="bg-glass-strong/80 backdrop-blur-xl p-5 rounded-savage border border-glass-border mb-3"
-                    >
-                      <View className="flex-row items-center justify-between">
-                        <View className="flex-1">
-                          <Text className="text-zinc-500 text-xs tracking-widest mb-2">
-                            HISTORIAL
-                          </Text>
-                          {variation.videos.length > 0 ? (
-                            <>
-                              <Text className="text-white font-bold text-lg mb-1">
-                                Último: {variation.videos[0].weight}kg × {variation.videos[0].reps}{' '}
-                                reps
+                    {/* CARDS - Justo debajo de la imagen, sin flex-1 */}
+                    <View className="bg-black px-4 pt-2 pb-2">
+                      {/* CARD HISTORIAL */}
+                      <TouchableOpacity
+                        onPress={() => {
+                          setModalExercise(item);
+                          setHistorialModalVisible(true);
+                        }}
+                        className="bg-zinc-900/90 p-4 rounded-xl border border-zinc-800 mb-2"
+                      >
+                        <View className="flex-row items-center justify-between">
+                          <View className="flex-1">
+                            <View className="flex-row items-center gap-1.5 mb-1.5">
+                              <View className="w-1 h-1 bg-savage-red rounded-full" />
+                              <Text className="text-zinc-500 text-[10px] tracking-widest uppercase">
+                                Historial
                               </Text>
-                              <Text className="text-zinc-600 text-sm">
-                                {variation.videos[0].date}
-                              </Text>
-                            </>
-                          ) : (
-                            <Text className="text-zinc-600">Sin registros</Text>
-                          )}
-                        </View>
-                        <View className="bg-zinc-800 px-3 py-1 rounded-full">
-                          <Text className="text-zinc-400 font-bold font-mono">
-                            {variation.videos.length}
-                          </Text>
-                        </View>
-                      </View>
-                    </TouchableOpacity>
-
-                    {/* CARD ESTRUCTURA - Mostrar en todas las variaciones */}
-                    <TouchableOpacity
-                      onPress={() => {
-                        setModalExercise(item);
-                        setStructureModalVisible(true);
-                      }}
-                      className="bg-glass-strong/80 backdrop-blur-xl p-5 rounded-savage border border-glass-border"
-                    >
-                      <View className="flex-row items-center justify-between">
-                        <View className="flex-1">
-                          <Text className="text-zinc-500 text-xs tracking-widest mb-2">
-                            ESTRUCTURA
-                          </Text>
-                          <View className="flex-row flex-wrap gap-1">
-                            {((variation as any).series || (item as any).series || [])
-                              .filter((s: any) => s && typeof s === 'object')
-                              .map((s: any, idx: number) => {
-                                const typeColors: Record<string, string> = {
-                                  WARMUP: 'bg-blue-500',
-                                  FEEDER: 'bg-yellow-500',
-                                  EFFECTIVE: 'bg-green-500',
-                                  INTENSITY: 'bg-red-500',
-                                };
-                                const colorClass = typeColors[s.type as string] || 'bg-zinc-500';
-                                return (
-                                  <View
-                                    key={String(idx)}
-                                    className={`${colorClass} w-8 h-8 rounded-full items-center justify-center`}
-                                  >
-                                    <Text className="text-white text-[10px] font-bold leading-tight">
-                                      {String(s.reps || 0)}
-                                    </Text>
-                                    {s.weight && Number(s.weight) > 0 ? (
-                                      <Text className="text-white text-[7px] leading-none">
-                                        {Number(s.weight)}kg
-                                      </Text>
-                                    ) : null}
-                                  </View>
-                                );
-                              })}
+                            </View>
+                            {variation.videos.length > 0 ? (
+                              <>
+                                <Text className="text-white font-bold text-sm">
+                                  Último: {variation.videos[0].weight}kg ×{' '}
+                                  {variation.videos[0].reps} reps
+                                </Text>
+                                <Text className="text-zinc-600 text-xs mt-0.5">
+                                  {variation.videos[0].date}
+                                </Text>
+                              </>
+                            ) : (
+                              <Text className="text-zinc-600 text-sm">Sin registros</Text>
+                            )}
+                          </View>
+                          <View className="bg-zinc-800 px-2.5 py-1 rounded-full">
+                            <Text className="text-zinc-400 font-bold font-mono text-xs">
+                              {variation.videos.length}
+                            </Text>
                           </View>
                         </View>
-                        <View className="bg-zinc-800 px-3 py-1 rounded-full">
-                          <Text className="text-zinc-400 font-bold font-mono">
-                            {((variation as any).series || (item as any).series || []).length}
+                      </TouchableOpacity>
+
+                      {/* CARD ESTRUCTURA */}
+                      <TouchableOpacity
+                        onPress={() => {
+                          setModalExercise(item);
+                          setStructureModalVisible(true);
+                        }}
+                        className="bg-zinc-900/90 p-4 rounded-xl border border-zinc-800"
+                      >
+                        <View className="flex-row items-center justify-between">
+                          <View className="flex-1">
+                            <View className="flex-row items-center gap-1.5 mb-1.5">
+                              <View className="w-1 h-1 bg-savage-red rounded-full" />
+                              <Text className="text-zinc-500 text-[10px] tracking-widest uppercase">
+                                Estructura
+                              </Text>
+                            </View>
+                            <View className="flex-row flex-wrap gap-1">
+                              {((variation as any).series || (item as any).series || [])
+                                .filter((s: any) => s && typeof s === 'object')
+                                .map((s: any, idx: number) => {
+                                  const typeColors: Record<string, string> = {
+                                    WARMUP: 'bg-blue-500',
+                                    FEEDER: 'bg-yellow-500',
+                                    EFFECTIVE: 'bg-green-500',
+                                    INTENSITY: 'bg-red-500',
+                                  };
+                                  const colorClass = typeColors[s.type as string] || 'bg-zinc-500';
+                                  return (
+                                    <View
+                                      key={String(idx)}
+                                      className={`${colorClass} w-6 h-6 rounded-full items-center justify-center`}
+                                    >
+                                      <Text className="text-white text-[8px] font-bold">
+                                        {String(s.reps || 0)}
+                                      </Text>
+                                    </View>
+                                  );
+                                })}
+                            </View>
+                          </View>
+                          <View className="bg-zinc-800 px-2.5 py-1 rounded-full">
+                            <Text className="text-zinc-400 font-bold font-mono text-xs">
+                              {((variation as any).series || (item as any).series || []).length}
+                            </Text>
+                          </View>
+                        </View>
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* ESPACIADOR FLEXIBLE */}
+                    <View className="flex-1" />
+
+                    {/* FOOTER "PRÓXIMO" */}
+                    {variation.isMain && index < exercises.length - 1 && (
+                      <View className="bg-zinc-900 py-3 px-4 border-t border-zinc-800">
+                        <View className="flex-row items-center gap-2">
+                          <ChevronDown color="#DC2626" size={16} />
+                          <Text
+                            className="text-zinc-400 text-xs tracking-wider uppercase flex-1 font-medium"
+                            numberOfLines={1}
+                          >
+                            Siguiente:{' '}
+                            <Text className="text-white">{exercises[index + 1].name}</Text>
                           </Text>
                         </View>
                       </View>
-                    </TouchableOpacity>
+                    )}
                   </View>
-
-                  {/* FOOTER "PRÓXIMO" - Solo en ejercicio principal */}
-                  {variation.isMain && index < exercises.length - 1 && (
-                    <View className="absolute bottom-0 left-0 right-0 bg-zinc-900 py-3 px-6 border-t border-zinc-800">
-                      <Text className="text-zinc-500 text-xs tracking-wider uppercase">
-                        PRÓXIMO: {exercises[index + 1].name}
-                      </Text>
-                    </View>
-                  )}
                 </View>
               )}
             />

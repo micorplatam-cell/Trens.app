@@ -1,0 +1,692 @@
+// ============================================================================
+// SPOTIFY SERVICE - TRENS
+// Control remoto de Spotify Premium
+// ============================================================================
+
+import * as AuthSession from 'expo-auth-session';
+import * as WebBrowser from 'expo-web-browser';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Alert } from 'react-native';
+
+// Completar el flujo de autenticación web
+WebBrowser.maybeCompleteAuthSession();
+
+// ============================================================================
+// CONFIGURACIÓN
+// ============================================================================
+const SPOTIFY_CLIENT_ID = 'b0c64eb73f1a4f5bab9509ba19f37217';
+const SPOTIFY_SCOPES = [
+  'user-read-playback-state',
+  'user-modify-playback-state',
+  'user-read-currently-playing',
+  'streaming',
+  'app-remote-control',
+].join(' ');
+
+const STORAGE_KEY = '@trens_spotify_token';
+
+// Discovery document for Spotify
+const discovery = {
+  authorizationEndpoint: 'https://accounts.spotify.com/authorize',
+  tokenEndpoint: 'https://accounts.spotify.com/api/token',
+};
+
+// ============================================================================
+// TIPOS
+// ============================================================================
+export interface SpotifyTrack {
+  uri: string;
+  name: string;
+  artist: string;
+  album: string;
+  albumArt: string;
+  durationMs: number;
+  positionMs: number;
+}
+
+export interface SpotifyPlaybackState {
+  isPlaying: boolean;
+  track: SpotifyTrack | null;
+  deviceId: string | null;
+  deviceName: string | null;
+  hasActiveDevice: boolean;
+  shuffleState: boolean;
+  repeatState: 'off' | 'track' | 'context';
+}
+
+/**
+ * Metadata de Spotify para guardar en videos (según MASTER)
+ * Solo metadata, NO audio - 100% legal
+ */
+export interface SpotifyVideoMetadata {
+  enabled: boolean;
+  trackUri: string;
+  positionMs: number;
+  trackName: string;
+  artist: string;
+  albumArt?: string;
+}
+
+/**
+ * Rol del usuario para control de Spotify
+ */
+export type SpotifyUserRole = 'pro' | 'free';
+
+interface StoredToken {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number;
+}
+
+// ============================================================================
+// SPOTIFY SERVICE CLASS
+// ============================================================================
+class SpotifyService {
+  private accessToken: string | null = null;
+  private refreshToken: string | null = null;
+  private expiresAt: number = 0;
+  private isConnected: boolean = false;
+
+  // Evitar mostrar alertas repetidas
+  private lastAlertTime: number = 0;
+  private readonly ALERT_COOLDOWN = 5000; // 5 segundos entre alertas
+
+  // --------------------------------------------------------------------------
+  // AUTENTICACIÓN
+  // --------------------------------------------------------------------------
+
+  /**
+   * Obtener la URL de redirección para la autenticación
+   */
+  getRedirectUri(): string {
+    // Usar el proxy de Expo para desarrollo (más confiable)
+    const uri = AuthSession.makeRedirectUri({
+      native: 'trensdev://spotify-callback',
+    });
+    console.warn('🎵 Spotify: Generated Redirect URI:', uri);
+    return uri;
+  }
+
+  /**
+   * Iniciar el flujo de autenticación OAuth
+   */
+  async authenticate(): Promise<boolean> {
+    try {
+      const redirectUri = this.getRedirectUri();
+
+      console.warn('🎵 Spotify: Usando Redirect URI:', redirectUri);
+
+      const request = new AuthSession.AuthRequest({
+        clientId: SPOTIFY_CLIENT_ID,
+        scopes: SPOTIFY_SCOPES.split(' '),
+        redirectUri,
+        usePKCE: true,
+        responseType: AuthSession.ResponseType.Code,
+      });
+
+      // Ejecutar prompt de autenticación
+      const result = await request.promptAsync(discovery);
+
+      if (result.type === 'success' && result.params.code) {
+        // Intercambiar código por tokens
+        const tokenResult = await AuthSession.exchangeCodeAsync(
+          {
+            clientId: SPOTIFY_CLIENT_ID,
+            code: result.params.code,
+            redirectUri,
+            extraParams: {
+              code_verifier: request.codeVerifier!,
+            },
+          },
+          discovery
+        );
+
+        this.accessToken = tokenResult.accessToken;
+        this.refreshToken = tokenResult.refreshToken || null;
+        this.expiresAt = Date.now() + (tokenResult.expiresIn || 3600) * 1000;
+        this.isConnected = true;
+
+        // Guardar tokens
+        await this.saveTokens();
+
+        console.warn('🎵 Spotify: Conectado exitosamente');
+        return true;
+      }
+
+      console.warn('🎵 Spotify: Autenticación cancelada o fallida');
+      return false;
+    } catch (error) {
+      console.error('🎵 Spotify: Error de autenticación:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Cargar tokens guardados
+   */
+  async loadStoredTokens(): Promise<boolean> {
+    try {
+      const stored = await AsyncStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const tokens: StoredToken = JSON.parse(stored);
+
+        // Verificar si el token aún es válido
+        if (tokens.expiresAt > Date.now()) {
+          this.accessToken = tokens.accessToken;
+          this.refreshToken = tokens.refreshToken;
+          this.expiresAt = tokens.expiresAt;
+          this.isConnected = true;
+          console.warn('🎵 Spotify: Token cargado desde almacenamiento');
+          return true;
+        } else if (tokens.refreshToken) {
+          // Intentar refrescar el token
+          return await this.refreshAccessToken();
+        }
+      }
+      return false;
+    } catch (error) {
+      console.error('🎵 Spotify: Error cargando tokens:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Guardar tokens en almacenamiento
+   */
+  private async saveTokens(): Promise<void> {
+    try {
+      const tokens: StoredToken = {
+        accessToken: this.accessToken!,
+        refreshToken: this.refreshToken || '',
+        expiresAt: this.expiresAt,
+      };
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(tokens));
+    } catch (error) {
+      console.error('🎵 Spotify: Error guardando tokens:', error);
+    }
+  }
+
+  /**
+   * Refrescar el access token
+   */
+  async refreshAccessToken(): Promise<boolean> {
+    if (!this.refreshToken) return false;
+
+    try {
+      const result = await AuthSession.refreshAsync(
+        {
+          clientId: SPOTIFY_CLIENT_ID,
+          refreshToken: this.refreshToken,
+        },
+        discovery
+      );
+
+      this.accessToken = result.accessToken;
+      this.refreshToken = result.refreshToken || this.refreshToken;
+      this.expiresAt = Date.now() + (result.expiresIn || 3600) * 1000;
+      this.isConnected = true;
+
+      await this.saveTokens();
+      console.warn('🎵 Spotify: Token refrescado');
+      return true;
+    } catch (error) {
+      console.error('🎵 Spotify: Error refrescando token:', error);
+      this.isConnected = false;
+      return false;
+    }
+  }
+
+  /**
+   * Desconectar de Spotify
+   */
+  async disconnect(): Promise<void> {
+    this.accessToken = null;
+    this.refreshToken = null;
+    this.expiresAt = 0;
+    this.isConnected = false;
+    await AsyncStorage.removeItem(STORAGE_KEY);
+    console.warn('🎵 Spotify: Desconectado');
+  }
+
+  /**
+   * Verificar si está conectado
+   */
+  getConnectionStatus(): boolean {
+    return this.isConnected && this.expiresAt > Date.now();
+  }
+
+  // --------------------------------------------------------------------------
+  // API CALLS
+  // --------------------------------------------------------------------------
+
+  /**
+   * Hacer una llamada a la API de Spotify
+   */
+  private async apiCall<T>(
+    endpoint: string,
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET',
+    body?: object
+  ): Promise<T | null> {
+    // Verificar y refrescar token si es necesario
+    if (this.expiresAt < Date.now() + 60000) {
+      await this.refreshAccessToken();
+    }
+
+    if (!this.accessToken) {
+      console.error('🎵 Spotify: No hay token de acceso');
+      return null;
+    }
+
+    try {
+      const response = await fetch(`https://api.spotify.com/v1${endpoint}`, {
+        method,
+        headers: {
+          Authorization: `Bearer ${this.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+
+      // 204 = No Content (éxito pero sin respuesta)
+      // 202 = Accepted (comando aceptado)
+      if (response.status === 204 || response.status === 202) {
+        return null;
+      }
+
+      // Si no hay contenido, retornar null
+      const text = await response.text();
+      if (!text || text.length === 0) {
+        return null;
+      }
+
+      // Intentar parsear JSON
+      try {
+        const data = JSON.parse(text);
+
+        if (!response.ok) {
+          // Manejar errores específicos con alertas para el usuario
+          const reason = data?.error?.reason;
+          const now = Date.now();
+
+          if (reason === 'NO_ACTIVE_DEVICE') {
+            // No hay dispositivo activo - mostrar alerta (con cooldown)
+            if (now - this.lastAlertTime > this.ALERT_COOLDOWN) {
+              this.lastAlertTime = now;
+              Alert.alert(
+                '🎧 SPOTIFY',
+                'No hay dispositivo activo.\n\nAbre Spotify en tu teléfono y reproduce algo para poder controlarlo desde TRENS.',
+                [{ text: 'ENTENDIDO', style: 'default' }]
+              );
+            }
+            return null;
+          }
+          if (reason === 'PREMIUM_REQUIRED') {
+            if (now - this.lastAlertTime > this.ALERT_COOLDOWN) {
+              this.lastAlertTime = now;
+              Alert.alert(
+                '⭐ SPOTIFY PREMIUM',
+                'Se requiere Spotify Premium para controlar la reproducción desde TRENS.',
+                [{ text: 'OK', style: 'default' }]
+              );
+            }
+            return null;
+          }
+          // Solo mostrar error para otros casos
+          console.error('🎵 Spotify API Error:', data);
+          return null;
+        }
+
+        return data;
+      } catch (e) {
+        // Si no es JSON válido, retornar null
+        console.warn('🎵 Spotify: Respuesta no es JSON:', text.substring(0, 100));
+        return null;
+      }
+    } catch (error) {
+      console.error('🎵 Spotify: Error en llamada API:', error);
+      return null;
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // CONTROL DE REPRODUCCIÓN
+  // --------------------------------------------------------------------------
+
+  /**
+   * Obtener el estado actual de reproducción
+   */
+  async getPlaybackState(): Promise<SpotifyPlaybackState | null> {
+    const data = await this.apiCall<any>('/me/player');
+
+    if (!data) {
+      return {
+        isPlaying: false,
+        track: null,
+        deviceId: null,
+        deviceName: null,
+        hasActiveDevice: false,
+        shuffleState: false,
+        repeatState: 'off',
+      };
+    }
+
+    return {
+      isPlaying: data.is_playing,
+      track: data.item
+        ? {
+            uri: data.item.uri,
+            name: data.item.name,
+            artist: data.item.artists.map((a: any) => a.name).join(', '),
+            album: data.item.album.name,
+            albumArt: data.item.album.images[0]?.url || '',
+            durationMs: data.item.duration_ms,
+            positionMs: data.progress_ms,
+          }
+        : null,
+      deviceId: data.device?.id || null,
+      deviceName: data.device?.name || null,
+      hasActiveDevice: !!data.device,
+      shuffleState: data.shuffle_state,
+      repeatState: data.repeat_state,
+    };
+  }
+
+  /**
+   * Obtener la canción actual
+   */
+  async getCurrentTrack(): Promise<SpotifyTrack | null> {
+    const state = await this.getPlaybackState();
+    return state?.track || null;
+  }
+
+  /**
+   * Reproducir una canción específica
+   */
+  async play(trackUri?: string, positionMs?: number): Promise<boolean> {
+    const body: any = {};
+
+    if (trackUri) {
+      body.uris = [trackUri];
+    }
+
+    if (positionMs !== undefined) {
+      body.position_ms = positionMs;
+    }
+
+    await this.apiCall('/me/player/play', 'PUT', Object.keys(body).length > 0 ? body : undefined);
+    return true;
+  }
+
+  /**
+   * Pausar la reproducción
+   */
+  async pause(): Promise<boolean> {
+    await this.apiCall('/me/player/pause', 'PUT');
+    return true;
+  }
+
+  /**
+   * Alternar play/pause
+   */
+  async togglePlayPause(): Promise<boolean> {
+    const state = await this.getPlaybackState();
+    if (state?.isPlaying) {
+      return await this.pause();
+    } else {
+      return await this.play();
+    }
+  }
+
+  /**
+   * Siguiente canción
+   */
+  async next(): Promise<boolean> {
+    await this.apiCall('/me/player/next', 'POST');
+    return true;
+  }
+
+  /**
+   * Canción anterior
+   */
+  async previous(): Promise<boolean> {
+    await this.apiCall('/me/player/previous', 'POST');
+    return true;
+  }
+
+  /**
+   * Buscar posición en la canción
+   */
+  async seek(positionMs: number): Promise<boolean> {
+    await this.apiCall(`/me/player/seek?position_ms=${positionMs}`, 'PUT');
+    return true;
+  }
+
+  /**
+   * Establecer volumen (0-100)
+   */
+  async setVolume(volumePercent: number): Promise<boolean> {
+    const volume = Math.max(0, Math.min(100, Math.round(volumePercent)));
+    await this.apiCall(`/me/player/volume?volume_percent=${volume}`, 'PUT');
+    return true;
+  }
+
+  /**
+   * Obtener dispositivos disponibles
+   */
+  async getDevices(): Promise<any[]> {
+    const data = await this.apiCall<{ devices: any[] }>('/me/player/devices');
+    return data?.devices || [];
+  }
+
+  /**
+   * Transferir reproducción a un dispositivo
+   */
+  async transferPlayback(deviceId: string, play: boolean = true): Promise<boolean> {
+    await this.apiCall('/me/player', 'PUT', {
+      device_ids: [deviceId],
+      play,
+    });
+    return true;
+  }
+
+  // =========================================================================
+  // 🎬 VIDEO SYNC - Para sincronizar feed con Spotify
+  // =========================================================================
+
+  /**
+   * Sincronizar reproducción con un video del feed
+   * @param trackUri - URI de la canción de Spotify
+   * @param positionMs - Posición donde empezar (capturada durante grabación)
+   */
+  async syncWithVideo(trackUri: string, positionMs: number): Promise<boolean> {
+    try {
+      // Primero verificar si hay un dispositivo activo
+      const devices = await this.getDevices();
+      const activeDevice = devices.find((d) => d.is_active) || devices[0];
+
+      if (!activeDevice) {
+        const now = Date.now();
+        if (now - this.lastAlertTime > this.ALERT_COOLDOWN) {
+          this.lastAlertTime = now;
+          Alert.alert(
+            '🎧 SPOTIFY',
+            'Este video tiene música de Spotify.\n\nAbre Spotify en tu teléfono y reproduce algo para sincronizar la música.',
+            [{ text: 'ENTENDIDO', style: 'default' }]
+          );
+        }
+        return false;
+      }
+
+      // Transferir a dispositivo si no está activo
+      if (!devices.find((d) => d.is_active)) {
+        await this.transferPlayback(activeDevice.id, false);
+      }
+
+      // Iniciar reproducción en la canción y posición específica
+      await this.play(trackUri, positionMs);
+      console.warn(`🎵 Spotify: Sincronizado a ${trackUri} en ${positionMs}ms`);
+      return true;
+    } catch (error) {
+      console.error('Error sincronizando Spotify:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Pausar para swipe del feed
+   */
+  async pauseForSwipe(): Promise<void> {
+    try {
+      await this.pause();
+    } catch (e) {
+      // Ignorar error si ya está pausado
+    }
+  }
+
+  // =========================================================================
+  // 📹 GRABACIÓN PRO - Capturar metadata durante grabación
+  // =========================================================================
+
+  /**
+   * Capturar metadata de Spotify durante grabación (SOLO PRO)
+   * Retorna la metadata para guardar con el video
+   * NO graba audio - solo metadata (100% legal según MASTER)
+   */
+  async captureMetadataForRecording(): Promise<SpotifyVideoMetadata | null> {
+    try {
+      const state = await this.getPlaybackState();
+
+      if (!state || !state.track || !state.isPlaying) {
+        // No hay música reproduciéndose
+        return null;
+      }
+
+      return {
+        enabled: true,
+        trackUri: state.track.uri,
+        positionMs: state.track.positionMs,
+        trackName: state.track.name,
+        artist: state.track.artist,
+        albumArt: state.track.albumArt,
+      };
+    } catch (error) {
+      console.error('🎵 Error capturando metadata:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Crear metadata vacía (para videos sin música)
+   */
+  createEmptyMetadata(): SpotifyVideoMetadata {
+    return {
+      enabled: false,
+      trackUri: '',
+      positionMs: 0,
+      trackName: '',
+      artist: '',
+    };
+  }
+
+  // =========================================================================
+  // 🎮 CONTROL BASADO EN ROL (PRO vs FREE)
+  // =========================================================================
+
+  /**
+   * Reproducir con control de rol
+   * PRO: control completo
+   * FREE: solo auto-play (sin control manual)
+   */
+  async playWithRole(
+    role: SpotifyUserRole,
+    trackUri?: string,
+    positionMs?: number
+  ): Promise<boolean> {
+    // Ambos roles pueden hacer auto-play
+    return await this.play(trackUri, positionMs);
+  }
+
+  /**
+   * Pausar con control de rol
+   * PRO: puede pausar
+   * FREE: NO puede pausar (solo swipe del feed pausa)
+   */
+  async pauseWithRole(role: SpotifyUserRole): Promise<boolean> {
+    if (role !== 'pro') {
+      console.warn('🎵 Spotify: Control de pausa solo disponible para PRO');
+      return false;
+    }
+    return await this.pause();
+  }
+
+  /**
+   * Toggle play/pause con control de rol
+   */
+  async toggleWithRole(role: SpotifyUserRole): Promise<boolean> {
+    if (role !== 'pro') {
+      console.warn('🎵 Spotify: Control solo disponible para PRO');
+      return false;
+    }
+    return await this.togglePlayPause();
+  }
+
+  /**
+   * Siguiente canción con control de rol
+   */
+  async nextWithRole(role: SpotifyUserRole): Promise<boolean> {
+    if (role !== 'pro') {
+      Alert.alert(
+        '⭐ FUNCIÓN PRO',
+        'Cambia a PRO para controlar la música.\n\nCon PRO puedes pausar, saltar canciones y tener control total de Spotify.',
+        [{ text: 'ENTENDIDO', style: 'default' }]
+      );
+      return false;
+    }
+    return await this.next();
+  }
+
+  /**
+   * Canción anterior con control de rol
+   */
+  async previousWithRole(role: SpotifyUserRole): Promise<boolean> {
+    if (role !== 'pro') {
+      return false;
+    }
+    return await this.previous();
+  }
+
+  /**
+   * Seek con control de rol
+   */
+  async seekWithRole(role: SpotifyUserRole, positionMs: number): Promise<boolean> {
+    if (role !== 'pro') {
+      return false;
+    }
+    return await this.seek(positionMs);
+  }
+
+  /**
+   * Verificar si el usuario puede controlar Spotify
+   */
+  canControl(role: SpotifyUserRole): boolean {
+    return role === 'pro';
+  }
+
+  /**
+   * Obtener mensaje CTA para FREE
+   */
+  getFreeCTA(): string {
+    return 'Conecta Spotify Premium para escuchar la música del entrenamiento';
+  }
+
+  /**
+   * Obtener mensaje de upgrade para controles
+   */
+  getUpgradeCTA(): string {
+    return 'Cambia a PRO para controlar la música';
+  }
+}
+
+// Exportar instancia única
+export const spotify = new SpotifyService();
+export default spotify;

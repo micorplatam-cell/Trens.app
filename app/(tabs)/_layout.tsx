@@ -1,6 +1,6 @@
 import { Tabs } from 'expo-router';
 import { View } from 'react-native';
-import { Home, User, Camera, Dumbbell, Calendar } from 'lucide-react-native';
+import { Home, User, Crosshair, Dumbbell, Calendar } from 'lucide-react-native';
 
 export default function TabsLayout() {
   return (
@@ -47,7 +47,7 @@ export default function TabsLayout() {
                 elevation: focused ? 8 : 0,
               }}
             >
-              <Camera color="#FFFFFF" size={32} />
+              <Crosshair color="#FFFFFF" size={32} />
             </View>
           ),
         }}

@@ -7,10 +7,13 @@ import {
   Image,
   RefreshControl,
   ActivityIndicator,
+  Modal,
+  Dimensions,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Grid, Lock, Plus, Play, Eye, EyeOff, Edit2 } from 'lucide-react-native';
+import { Grid, Lock, Plus, Play, Eye, EyeOff, Edit2, X, Music } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
+import { VideoView, useVideoPlayer } from 'expo-video';
 import { supabase } from '../../../lib/supabase';
 import { useAuth } from '../../_layout';
 import { useHank } from '../../../context/HankContext';
@@ -51,10 +54,38 @@ interface Video {
   id: string;
   title: string;
   thumbnail_url: string;
+  video_url?: string;
   is_public: boolean;
   views?: number;
   created_at: string;
+  source: 'asset' | 'pro'; // Origen del video
+  exercise_name?: string;
+  spotify?: {
+    enabled: boolean;
+    trackName?: string;
+    artist?: string;
+  };
 }
+
+// ============================================================================
+// VIDEO THUMBNAIL - Muestra el primer frame del video
+// ============================================================================
+const VideoThumbnail = ({ videoUrl, size }: { videoUrl: string; size: number }) => {
+  const player = useVideoPlayer(videoUrl, (p) => {
+    p.loop = false;
+    p.muted = true;
+    p.pause();
+  });
+
+  return (
+    <VideoView
+      player={player}
+      style={{ width: size, height: size * (16 / 9) }}
+      contentFit="cover"
+      nativeControls={false}
+    />
+  );
+};
 
 export default function AdnScreen() {
   const { user } = useAuth();
@@ -63,6 +94,28 @@ export default function AdnScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'legacy' | 'vault'>('legacy');
   const [showAddModal, setShowAddModal] = useState(false);
+
+  // Video viewer state
+  const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
+  const [videoViewerVisible, setVideoViewerVisible] = useState(false);
+  const { width: screenWidth } = Dimensions.get('window');
+  const videoTileSize = screenWidth / 3;
+
+  // Video player para el viewer
+  const videoSource = selectedVideo?.video_url || '';
+  const videoPlayer = useVideoPlayer(videoSource, (player) => {
+    player.loop = true;
+    player.muted = false;
+  });
+
+  // Control de reproducción
+  useEffect(() => {
+    if (videoViewerVisible && videoPlayer) {
+      videoPlayer.play();
+    } else if (videoPlayer) {
+      videoPlayer.pause();
+    }
+  }, [videoViewerVisible, videoPlayer]);
 
   // Data states
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -132,24 +185,50 @@ export default function AdnScreen() {
 
       setFollowersCount(count || 0);
 
-      // Fetch videos from user_assets
-      const { data: videosData } = await supabase
+      // Fetch videos from user_assets (legacy)
+      const { data: assetsData } = await supabase
         .from('user_assets')
         .select('*')
         .eq('user_id', user.id)
-        .eq('deleted_at', null)
+        .is('deleted_at', null)
+        .order('created_at', { ascending: false });
+
+      // Fetch videos from pro_videos (nuevos videos PRO)
+      const { data: proVideosData } = await supabase
+        .from('pro_videos')
+        .select('*')
+        .eq('user_id', user.id)
         .order('created_at', { ascending: false });
 
       // Map user_assets to videos format
-      const mappedVideos: Video[] = (videosData || []).map((asset: any) => ({
+      const assetVideos: Video[] = (assetsData || []).map((asset: any) => ({
         id: asset.id,
         title: asset.name || 'Sin título',
         thumbnail_url: asset.thumbnail_url || asset.uri,
         is_public: asset.is_public || false,
         created_at: asset.created_at,
+        source: 'asset' as const,
       }));
 
-      setVideos(mappedVideos);
+      // Map pro_videos to videos format
+      const proVideos: Video[] = (proVideosData || []).map((video: any) => ({
+        id: video.id,
+        title: video.exercise_name || video.free_text || 'Video PRO',
+        thumbnail_url: video.thumbnail_url || video.video_url,
+        video_url: video.video_url,
+        is_public: video.is_public,
+        created_at: video.created_at,
+        source: 'pro' as const,
+        exercise_name: video.exercise_name,
+        spotify: video.spotify,
+      }));
+
+      // Combinar y ordenar por fecha
+      const allVideos = [...assetVideos, ...proVideos].sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+
+      setVideos(allVideos);
     } catch (err) {
       console.error('Error fetching ADN data:', err);
     } finally {
@@ -394,18 +473,42 @@ export default function AdnScreen() {
                   displayVideos.map((vid) => (
                     <TouchableOpacity
                       key={vid.id}
-                      className="w-1/3 aspect-[9/16] bg-zinc-900 relative"
-                      onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
+                      className="w-1/3 aspect-[9/16] bg-zinc-900 relative overflow-hidden"
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        if (vid.video_url) {
+                          setSelectedVideo(vid);
+                          setVideoViewerVisible(true);
+                        }
+                      }}
                     >
-                      <Image
-                        source={{ uri: vid.thumbnail_url }}
-                        className="w-full h-full opacity-80"
-                        resizeMode="cover"
-                      />
+                      {/* Video Thumbnail - muestra primer frame del video */}
+                      {vid.video_url ? (
+                        <View className="w-full h-full opacity-80">
+                          <VideoThumbnail videoUrl={vid.video_url} size={videoTileSize} />
+                        </View>
+                      ) : (
+                        <Image
+                          source={{ uri: vid.thumbnail_url }}
+                          className="w-full h-full opacity-80"
+                          resizeMode="cover"
+                        />
+                      )}
+                      {/* Overlay con icono play */}
+                      <View className="absolute inset-0 items-center justify-center bg-black/20">
+                        <View className="w-8 h-8 rounded-full bg-black/50 items-center justify-center">
+                          <Play size={14} color="#fff" fill="#fff" />
+                        </View>
+                      </View>
                       <View className="absolute bottom-1 left-1 flex-row items-center gap-1">
                         <Play size={8} color="#fff" fill="#fff" />
                         <Text className="text-[9px] font-bold text-white">{vid.views || 0}</Text>
                       </View>
+                      {vid.spotify?.enabled && (
+                        <View className="absolute top-1 right-1">
+                          <Music size={10} color="#1DB954" />
+                        </View>
+                      )}
                     </TouchableOpacity>
                   ))
                 )}
@@ -492,6 +595,75 @@ export default function AdnScreen() {
         onClose={() => setShowAddModal(false)}
         onSave={handleAddRecord}
       />
+
+      {/* Modal Video Viewer */}
+      <Modal
+        visible={videoViewerVisible}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => {
+          setVideoViewerVisible(false);
+          setSelectedVideo(null);
+        }}
+      >
+        <View className="flex-1 bg-black">
+          {/* Header */}
+          <View className="absolute top-0 left-0 right-0 z-10 pt-14 px-4 pb-4 bg-gradient-to-b from-black/80 to-transparent">
+            <View className="flex-row items-center justify-between">
+              <TouchableOpacity
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setVideoViewerVisible(false);
+                  setSelectedVideo(null);
+                }}
+                className="w-10 h-10 rounded-full bg-zinc-900/80 items-center justify-center"
+              >
+                <X size={20} color="#fff" />
+              </TouchableOpacity>
+              <View className="flex-1 mx-4">
+                <Text className="text-white font-bold text-sm text-center" numberOfLines={1}>
+                  {selectedVideo?.title || 'Video'}
+                </Text>
+                {selectedVideo?.exercise_name && (
+                  <Text className="text-zinc-400 text-xs text-center mt-0.5">
+                    {selectedVideo.exercise_name}
+                  </Text>
+                )}
+              </View>
+              <View className="w-10" />
+            </View>
+          </View>
+
+          {/* Video Player */}
+          <View className="flex-1 items-center justify-center">
+            {selectedVideo?.video_url && (
+              <VideoView
+                player={videoPlayer}
+                style={{ width: screenWidth, height: screenWidth * (16 / 9) }}
+                contentFit="contain"
+                nativeControls={true}
+              />
+            )}
+          </View>
+
+          {/* Footer con info de Spotify */}
+          {selectedVideo?.spotify?.enabled && (
+            <View className="absolute bottom-0 left-0 right-0 pb-10 px-4 pt-4 bg-gradient-to-t from-black/80 to-transparent">
+              <View className="flex-row items-center gap-2 bg-zinc-900/80 rounded-lg px-3 py-2">
+                <Music size={16} color="#1DB954" />
+                <View className="flex-1">
+                  <Text className="text-white text-xs font-bold" numberOfLines={1}>
+                    {selectedVideo.spotify.trackName}
+                  </Text>
+                  <Text className="text-zinc-400 text-[10px]" numberOfLines={1}>
+                    {selectedVideo.spotify.artist}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          )}
+        </View>
+      </Modal>
     </View>
   );
 }
