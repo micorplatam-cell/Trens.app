@@ -477,8 +477,7 @@ export default function GymScreen() {
         setTacticalContext(exerciseId, exerciseName);
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeExerciseIndex, exercises, isFocused, activeAlternatives, viewMode]);
+  }, [activeExerciseIndex, exercises, isFocused, activeAlternatives, viewMode, setTacticalContext]);
 
   // Modal drag state
   const translateYHistorial = useSharedValue(0);
