@@ -183,22 +183,37 @@ PLANK (Plancha)
 function generateSystemPrompt(context: GeminiContext): string {
   // Helper para formatear series en el prompt
   const formatSeriesForPrompt = (liquidData: Record<string, unknown>): string => {
-    const series = (liquidData?.custom_series as Array<{ id: string; reps: number; weight: number; type: string }> | undefined) || [];
-    return series.map((s, i) => `  Serie ${i + 1}: ${s.reps} reps × ${s.weight}kg (${s.type})`).join('\n');
+    const series =
+      (liquidData?.custom_series as
+        | Array<{ id: string; reps: number; weight: number; type: string }>
+        | undefined) || [];
+    return series
+      .map((s, i) => `  Serie ${i + 1}: ${s.reps} reps × ${s.weight}kg (${s.type})`)
+      .join('\n');
   };
 
   // Determinar cómo llamar al usuario según su nivel
   const getUserTitle = (level: string): string => {
     switch (level) {
-      case 'BEGINNER': return 'este atleta en formación';
-      case 'INTERMEDIATE': return 'este atleta';
-      case 'ADVANCED': return 'este atleta avanzado';
-      case 'SAVAGE': return 'esta bestia';
-      default: return 'este atleta';
+      case 'BEGINNER':
+        return 'este atleta en formación';
+      case 'INTERMEDIATE':
+        return 'este atleta';
+      case 'ADVANCED':
+        return 'este atleta avanzado';
+      case 'SAVAGE':
+        return 'esta bestia';
+      default:
+        return 'este atleta';
     }
   };
 
-  return `Eres HANK, el coach de alto rendimiento de TRENS.
+  return `🚨 INSTRUCCIÓN CRÍTICA DE FUNCTION CALLING 🚨
+Cuando necesites ejecutar una acción o consultar datos, DEBES usar el mecanismo nativo de function calling de esta API.
+NUNCA escribas código como "print(default_api.HERRAMIENTA())" - eso es INCORRECTO.
+Simplemente invoca la función directamente usando el sistema de function calling.
+
+Eres HANK, el coach de alto rendimiento de TRENS.
 
 🧠 TU ESENCIA:
 No eres un chatbot genérico. Eres el tipo que lleva 15 años en el gym, que ha entrenado atletas de todos los niveles, y que sabe que los resultados vienen de la consistencia y la técnica, no de los atajos.
@@ -372,6 +387,29 @@ PARA PREGUNTAS (sin modificar):
 - "¿Cuántas series?" → Responde directo: "Tienes X series"
 - "¿Cuánto peso?" → Responde directo con los datos del contexto
 
+🚨🚨🚨 OBLIGATORIO PARA CONSULTAR RUTINA DE HOY 🚨🚨🚨
+Cuando el usuario pregunte sobre qué le toca entrenar hoy, qué ejercicios tiene hoy, cuál es su rutina de hoy, o cualquier variación similar:
+- SIEMPRE debes llamar a GYM_GET_TODAY_ROUTINE
+- NUNCA respondas de memoria o del historial de chat
+- La rutina puede haber cambiado desde la última vez que preguntó
+- El día de entrenamiento avanza automáticamente cada día
+
+Triggers que OBLIGAN a llamar GYM_GET_TODAY_ROUTINE:
+- "qué me toca hoy" → GYM_GET_TODAY_ROUTINE(trainingDay=0)
+- "qué toca entrenar hoy" → GYM_GET_TODAY_ROUTINE(trainingDay=0)
+- "qué rutina tengo hoy" → GYM_GET_TODAY_ROUTINE(trainingDay=0)
+- "qué entreno hoy" → GYM_GET_TODAY_ROUTINE(trainingDay=0)
+- "cuál es mi rutina" → GYM_GET_TODAY_ROUTINE(trainingDay=0)
+- "ejercicios de hoy" → GYM_GET_TODAY_ROUTINE(trainingDay=0)
+(Nota: trainingDay=0 es ignorado, la herramienta calcula el día real internamente)
+
+PARA VER RUTINA COMPLETA (usa GYM_LIST_EXERCISES):
+- "mi rutina completa" → GYM_LIST_EXERCISES() (todos los ejercicios)
+- "todos mis ejercicios" → GYM_LIST_EXERCISES()
+- "qué ejercicios tengo en total" → GYM_LIST_EXERCISES()
+
+⚠️ NUNCA menciones "Día 0", "Día 1", etc. al usuario. Son índices técnicos internos.
+
 EJEMPLOS DE COMANDOS CON HERRAMIENTAS:
 - "cambia peso última serie a 80" → ASSET_UPDATE_FIELD(assetName="${context.activeAsset?.name || 'N/A'}", fieldPath="custom_series.${context.activeAsset?.liquidData?.custom_series ? (context.activeAsset.liquidData.custom_series as unknown[]).length - 1 : 0}.weight", newValue=80)
 - "pon 12 reps en la primera" → ASSET_UPDATE_FIELD(assetName="${context.activeAsset?.name || 'N/A'}", fieldPath="custom_series.0.reps", newValue=12)
@@ -409,7 +447,14 @@ FRASES CARACTERÍSTICAS DE HANK:
 - "Día de pierna y estás aquí. Respeto. 🦵"
 - "¿Sustituir sentadilla? OK, pero dame una razón real."
 
-⛔ PROHIBIDO: Decir "Listo" o "Hecho" sin haber ejecutado una herramienta (function call) primero.`;
+🚨🚨🚨 PROHIBICIONES ABSOLUTAS 🚨🚨🚨:
+1. NUNCA escribas código en tu respuesta - NO "print()", NO "default_api.", NO "function()", NO JSON, NO Python, NO JavaScript
+2. Para ejecutar herramientas, USA EL MECANISMO NATIVO DE FUNCTION CALLING - no escribas el código de la llamada
+3. NUNCA menciones "Día 0", "Día 1", "Día 2", etc. Los índices de días son técnicos internos
+4. NUNCA digas "Listo" o "Hecho" sin haber ejecutado una herramienta (function call) primero
+5. NUNCA respondas solo con el conteo de ejercicios. SIEMPRE lista los nombres
+6. Si quieres obtener datos, INVOCA LA FUNCIÓN - no escribas cómo llamarla
+7. NUNCA respondas sobre la rutina de hoy usando información del historial de chat - SIEMPRE llama GYM_GET_TODAY_ROUTINE porque el día puede haber cambiado`;
 }
 
 // ============================================================================
@@ -473,7 +518,7 @@ export async function callGemini(
     ],
     toolConfig: {
       functionCallingConfig: {
-        mode: 'AUTO', // Gemini decide cuándo usar herramientas
+        mode: 'AUTO', // Gemini decide cuándo usar herramientas, fallback parsea código si falla
       },
     },
     generationConfig: {
@@ -528,6 +573,62 @@ export async function callGemini(
         });
       } else if (part.text) {
         textMessage += part.text;
+      }
+    }
+
+    // 🛡️ FALLBACK: Detectar si Gemini escribió código en lugar de usar function calling
+    // Esto pasa a veces cuando Gemini confunde el formato
+    if ((textMessage && textMessage.includes('default_api.')) || textMessage.includes('print(')) {
+      console.warn('⚠️ Gemini escribió código en lugar de function call, parseando...');
+
+      // Intentar extraer el nombre de la función y parámetros del código
+      const codeMatch = textMessage.match(/(?:print\()?default_api\.(\w+)\(([^)]*)\)/);
+      if (codeMatch) {
+        const [, funcName, paramsStr] = codeMatch;
+
+        // Parsear parámetros simples (trainingDay=0, etc.)
+        const params: Record<string, unknown> = {};
+        const paramMatches = paramsStr.matchAll(/(\w+)=([^,\s)]+)/g);
+        for (const match of paramMatches) {
+          const [, key, value] = match;
+          // Convertir valores
+          if (value === 'true') params[key] = true;
+          else if (value === 'false') params[key] = false;
+          else if (/^\d+$/.test(value)) params[key] = parseInt(value);
+          else if (/^\d+\.\d+$/.test(value)) params[key] = parseFloat(value);
+          else params[key] = value.replace(/['"]/g, '');
+        }
+
+        // Agregar como tool call real
+        toolCalls.push({
+          tool: funcName as HankToolName,
+          parameters: params,
+        });
+
+        // Limpiar el mensaje de código
+        textMessage = '';
+        console.warn('✅ Convertido a function call:', funcName, params);
+      }
+    }
+
+    // 🛡️ FALLBACK 2: Detectar patrón [EJECUTANDO TOOL_NAME] en el texto
+    // Gemini a veces escribe esto en lugar de hacer function call real
+    if (textMessage && textMessage.includes('[EJECUTANDO')) {
+      console.warn('⚠️ Gemini escribió [EJECUTANDO...] en lugar de function call, parseando...');
+
+      const execMatch = textMessage.match(/\[EJECUTANDO\s+(\w+)\]/i);
+      if (execMatch) {
+        const [, funcName] = execMatch;
+
+        // Agregar como tool call real sin parámetros
+        toolCalls.push({
+          tool: funcName as HankToolName,
+          parameters: {},
+        });
+
+        // Limpiar el mensaje del patrón [EJECUTANDO...]
+        textMessage = textMessage.replace(/\[EJECUTANDO\s+\w+\]\s*/gi, '').trim();
+        console.warn('✅ Convertido a function call:', funcName);
       }
     }
 

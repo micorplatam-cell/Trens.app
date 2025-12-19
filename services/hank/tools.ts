@@ -424,6 +424,111 @@ export async function gymReplaceExercise(
 }
 
 // ============================================================================
+// GYM TOOL: Obtener Rutina del Día (nombre y ejercicios)
+// ============================================================================
+export async function gymGetTodayRoutine(
+  userId: string,
+  _trainingDayHint: number // Este hint puede estar desactualizado, calculamos el real
+): Promise<HankToolResult> {
+  try {
+    // 1. Obtener datos del perfil con lógica de día actual
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select(
+        'training_routine_names, training_frequency, training_current_day, training_last_access'
+      )
+      .eq('id', userId)
+      .single();
+
+    if (profileError) {
+      console.warn('gymGetTodayRoutine: Error obteniendo perfil:', profileError.message);
+    }
+
+    // Calcular el día de entrenamiento correcto (misma lógica que GYM y PLAN)
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayISO = today.toISOString();
+
+    let trainingDay = profile?.training_current_day ?? 0;
+    const frequency = profile?.training_frequency ?? 3;
+
+    if (profile?.training_last_access) {
+      const lastAccess = new Date(profile.training_last_access);
+      lastAccess.setHours(0, 0, 0, 0);
+      const lastAccessISO = lastAccess.toISOString();
+
+      // Si han pasado uno o más días, avanzar al siguiente día
+      if (todayISO > lastAccessISO) {
+        trainingDay = (profile.training_current_day || 0) + 1;
+        if (trainingDay >= frequency) {
+          trainingDay = 0; // Reiniciar ciclo
+        }
+
+        // Actualizar en Supabase
+        await supabase
+          .from('profiles')
+          .update({
+            training_last_access: todayISO,
+            training_current_day: trainingDay,
+          })
+          .eq('id', userId);
+
+        console.warn(`🏋️ HANK: Día avanzado automáticamente a ${trainingDay}`);
+      }
+    }
+
+    const routineNames = (profile?.training_routine_names || {}) as Record<string, string>;
+    const routineName = routineNames[String(trainingDay)] || null;
+
+    // 2. Obtener ejercicios del día
+    const { data: exercises, error: exercisesError } = await supabase
+      .from('user_assets')
+      .select('name, metadata')
+      .eq('user_id', userId)
+      .eq('asset_type', 'gym_exercise')
+      .is('deleted_at', null)
+      .contains('training_days', [trainingDay])
+      .order('order', { ascending: true });
+
+    if (exercisesError) throw exercisesError;
+
+    const exerciseCount = exercises?.length || 0;
+    const exerciseNames = (exercises || []).map((ex) => ex.name);
+
+    // 3. Construir mensaje
+    let message = '';
+    if (routineName) {
+      message = `💪 Hoy toca: ${routineName}\n`;
+    } else {
+      message = `💪 Hoy es día de entrenamiento\n`;
+    }
+
+    if (exerciseCount > 0) {
+      message += `\n🏋️ ${exerciseCount} ejercicios:\n`;
+      exerciseNames.forEach((name, i) => {
+        message += `${i + 1}. ${name}\n`;
+      });
+    } else {
+      message += '\nNo tienes ejercicios programados. ¿Quieres que te agregue algunos?';
+    }
+
+    return {
+      success: true,
+      message: message.trim(),
+      data: {
+        routineName,
+        trainingDay,
+        frequency,
+        exercises: exerciseNames,
+      },
+    };
+  } catch (error) {
+    console.error('gymGetTodayRoutine error:', error);
+    return { success: false, message: 'Error al obtener la rutina del día.' };
+  }
+}
+
+// ============================================================================
 // GYM TOOL: Listar Ejercicios
 // ============================================================================
 export async function gymListExercises(
@@ -447,23 +552,46 @@ export async function gymListExercises(
       exercises = exercises.filter((ex) => (ex.training_days || []).includes(trainingDay));
     }
 
-    const summary = exercises.map((ex) => ({
-      id: ex.id,
-      name: ex.name,
-      days: ex.training_days,
-      series: (ex.metadata as Record<string, unknown>)?.custom_series
-        ? ((ex.metadata as Record<string, unknown>).custom_series as unknown[]).length
-        : 0,
-      category: (ex.metadata as Record<string, unknown>)?.category,
-    }));
+    if (exercises.length === 0) {
+      return {
+        success: true,
+        message:
+          trainingDay !== undefined
+            ? 'No tienes ejercicios programados para hoy. ¿Quieres que te agregue algunos?'
+            : 'No tienes ejercicios en tu rutina todavía.',
+        data: { exercises: [] },
+      };
+    }
+
+    // Crear lista legible de ejercicios con sus series
+    const exerciseList = exercises.map((ex, index) => {
+      const series = (ex.metadata as Record<string, unknown>)?.custom_series as
+        | Array<{ reps: number; weight: number; type: string }>
+        | undefined;
+      const seriesCount = series?.length || 0;
+      const seriesInfo =
+        series && series.length > 0
+          ? series.map((s) => `${s.reps}×${s.weight}kg`).join(', ')
+          : 'sin series';
+      return `${index + 1}. ${ex.name} (${seriesCount} series: ${seriesInfo})`;
+    });
+
+    const message =
+      trainingDay !== undefined
+        ? `🏋️ Hoy te toca:\n${exerciseList.join('\n')}`
+        : `📋 Tu rutina completa:\n${exerciseList.join('\n')}`;
 
     return {
       success: true,
-      message:
-        trainingDay !== undefined
-          ? `📋 Día ${trainingDay + 1}: ${exercises.length} ejercicios`
-          : `📋 Total: ${exercises.length} ejercicios`,
-      data: { exercises: summary },
+      message,
+      data: {
+        exercises: exercises.map((ex) => ({
+          name: ex.name,
+          series: (ex.metadata as Record<string, unknown>)?.custom_series
+            ? ((ex.metadata as Record<string, unknown>).custom_series as unknown[]).length
+            : 0,
+        })),
+      },
     };
   } catch (error) {
     console.error('gymListExercises error:', error);
@@ -1489,22 +1617,34 @@ export async function planUpdateMealTime(
 ): Promise<HankToolResult> {
   try {
     let mealId = options.mealId;
+    let mealName = 'comida';
 
     if (!mealId && options.position) {
       const { data: meals } = await supabase
         .from('meals')
-        .select('id')
+        .select('id, name')
         .eq('user_id', userId)
         .order('time', { ascending: true });
 
       if (meals && meals.length > 0) {
-        if (options.position === 'first') mealId = meals[0].id;
-        else if (options.position === 'last') mealId = meals[meals.length - 1].id;
-        else {
+        if (options.position === 'first') {
+          mealId = meals[0].id;
+          mealName = meals[0].name || 'desayuno';
+        } else if (options.position === 'last') {
+          mealId = meals[meals.length - 1].id;
+          mealName = meals[meals.length - 1].name || 'cena';
+        } else {
           const idx = parseInt(options.position, 10) - 1;
-          if (meals[idx]) mealId = meals[idx].id;
+          if (meals[idx]) {
+            mealId = meals[idx].id;
+            mealName = meals[idx].name || 'comida';
+          }
         }
       }
+    } else if (mealId) {
+      // Obtener nombre si tenemos mealId directamente
+      const { data: meal } = await supabase.from('meals').select('name').eq('id', mealId).single();
+      if (meal?.name) mealName = meal.name;
     }
 
     if (!mealId) {
@@ -1515,9 +1655,15 @@ export async function planUpdateMealTime(
 
     if (error) throw error;
 
+    // Convertir a formato AM/PM
+    const [hours, mins] = newTime.split(':').map(Number);
+    const period = hours >= 12 ? 'PM' : 'AM';
+    const hours12 = hours % 12 || 12;
+    const timeFormatted = `${hours12}:${mins.toString().padStart(2, '0')} ${period}`;
+
     return {
       success: true,
-      message: `✅ Hora de comida actualizada a ${newTime}.`,
+      message: `✅ Hora de ${mealName.toLowerCase()} actualizada a ${timeFormatted}.`,
       affectedRecords: 1,
     };
   } catch (error) {
@@ -1571,6 +1717,310 @@ export async function planUpdateIngredients(
   } catch (error) {
     console.error('planUpdateIngredients error:', error);
     return { success: false, message: 'Error al actualizar ingredientes.' };
+  }
+}
+
+// ============================================================================
+// OMNISCIENT TOOL: Obtener contexto completo del usuario
+// ============================================================================
+export async function getFullUserContext(userId: string): Promise<HankToolResult> {
+  try {
+    // 1. Perfil del usuario
+    const { data: profile } = await supabase.from('profiles').select('*').eq('id', userId).single();
+
+    // 2. Todas las comidas con todas sus opciones
+    const { data: meals } = await supabase
+      .from('meals')
+      .select(
+        `
+        id, time, selected_option,
+        meal_options (
+          id, name, option_index,
+          meal_ingredients (id, name, quantity, portion)
+        )
+      `
+      )
+      .eq('user_id', userId)
+      .order('time', { ascending: true });
+
+    // 3. Stack de suplementos
+    const { data: stack } = await supabase
+      .from('supplement_stack')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('is_active', true);
+
+    // 4. Ejercicios del usuario
+    const { data: exercises } = await supabase
+      .from('user_assets')
+      .select('id, name, training_days, metadata')
+      .eq('user_id', userId)
+      .eq('asset_type', 'gym_exercise')
+      .is('deleted_at', null);
+
+    // 5. Nombres de rutinas
+    const routineNames = profile?.training_routine_names || {};
+    const currentDay = profile?.training_current_day || 0;
+    const frequency = profile?.training_frequency || 3;
+
+    // Formatear resumen
+    const formatTime = (t: string) => {
+      const [h, m] = t.split(':').map(Number);
+      const period = h >= 12 ? 'PM' : 'AM';
+      const h12 = h % 12 || 12;
+      return `${h12}:${m.toString().padStart(2, '0')} ${period}`;
+    };
+
+    // Comidas con todas sus opciones
+    const mealsContext =
+      meals
+        ?.map((meal, idx) => {
+          const options = (meal.meal_options as any[]) || [];
+          const optionsText = options
+            .map((opt, optIdx) => {
+              const ings =
+                opt.meal_ingredients?.map((i: any) => `${i.name} (${i.quantity})`).join(', ') ||
+                'Sin ingredientes';
+              return `  Opción ${optIdx + 1}: ${ings}`;
+            })
+            .join('\n');
+          return `COMIDA ${idx + 1} (${formatTime(meal.time)}):\n${optionsText || '  Sin opciones'}`;
+        })
+        .join('\n\n') || 'Sin comidas';
+
+    // Ejercicios por día
+    const exercisesByDay: Record<number, string[]> = {};
+    exercises?.forEach((ex) => {
+      const days = ex.training_days || [];
+      days.forEach((day: number) => {
+        if (!exercisesByDay[day]) exercisesByDay[day] = [];
+        exercisesByDay[day].push(ex.name);
+      });
+    });
+
+    const routinesContext = Object.entries(routineNames)
+      .map(([day, name]) => {
+        const exs = exercisesByDay[parseInt(day)] || [];
+        return `DÍA ${parseInt(day) + 1} - ${name}: ${exs.join(', ') || 'Sin ejercicios'}`;
+      })
+      .join('\n');
+
+    // Stack
+    const stackContext = stack?.map((s) => `${s.name} (${s.dose})`).join(', ') || 'Sin suplementos';
+
+    const fullContext = `
+📊 CONTEXTO COMPLETO DEL USUARIO:
+
+🏋️ ENTRENAMIENTO:
+- Día actual: ${currentDay + 1} de ${frequency}
+- Rutina de hoy: ${routineNames[currentDay] || 'Sin nombre'}
+${routinesContext}
+
+🍽️ COMIDAS:
+${mealsContext}
+
+💊 STACK:
+${stackContext}
+`.trim();
+
+    return {
+      success: true,
+      message: fullContext,
+      data: { profile, meals, stack, exercises, routineNames, currentDay },
+    };
+  } catch (error) {
+    console.error('getFullUserContext error:', error);
+    return { success: false, message: 'Error al obtener contexto.' };
+  }
+}
+
+/**
+ * Obtiene detalles de una comida específica con TODAS sus opciones
+ */
+export async function planGetMealDetails(
+  userId: string,
+  mealIdentifier: string | number // Puede ser hora (ej: "20:00", "8pm", "cena") o índice (1, 2, 3...)
+): Promise<HankToolResult> {
+  try {
+    // Primero obtener todas las comidas
+    const { data: meals, error } = await supabase
+      .from('meals')
+      .select(
+        `
+        id, time, selected_option,
+        meal_options (
+          id, name, option_index,
+          meal_ingredients (id, name, quantity, portion)
+        )
+      `
+      )
+      .eq('user_id', userId)
+      .order('time', { ascending: true });
+
+    if (error) throw error;
+    if (!meals || meals.length === 0) {
+      return { success: false, message: 'No tienes comidas configuradas.' };
+    }
+
+    // Encontrar la comida
+    let targetMeal: any = null;
+    let mealIndex = 0;
+
+    // Si es número, usar como índice
+    if (typeof mealIdentifier === 'number') {
+      const idx = mealIdentifier - 1; // Convertir a 0-based
+      if (idx >= 0 && idx < meals.length) {
+        targetMeal = meals[idx];
+        mealIndex = idx;
+      }
+    } else {
+      const identifier = mealIdentifier.toLowerCase();
+
+      // Mapear palabras comunes a horas aproximadas
+      const mealTimeMap: Record<string, number[]> = {
+        desayuno: [5, 6, 7, 8, 9, 10],
+        almuerzo: [11, 12, 13, 14],
+        comida: [11, 12, 13, 14, 15],
+        merienda: [15, 16, 17, 18],
+        cena: [18, 19, 20, 21, 22, 23],
+        snack: [10, 11, 15, 16, 17],
+      };
+
+      // Palabras especiales que siempre funcionan
+      if (identifier.includes('última') || identifier.includes('ultima')) {
+        targetMeal = meals[meals.length - 1];
+        mealIndex = meals.length - 1;
+      } else if (identifier.includes('primera') || identifier.includes('primer')) {
+        targetMeal = meals[0];
+        mealIndex = 0;
+      } else if (
+        identifier.includes('segunda') ||
+        identifier.includes('segundo') ||
+        identifier.includes('2')
+      ) {
+        if (meals.length >= 2) {
+          targetMeal = meals[1];
+          mealIndex = 1;
+        }
+      } else if (
+        identifier.includes('tercera') ||
+        identifier.includes('tercer') ||
+        identifier.includes('3')
+      ) {
+        if (meals.length >= 3) {
+          targetMeal = meals[2];
+          mealIndex = 2;
+        }
+      } else {
+        // Buscar por palabra clave de tiempo (desayuno, cena, etc.)
+        for (const [keyword, hours] of Object.entries(mealTimeMap)) {
+          if (identifier.includes(keyword)) {
+            // Buscar comida en esas horas
+            for (let i = 0; i < meals.length; i++) {
+              const mealHour = parseInt(meals[i].time.split(':')[0]);
+              if (hours.includes(mealHour)) {
+                targetMeal = meals[i];
+                mealIndex = i;
+                break;
+              }
+            }
+
+            // Si no encontró en las horas esperadas, usar fallback inteligente
+            if (!targetMeal) {
+              if (keyword === 'cena') {
+                // "cena" = última comida del día
+                targetMeal = meals[meals.length - 1];
+                mealIndex = meals.length - 1;
+              } else if (keyword === 'desayuno') {
+                // "desayuno" = primera comida del día
+                targetMeal = meals[0];
+                mealIndex = 0;
+              } else if (keyword === 'almuerzo' || keyword === 'comida') {
+                // "almuerzo/comida" = segunda comida si hay más de una
+                if (meals.length >= 2) {
+                  targetMeal = meals[1];
+                  mealIndex = 1;
+                } else {
+                  targetMeal = meals[0];
+                  mealIndex = 0;
+                }
+              }
+            }
+            break;
+          }
+        }
+      }
+
+      // Si no encontró por keyword, buscar por hora exacta
+      if (!targetMeal && identifier.includes(':')) {
+        const searchTime = identifier;
+        targetMeal = meals.find((m, i) => {
+          if (m.time.startsWith(searchTime)) {
+            mealIndex = i;
+            return true;
+          }
+          return false;
+        });
+      }
+
+      // Último intento: buscar número en el texto
+      if (!targetMeal) {
+        const numMatch = identifier.match(/(\d+)/);
+        if (numMatch) {
+          const num = parseInt(numMatch[1]);
+          if (num >= 1 && num <= meals.length) {
+            targetMeal = meals[num - 1];
+            mealIndex = num - 1;
+          }
+        }
+      }
+    }
+
+    if (!targetMeal) {
+      // Listar las comidas disponibles
+      const available = meals
+        .map((m, i) => {
+          const [h] = m.time.split(':').map(Number);
+          const period = h >= 12 ? 'PM' : 'AM';
+          const h12 = h % 12 || 12;
+          return `${i + 1}. ${h12}:00 ${period}`;
+        })
+        .join('\n');
+      return {
+        success: false,
+        message: `No encontré esa comida. Tus comidas son:\n${available}\n\nPuedes decir "la última", "cena", "comida 3", etc.`,
+      };
+    }
+
+    // Formatear la respuesta con todas las opciones
+    const formatTime = (t: string) => {
+      const [h, m] = t.split(':').map(Number);
+      const period = h >= 12 ? 'PM' : 'AM';
+      const h12 = h % 12 || 12;
+      return `${h12}:${m.toString().padStart(2, '0')} ${period}`;
+    };
+
+    const options = (targetMeal.meal_options as any[]) || [];
+    const selectedOption = targetMeal.selected_option || 0;
+
+    const optionsText = options
+      .map((opt, idx) => {
+        const isSelected = idx === selectedOption ? ' ✓ (SELECCIONADA)' : '';
+        const ings =
+          opt.meal_ingredients?.map((i: any) => `    • ${i.name}: ${i.quantity}`).join('\n') ||
+          '    Sin ingredientes';
+        return `📌 OPCIÓN ${idx + 1}${isSelected}:\n${ings}`;
+      })
+      .join('\n\n');
+
+    return {
+      success: true,
+      message: `🍽️ COMIDA ${mealIndex + 1} (${formatTime(targetMeal.time)}):\n\n${optionsText || 'Sin opciones configuradas'}`,
+      data: { meal: targetMeal, mealIndex },
+    };
+  } catch (error) {
+    console.error('planGetMealDetails error:', error);
+    return { success: false, message: 'Error al obtener detalles de la comida.' };
   }
 }
 
@@ -1718,6 +2168,58 @@ export async function planRemoveSupplement(userId: string, name: string): Promis
 }
 
 /**
+ * Actualiza la hora de un suplemento
+ */
+export async function planUpdateSupplementTime(
+  userId: string,
+  name: string,
+  newTime: string
+): Promise<HankToolResult> {
+  try {
+    // Buscar el suplemento por nombre
+    const { data: supplements } = await supabase
+      .from('supplement_stack')
+      .select('id, name')
+      .eq('user_id', userId)
+      .ilike('name', `%${name}%`)
+      .eq('is_active', true);
+
+    if (!supplements || supplements.length === 0) {
+      return { success: false, message: `No encontré "${name}" en tu stack.` };
+    }
+
+    const supplement = supplements[0];
+
+    // Si es PRE o POST workout, no se puede poner hora fija
+    const { error } = await supabase
+      .from('supplement_stack')
+      .update({
+        time: newTime,
+        is_pre_workout: false,
+        is_post_workout: false,
+      })
+      .eq('id', supplement.id);
+
+    if (error) throw error;
+
+    // Convertir a formato AM/PM
+    const [hours, mins] = newTime.split(':').map(Number);
+    const period = hours >= 12 ? 'PM' : 'AM';
+    const hours12 = hours % 12 || 12;
+    const timeFormatted = `${hours12}:${mins.toString().padStart(2, '0')} ${period}`;
+
+    return {
+      success: true,
+      message: `✅ Hora de ${supplement.name} actualizada a ${timeFormatted}.`,
+      affectedRecords: 1,
+    };
+  } catch (error) {
+    console.error('planUpdateSupplementTime error:', error);
+    return { success: false, message: 'Error al actualizar hora del suplemento.' };
+  }
+}
+
+/**
  * Obtiene el stack de suplementos
  */
 export async function planGetStack(userId: string): Promise<HankToolResult> {
@@ -1726,7 +2228,8 @@ export async function planGetStack(userId: string): Promise<HankToolResult> {
       .from('supplement_stack')
       .select('*')
       .eq('user_id', userId)
-      .eq('is_active', true);
+      .eq('is_active', true)
+      .order('time', { ascending: true, nullsFirst: false });
 
     if (error) throw error;
 
@@ -1738,11 +2241,23 @@ export async function planGetStack(userId: string): Promise<HankToolResult> {
       };
     }
 
+    // Helper para formatear hora a AM/PM
+    const formatTime = (time24: string | null): string => {
+      if (!time24) return 'Sin hora definida';
+      const [hours, minutes] = time24.split(':').map(Number);
+      const h = hours || 0;
+      const m = minutes || 0;
+      const period = h >= 12 ? 'PM' : 'AM';
+      const hour12 = h % 12 || 12;
+      return `${hour12}:${m.toString().padStart(2, '0')} ${period}`;
+    };
+
     const stackSummary = stack
       .map((s) => {
         let timing = '';
         if (s.is_pre_workout) timing = ' 🏋️ PRE';
-        if (s.is_post_workout) timing = ' 💪 POST';
+        else if (s.is_post_workout) timing = ' 💪 POST';
+        else if (s.time) timing = ` ⏰ ${formatTime(s.time)}`;
         return `• ${s.name} - ${s.dose}${timing}`;
       })
       .join('\n');
@@ -1755,6 +2270,29 @@ export async function planGetStack(userId: string): Promise<HankToolResult> {
   } catch (error) {
     console.error('planGetStack error:', error);
     return { success: false, message: 'Error al obtener stack.' };
+  }
+}
+
+// ============================================================================
+// SYSTEM TOOL: Limpiar historial de chat de HANK
+// ============================================================================
+export async function hankClearHistory(userId: string): Promise<HankToolResult> {
+  try {
+    const { error, count } = await supabase
+      .from('hank_chat_messages')
+      .delete()
+      .eq('user_id', userId);
+
+    if (error) throw error;
+
+    return {
+      success: true,
+      message: `🧹 Historial limpiado. Empezamos de cero. ¿En qué te puedo ayudar?`,
+      data: { deletedCount: count, clearUIChat: true },
+    };
+  } catch (error) {
+    console.error('hankClearHistory error:', error);
+    return { success: false, message: 'Error al limpiar historial.' };
   }
 }
 
@@ -1827,12 +2365,27 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     requiredParams: ['oldExerciseName', 'newExerciseName'],
   },
   {
-    name: 'GYM_LIST_EXERCISES',
-    description: 'Lista los ejercicios de la rutina. Usa cuando pregunte "qué tengo", "mi rutina".',
+    name: 'GYM_GET_TODAY_ROUTINE',
+    description:
+      'Obtiene el nombre de la rutina del día (ej: "PECHO | ESPALDA") y sus ejercicios. Usa cuando pregunte "qué me toca hoy", "qué toca entrenar hoy", "qué rutina tengo hoy". SIEMPRE usa esta herramienta para preguntas sobre el entrenamiento de hoy.',
     parameters: {
       trainingDay: {
         type: 'number',
-        description: 'Día específico (omitir para todos)',
+        description: 'Índice del día de entrenamiento (0-based). Usa el día actual del contexto.',
+        required: true,
+      },
+    },
+    requiredParams: ['trainingDay'],
+  },
+  {
+    name: 'GYM_LIST_EXERCISES',
+    description:
+      'Lista TODOS los ejercicios de la rutina completa o de un día específico. Usa para "mi rutina completa", "todos mis ejercicios", "qué ejercicios tengo en total".',
+    parameters: {
+      trainingDay: {
+        type: 'number',
+        description:
+          'Índice del día de entrenamiento (0-based). Omitir para ver TODOS los ejercicios.',
         required: false,
       },
     },
@@ -2194,6 +2747,30 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     },
     requiredParams: [],
   },
+  // ============================================================================
+  // OMNISCIENT TOOLS - Para que HANK sea Dios en TRENS
+  // ============================================================================
+  {
+    name: 'GET_FULL_USER_CONTEXT',
+    description:
+      'HERRAMIENTA MAESTRA: Obtiene TODO el contexto del usuario de una vez - comidas, ejercicios, rutinas, suplementos, perfil. Usa cuando necesites información general, el usuario pregunte algo ambiguo, o para entender el contexto completo antes de actuar. SIEMPRE úsala primero si tienes dudas.',
+    parameters: {},
+    requiredParams: [],
+  },
+  {
+    name: 'PLAN_GET_MEAL_DETAILS',
+    description:
+      'Obtiene detalles de una comida específica con TODAS sus opciones/alternativas. Usa cuando pregunte sobre "la cena", "mi última comida", "comida 2", "opción 2 de la cena", "alternativa de desayuno", etc.',
+    parameters: {
+      mealIdentifier: {
+        type: 'string',
+        description:
+          'Identificador de la comida: puede ser número (1, 2, 3), hora ("20:00"), o palabra clave ("cena", "desayuno", "última", "primera")',
+        required: true,
+      },
+    },
+    requiredParams: ['mealIdentifier'],
+  },
   {
     name: 'PLAN_GET_MEALS',
     description:
@@ -2254,6 +2831,24 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     requiredParams: ['name'],
   },
   {
+    name: 'PLAN_UPDATE_SUPPLEMENT_TIME',
+    description:
+      'Cambia la hora de un suplemento. Usa cuando diga "cambia la hora de la creatina a las 8", "pon el omega 3 a las 9 de la mañana", "mueve la proteína a las 6 PM".',
+    parameters: {
+      name: {
+        type: 'string',
+        description: 'Nombre del suplemento a modificar',
+        required: true,
+      },
+      newTime: {
+        type: 'string',
+        description: 'Nueva hora en formato 24h (ej: "08:00", "20:00")',
+        required: true,
+      },
+    },
+    requiredParams: ['name', 'newTime'],
+  },
+  {
     name: 'PLAN_GET_STACK',
     description:
       'Obtiene el stack de suplementos actual. Usa cuando pregunte "qué suplementos tomo", "muéstrame mi stack".',
@@ -2264,6 +2859,13 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     name: 'PLAN_ANALYZE_NUTRITION',
     description:
       'Analiza la nutrición del día completo y da recomendaciones. Usa cuando diga "analiza mi dieta", "cómo está mi nutrición", "qué me falta hoy".',
+    parameters: {},
+    requiredParams: [],
+  },
+  {
+    name: 'HANK_CLEAR_HISTORY',
+    description:
+      'Borra el historial de chat con HANK. Usa cuando diga "borra el historial", "limpia el chat", "resetea la conversación", "olvida todo", "empieza de nuevo".',
     parameters: {},
     requiredParams: [],
   },

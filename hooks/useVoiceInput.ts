@@ -142,6 +142,15 @@ async function transcribeWithGemini(audioUri: string): Promise<string | null> {
     const file = new File(audioUri);
     const base64Audio = await file.base64();
 
+    // Log del tamaño del audio para debugging
+    const audioSizeKB = Math.round((base64Audio.length * 0.75) / 1024);
+    console.warn(`🎤 Audio size: ${audioSizeKB} KB`);
+
+    if (audioSizeKB < 5) {
+      console.warn('🎤 Audio muy corto, ignorando...');
+      return null;
+    }
+
     // Determinar el mime type
     const mimeType = audioUri.endsWith('.m4a') ? 'audio/mp4' : 'audio/webm';
 
@@ -164,13 +173,13 @@ async function transcribeWithGemini(audioUri: string): Promise<string | null> {
                   },
                 },
                 {
-                  text: 'Transcribe este audio en español. Solo devuelve el texto transcrito, sin explicaciones adicionales. Si no puedes entender el audio, responde "NO_AUDIO".',
+                  text: 'Eres un transcriptor de audio. Escucha atentamente y transcribe EXACTAMENTE lo que dice la persona en español. Si el audio está vacío o no se entiende nada, responde SOLO con la palabra: EMPTY',
                 },
               ],
             },
           ],
           generationConfig: {
-            temperature: 0.1,
+            temperature: 0,
             maxOutputTokens: 500,
           },
         }),
@@ -178,14 +187,17 @@ async function transcribeWithGemini(audioUri: string): Promise<string | null> {
     );
 
     if (!response.ok) {
-      console.error('Gemini transcription error:', response.status);
+      const errorText = await response.text();
+      console.error('Gemini transcription error:', response.status, errorText);
       return null;
     }
 
     const data = await response.json();
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
 
-    if (text && text !== 'NO_AUDIO') {
+    console.warn('🎤 Gemini raw response:', text);
+
+    if (text && text !== 'EMPTY' && text.trim().length > 1) {
       return text.trim();
     }
 

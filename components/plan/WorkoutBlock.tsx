@@ -62,6 +62,7 @@ interface WorkoutBlockProps {
   isFirst: boolean;
   isLast: boolean;
   onPressRoutine?: () => void;
+  isCompressed?: boolean;
 }
 
 // ============================================================================
@@ -139,12 +140,67 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
   isFirst,
   isLast,
   onPressRoutine,
+  isCompressed = false,
 }) => {
+  // ============================================================================
+  // HOOKS - Siempre deben llamarse primero
+  // ============================================================================
   const [preExpanded, setPreExpanded] = useState(false);
   const [postExpanded, setPostExpanded] = useState(false);
 
   const preProgress = useSharedValue(0);
   const postProgress = useSharedValue(0);
+
+  const preHeight = Math.max(data.preStack.length * 48 + 24, 80);
+  const postHeight = Math.max(data.postStack.length * 48 + 24, 80);
+
+  const preExpandedStyle = useAnimatedStyle(() => ({
+    height: interpolate(preProgress.value, [0, 1], [0, preHeight]),
+    opacity: preProgress.value,
+    marginTop: interpolate(preProgress.value, [0, 1], [0, 8]),
+  }));
+
+  const postExpandedStyle = useAnimatedStyle(() => ({
+    height: interpolate(postProgress.value, [0, 1], [0, postHeight]),
+    opacity: postProgress.value,
+    marginTop: interpolate(postProgress.value, [0, 1], [0, 8]),
+  }));
+
+  const preChevronStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${interpolate(preProgress.value, [0, 1], [0, 90])}deg` }],
+  }));
+
+  const postChevronStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${interpolate(postProgress.value, [0, 1], [0, 90])}deg` }],
+  }));
+
+  // ============================================================================
+  // MODO COMPRIMIDO - Para drag & drop
+  // ============================================================================
+  if (isCompressed) {
+    return (
+      <View className="mb-3">
+        <View className="bg-[#1a1a1a] border-2 border-red-500/40 rounded-xl px-4 py-4 flex-row items-center justify-between shadow-lg">
+          <View className="flex-row items-center gap-3">
+            <View className="bg-red-500/20 p-2 rounded-lg">
+              <GripHorizontal size={18} color="#DC2626" />
+            </View>
+            <View>
+              <Text className="text-red-500 text-xs font-bold tracking-widest uppercase">
+                BLOQUE ENTRENO
+              </Text>
+              <Text className="text-white font-bold text-base mt-0.5">{data.routineName}</Text>
+            </View>
+          </View>
+          <View className="bg-red-500/20 px-3 py-1.5 rounded-lg">
+            <Text className="text-red-400 text-sm font-mono">
+              {data.exercises?.length || 0} ejercicios
+            </Text>
+          </View>
+        </View>
+      </View>
+    );
+  }
 
   const togglePre = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -169,29 +225,6 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     onMoveDown();
   };
-
-  const preHeight = Math.max(data.preStack.length * 48 + 24, 80);
-  const postHeight = Math.max(data.postStack.length * 48 + 24, 80);
-
-  const preExpandedStyle = useAnimatedStyle(() => ({
-    height: interpolate(preProgress.value, [0, 1], [0, preHeight]),
-    opacity: preProgress.value,
-    marginTop: interpolate(preProgress.value, [0, 1], [0, 8]),
-  }));
-
-  const postExpandedStyle = useAnimatedStyle(() => ({
-    height: interpolate(postProgress.value, [0, 1], [0, postHeight]),
-    opacity: postProgress.value,
-    marginTop: interpolate(postProgress.value, [0, 1], [0, 8]),
-  }));
-
-  const preChevronStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${interpolate(preProgress.value, [0, 1], [0, 90])}deg` }],
-  }));
-
-  const postChevronStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${interpolate(postProgress.value, [0, 1], [0, 90])}deg` }],
-  }));
 
   const hasExercises = data.exercises && data.exercises.length > 0;
 

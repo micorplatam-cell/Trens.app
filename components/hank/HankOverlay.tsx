@@ -404,12 +404,356 @@ const ThinkingIndicator: React.FC = () => {
 };
 
 // ============================================================================
+// HANK TAKEOVER - Efecto de pantalla completa cuando HANK toma el control
+// ============================================================================
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+const HankTakeover: React.FC<{ isActive: boolean; statusText: string }> = ({
+  isActive,
+  statusText,
+}) => {
+  // Animaciones
+  const opacity = useSharedValue(0);
+  const scale = useSharedValue(0.5);
+  const ringScale1 = useSharedValue(1);
+  const ringScale2 = useSharedValue(1);
+  const ringScale3 = useSharedValue(1);
+  const ringOpacity1 = useSharedValue(0.8);
+  const ringOpacity2 = useSharedValue(0.6);
+  const ringOpacity3 = useSharedValue(0.4);
+  const glitchX = useSharedValue(0);
+  const scanlineY = useSharedValue(0);
+  const textOpacity = useSharedValue(0);
+
+  useEffect(() => {
+    if (isActive) {
+      // Fade in
+      opacity.value = withTiming(1, { duration: 200 });
+      scale.value = withSpring(1, { damping: 12, stiffness: 100 });
+      textOpacity.value = withTiming(1, { duration: 400 });
+
+      // Anillos pulsantes que emanan del centro
+      ringScale1.value = withRepeat(
+        withSequence(
+          withTiming(1, { duration: 0 }),
+          withTiming(8, { duration: 1500, easing: Easing.out(Easing.ease) })
+        ),
+        -1,
+        false
+      );
+      ringOpacity1.value = withRepeat(
+        withSequence(
+          withTiming(0.8, { duration: 0 }),
+          withTiming(0, { duration: 1500, easing: Easing.out(Easing.ease) })
+        ),
+        -1,
+        false
+      );
+
+      // Ring 2 con delay
+      setTimeout(() => {
+        ringScale2.value = withRepeat(
+          withSequence(
+            withTiming(1, { duration: 0 }),
+            withTiming(8, { duration: 1500, easing: Easing.out(Easing.ease) })
+          ),
+          -1,
+          false
+        );
+        ringOpacity2.value = withRepeat(
+          withSequence(
+            withTiming(0.6, { duration: 0 }),
+            withTiming(0, { duration: 1500, easing: Easing.out(Easing.ease) })
+          ),
+          -1,
+          false
+        );
+      }, 500);
+
+      // Ring 3 con más delay
+      setTimeout(() => {
+        ringScale3.value = withRepeat(
+          withSequence(
+            withTiming(1, { duration: 0 }),
+            withTiming(8, { duration: 1500, easing: Easing.out(Easing.ease) })
+          ),
+          -1,
+          false
+        );
+        ringOpacity3.value = withRepeat(
+          withSequence(
+            withTiming(0.4, { duration: 0 }),
+            withTiming(0, { duration: 1500, easing: Easing.out(Easing.ease) })
+          ),
+          -1,
+          false
+        );
+      }, 1000);
+
+      // Efecto glitch
+      glitchX.value = withRepeat(
+        withSequence(
+          withTiming(-3, { duration: 50 }),
+          withTiming(3, { duration: 50 }),
+          withTiming(-2, { duration: 50 }),
+          withTiming(0, { duration: 50 }),
+          withTiming(0, { duration: 200 })
+        ),
+        -1,
+        false
+      );
+
+      // Scanline
+      scanlineY.value = withRepeat(
+        withTiming(SCREEN_HEIGHT, { duration: 2000, easing: Easing.linear }),
+        -1,
+        false
+      );
+    } else {
+      // Fade out
+      opacity.value = withTiming(0, { duration: 300 });
+      scale.value = withTiming(0.8, { duration: 300 });
+      textOpacity.value = withTiming(0, { duration: 200 });
+      cancelAnimation(ringScale1);
+      cancelAnimation(ringScale2);
+      cancelAnimation(ringScale3);
+      cancelAnimation(ringOpacity1);
+      cancelAnimation(ringOpacity2);
+      cancelAnimation(ringOpacity3);
+      cancelAnimation(glitchX);
+      cancelAnimation(scanlineY);
+    }
+  }, [isActive]);
+
+  const containerStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+    transform: [{ scale: scale.value }],
+  }));
+
+  const ring1Style = useAnimatedStyle(() => ({
+    transform: [{ scale: ringScale1.value }],
+    opacity: ringOpacity1.value,
+  }));
+
+  const ring2Style = useAnimatedStyle(() => ({
+    transform: [{ scale: ringScale2.value }],
+    opacity: ringOpacity2.value,
+  }));
+
+  const ring3Style = useAnimatedStyle(() => ({
+    transform: [{ scale: ringScale3.value }],
+    opacity: ringOpacity3.value,
+  }));
+
+  const glitchStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: glitchX.value }],
+  }));
+
+  const scanlineStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: scanlineY.value }],
+  }));
+
+  const textStyle = useAnimatedStyle(() => ({
+    opacity: textOpacity.value,
+  }));
+
+  if (!isActive) return null;
+
+  return (
+    <Modal visible={isActive} transparent animationType="none">
+      <Animated.View
+        style={[
+          {
+            flex: 1,
+            backgroundColor: 'rgba(0, 0, 0, 0.95)',
+            justifyContent: 'center',
+            alignItems: 'center',
+          },
+          containerStyle,
+        ]}
+      >
+        {/* Scanline effect */}
+        <Animated.View
+          style={[
+            {
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              height: 2,
+              backgroundColor: 'rgba(220, 38, 38, 0.3)',
+            },
+            scanlineStyle,
+          ]}
+        />
+
+        {/* Grid pattern overlay */}
+        <View
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            opacity: 0.05,
+          }}
+        >
+          {Array.from({ length: 20 }).map((_, i) => (
+            <View
+              key={`h-${i}`}
+              style={{
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                top: i * (SCREEN_HEIGHT / 20),
+                height: 1,
+                backgroundColor: '#DC2626',
+              }}
+            />
+          ))}
+          {Array.from({ length: 10 }).map((_, i) => (
+            <View
+              key={`v-${i}`}
+              style={{
+                position: 'absolute',
+                top: 0,
+                bottom: 0,
+                left: i * (SCREEN_WIDTH / 10),
+                width: 1,
+                backgroundColor: '#DC2626',
+              }}
+            />
+          ))}
+        </View>
+
+        {/* Pulsing rings from center */}
+        <Animated.View
+          style={[
+            {
+              position: 'absolute',
+              width: 100,
+              height: 100,
+              borderRadius: 50,
+              borderWidth: 2,
+              borderColor: '#DC2626',
+            },
+            ring1Style,
+          ]}
+        />
+        <Animated.View
+          style={[
+            {
+              position: 'absolute',
+              width: 100,
+              height: 100,
+              borderRadius: 50,
+              borderWidth: 2,
+              borderColor: '#DC2626',
+            },
+            ring2Style,
+          ]}
+        />
+        <Animated.View
+          style={[
+            {
+              position: 'absolute',
+              width: 100,
+              height: 100,
+              borderRadius: 50,
+              borderWidth: 2,
+              borderColor: '#DC2626',
+            },
+            ring3Style,
+          ]}
+        />
+
+        {/* Central HANK icon with glitch */}
+        <Animated.View
+          style={[
+            {
+              width: 100,
+              height: 100,
+              borderRadius: 50,
+              backgroundColor: '#000000',
+              borderWidth: 3,
+              borderColor: '#DC2626',
+              justifyContent: 'center',
+              alignItems: 'center',
+              shadowColor: '#DC2626',
+              shadowOffset: { width: 0, height: 0 },
+              shadowOpacity: 1,
+              shadowRadius: 30,
+              elevation: 20,
+            },
+            glitchStyle,
+          ]}
+        >
+          <Bot size={50} color="#DC2626" />
+        </Animated.View>
+
+        {/* Status text */}
+        <Animated.View style={[{ marginTop: 40 }, textStyle]}>
+          <Text
+            style={{
+              color: '#DC2626',
+              fontSize: 14,
+              fontFamily: 'monospace',
+              fontWeight: 'bold',
+              letterSpacing: 4,
+              textTransform: 'uppercase',
+            }}
+          >
+            HANK TAKEOVER
+          </Text>
+          <Text
+            style={{
+              color: '#FFFFFF',
+              fontSize: 12,
+              fontFamily: 'monospace',
+              textAlign: 'center',
+              marginTop: 8,
+              opacity: 0.7,
+            }}
+          >
+            {statusText}
+          </Text>
+        </Animated.View>
+
+        {/* Corner decorations */}
+        <View style={{ position: 'absolute', top: 40, left: 20 }}>
+          <Text style={{ color: '#DC2626', fontFamily: 'monospace', fontSize: 10, opacity: 0.5 }}>
+            {'<SYSTEM>'}
+          </Text>
+        </View>
+        <View style={{ position: 'absolute', top: 40, right: 20 }}>
+          <Text style={{ color: '#DC2626', fontFamily: 'monospace', fontSize: 10, opacity: 0.5 }}>
+            {'{OVERRIDE}'}
+          </Text>
+        </View>
+        <View style={{ position: 'absolute', bottom: 60, left: 20 }}>
+          <Text style={{ color: '#DC2626', fontFamily: 'monospace', fontSize: 10, opacity: 0.5 }}>
+            {'[EXECUTING]'}
+          </Text>
+        </View>
+        <View style={{ position: 'absolute', bottom: 60, right: 20 }}>
+          <Text style={{ color: '#DC2626', fontFamily: 'monospace', fontSize: 10, opacity: 0.5 }}>
+            {'//HANK.v1'}
+          </Text>
+        </View>
+      </Animated.View>
+    </Modal>
+  );
+};
+
+// ============================================================================
 // MAIN COMPONENT: HANK OVERLAY
 // ============================================================================
 export const HankOverlay: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [inputText, setInputText] = useState('');
   const [isListening, setIsListening] = useState(false);
+  const [isLongPressProcessing, setIsLongPressProcessing] = useState(false);
+  const [isTakeover, setIsTakeover] = useState(false);
+  const [takeoverStatus, setTakeoverStatus] = useState('');
   const [pendingExecution, setPendingExecution] = useState<{
     text: string;
     toolCalls: HankToolCall[];
@@ -417,6 +761,7 @@ export const HankOverlay: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([getDefaultWelcomeMessage()]);
   const [userId, setUserId] = useState<string | null>(null);
   const messagesInitialized = useRef(false);
+  const takeoverResultRef = useRef<HankToolResult[] | null>(null);
 
   const flatListRef = useRef<FlatList>(null);
   const {
@@ -439,6 +784,32 @@ export const HankOverlay: React.FC = () => {
     stopRecording,
     error: voiceError,
   } = useVoiceInput();
+
+  // -------------------------------------------------------------------------
+  // HELPER: Verificar si debe limpiar la UI del chat
+  // -------------------------------------------------------------------------
+  const checkAndClearUIChat = useCallback(
+    (results: HankToolResult[]) => {
+      // Verificar si algún resultado tiene el flag clearUIChat
+      const shouldClear = results.some((r) => (r.data as { clearUIChat?: boolean })?.clearUIChat === true);
+      if (shouldClear) {
+        console.warn('🧹 HANK UI: Limpiando chat visual...');
+        // Resetear mensajes con solo bienvenida + notificación
+        const clearedNotification: ChatMessage = {
+          id: `cleared-${Date.now()}`,
+          role: 'hank',
+          content: '🧹 Historial limpiado. Empezamos de cero. ¿En qué te puedo ayudar?',
+          timestamp: new Date(),
+        };
+        setMessages([getDefaultWelcomeMessage(), clearedNotification]);
+        // También limpiar el contexto de conversación
+        clearConversation();
+        return true;
+      }
+      return false;
+    },
+    [clearConversation]
+  );
 
   // -------------------------------------------------------------------------
   // OBTENER USER ID
@@ -568,6 +939,11 @@ export const HankOverlay: React.FC = () => {
     // Execute command
     const results = await executeCommand(userMessage.content);
 
+    // Verificar si debe limpiar la UI del chat
+    if (checkAndClearUIChat(results)) {
+      return; // Ya se limpió, no agregar más mensajes
+    }
+
     // Add Hank response
     const hankMessage: ChatMessage = {
       id: (Date.now() + 1).toString(),
@@ -624,15 +1000,22 @@ export const HankOverlay: React.FC = () => {
         // Ejecutar comando
         const results = await executeCommand(transcription);
 
-        // Remover thinking y agregar respuesta
+        // Remover thinking
         setMessages((prev) => prev.filter((m) => !m.id.startsWith('thinking-')));
+
+        // Verificar si debe limpiar la UI del chat
+        if (checkAndClearUIChat(results)) {
+          setInputText('');
+          return; // Ya se limpió, no agregar más mensajes
+        }
 
         const hankMessage: ChatMessage = {
           id: `hank-${Date.now()}`,
           role: 'hank',
           content: results.length > 0 ? results[0].message : 'Comando ejecutado.',
           timestamp: new Date(),
-          results,
+          // Solo mostrar results si hay más de uno (evita duplicación)
+          results: results.length > 1 ? results : undefined,
         };
         setMessages((prev) => [...prev, hankMessage]);
         setInputText('');
@@ -682,8 +1065,9 @@ export const HankOverlay: React.FC = () => {
     const transcription = await stopRecording();
 
     if (transcription) {
-      // Abrir el chat
+      // Abrir el chat y mostrar indicador de procesamiento
       setIsOpen(true);
+      setIsLongPressProcessing(true);
 
       // Agregar mensaje del usuario
       const userMessage: ChatMessage = {
@@ -724,27 +1108,46 @@ export const HankOverlay: React.FC = () => {
         if (result.toolCalls && result.toolCalls.length > 0) {
           // Separar herramientas de lectura (ejecutar directo) de escritura (pedir confirmación)
           const readOnlyTools = [
+            // GYM
+            'GYM_GET_TODAY_ROUTINE',
             'GYM_LIST_EXERCISES',
+            // ASSET
             'ASSET_READ',
             'ASSET_GET_SCHEMA',
+            // ADN
             'ADN_GET_PROFILE',
             'ADN_GET_RECORDS',
+            // PLAN - Tools de lectura
+            'PLAN_GET_MEALS',
+            'PLAN_GET_MEAL_DETAILS',
+            'PLAN_GET_STACK',
+            'PLAN_ANALYZE_NUTRITION',
+            // Contexto OMNISCIENTE
             'GET_USER_CONTEXT',
+            'GET_FULL_USER_CONTEXT',
+            // Sistema - Ejecutar sin confirmación
+            'HANK_CLEAR_HISTORY',
           ];
 
           const writeToolCalls = result.toolCalls.filter((tc) => !readOnlyTools.includes(tc.tool));
           const readToolCalls = result.toolCalls.filter((tc) => readOnlyTools.includes(tc.tool));
 
           // Ejecutar herramientas de lectura directamente y capturar resultados
-          let readResults: string[] = [];
+          let readResults: HankToolResult[] = [];
           if (readToolCalls.length > 0) {
             console.log('✅ Ejecutando herramientas de lectura sin confirmación...');
             for (const tc of readToolCalls) {
               const toolResult = await executeTool(tc);
-              if (toolResult.success && toolResult.message) {
-                readResults.push(toolResult.message);
+              if (toolResult.success) {
+                readResults.push(toolResult);
               }
             }
+          }
+
+          // Verificar si algún resultado tiene flag de limpiar UI
+          if (checkAndClearUIChat(readResults)) {
+            setIsLongPressProcessing(false);
+            return; // Ya se limpió, no agregar más mensajes
           }
 
           // Si hay herramientas de escritura, pedir confirmación
@@ -775,6 +1178,43 @@ export const HankOverlay: React.FC = () => {
                     return `Agregar medida: ${tc.parameters.name} = ${tc.parameters.value}`;
                   case 'ADN_REMOVE_MEASUREMENT':
                     return `Eliminar medida: ${tc.parameters.measurementName}`;
+                  // PLAN Tools
+                  case 'PLAN_ADD_SUPPLEMENT':
+                    return `Agregar suplemento: ${tc.parameters.name} (${tc.parameters.dose})`;
+                  case 'PLAN_REMOVE_SUPPLEMENT':
+                    return `Eliminar suplemento: ${tc.parameters.name}`;
+                  case 'PLAN_UPDATE_SUPPLEMENT_TIME': {
+                    // Convertir formato 24h a AM/PM
+                    const time24s = tc.parameters.newTime as string;
+                    const [hoursS, minsS] = time24s.split(':').map(Number);
+                    const periodS = hoursS >= 12 ? 'PM' : 'AM';
+                    const hours12S = hoursS % 12 || 12;
+                    const timeFormattedS = `${hours12S}:${minsS.toString().padStart(2, '0')} ${periodS}`;
+                    return `Cambiar hora de ${tc.parameters.name} a ${timeFormattedS}`;
+                  }
+                  case 'PLAN_ADD_MEAL':
+                    return `Agregar comida a las ${tc.parameters.time}`;
+                  case 'PLAN_EDIT_MEAL':
+                    return `Editar comida`;
+                  case 'PLAN_DELETE_MEAL':
+                    return `Eliminar comida`;
+                  case 'PLAN_UPDATE_MEAL_TIME': {
+                    // Convertir formato 24h a AM/PM
+                    const time24 = tc.parameters.newTime as string;
+                    const [hours, mins] = time24.split(':').map(Number);
+                    const period = hours >= 12 ? 'PM' : 'AM';
+                    const hours12 = hours % 12 || 12;
+                    const timeFormatted = `${hours12}:${mins.toString().padStart(2, '0')} ${period}`;
+                    // Determinar nombre de comida por position
+                    let mealLabel = 'comida';
+                    const pos = tc.parameters.position as string;
+                    if (pos === 'first') mealLabel = 'desayuno';
+                    else if (pos === 'last') mealLabel = 'cena';
+                    else if (pos === '2' || pos === 'second') mealLabel = 'almuerzo';
+                    return `Cambiar hora de ${mealLabel} a ${timeFormatted}`;
+                  }
+                  case 'PLAN_CALCULATE_MACROS':
+                    return `Calcular macros de la comida`;
                   default:
                     return tc.tool;
                 }
@@ -799,21 +1239,29 @@ export const HankOverlay: React.FC = () => {
             // Vibración de alerta
             await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
           } else if (readResults.length > 0) {
-            // Solo había herramientas de lectura - pasar resultado a Gemini para respuesta natural
-            const toolResultContext = readResults.join('\n\n');
+            // Solo había herramientas de lectura - mostrar resultado directamente
+            const toolResultContext = readResults.map((r) => r.message).join('\n\n');
 
-            // Segunda llamada a Gemini para que formule respuesta concisa
-            const naturalResponse = await callGemini(
-              `El usuario preguntó: "${transcription}"\n\nDatos obtenidos:\n${toolResultContext}\n\nResponde de forma BREVE y DIRECTA solo lo que preguntó. No repitas toda la información, solo lo relevante a su pregunta.`,
-              geminiContext,
-              GEMINI_API_KEY,
-              [] // Sin historial para respuesta limpia
-            );
+            // Intentar respuesta natural con Gemini, pero con fallback al resultado directo
+            let finalMessage = toolResultContext;
+            try {
+              const naturalResponse = await callGemini(
+                `El usuario preguntó: "${transcription}"\n\nDatos obtenidos:\n${toolResultContext}\n\nResponde de forma BREVE y DIRECTA solo lo que preguntó. No repitas toda la información, solo lo relevante a su pregunta.`,
+                geminiContext,
+                GEMINI_API_KEY,
+                [] // Sin historial para respuesta limpia
+              );
+              if (naturalResponse.message) {
+                finalMessage = naturalResponse.message;
+              }
+            } catch (geminiError) {
+              console.warn('⚠️ Gemini falló para respuesta natural, usando resultado directo');
+            }
 
             const hankMessage: ChatMessage = {
               id: `hank-${Date.now()}`,
               role: 'hank',
-              content: naturalResponse.message || toolResultContext,
+              content: finalMessage,
               timestamp: new Date(),
             };
             setMessages((prev) => [...prev, hankMessage]);
@@ -846,15 +1294,27 @@ export const HankOverlay: React.FC = () => {
           timestamp: new Date(),
         };
         setMessages((prev) => [...prev, errorMessage]);
+      } finally {
+        // Siempre apagar el indicador de procesamiento
+        setIsLongPressProcessing(false);
       }
 
       setTimeout(() => {
         flatListRef.current?.scrollToEnd({ animated: true });
       }, 100);
     }
-  }, [stopRecording, screenContext, sportMode, activeAsset, userProfile, availableExercises]);
+  }, [
+    stopRecording,
+    screenContext,
+    sportMode,
+    activeAsset,
+    userProfile,
+    availableExercises,
+    checkAndClearUIChat,
+    executeTool,
+  ]);
 
-  // Confirmar ejecución pendiente
+  // Confirmar ejecución pendiente - CON EFECTO HANK TAKEOVER
   const handleConfirmExecution = useCallback(async () => {
     if (!pendingExecution) return;
 
@@ -863,29 +1323,79 @@ export const HankOverlay: React.FC = () => {
     // Vibración de confirmación
     await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-    // Ejecutar cada tool call
+    // 1. CERRAR EL CHAT
+    setIsOpen(false);
+
+    // 2. ACTIVAR TAKEOVER MODE
+    setTakeoverStatus('Aplicando cambios...');
+    setIsTakeover(true);
+
+    // Vibración fuerte para indicar takeover
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+
+    // 3. EJECUTAR LAS HERRAMIENTAS
     const results: HankToolResult[] = [];
-    for (const toolCall of pendingExecution.toolCalls) {
+    for (let i = 0; i < pendingExecution.toolCalls.length; i++) {
+      const toolCall = pendingExecution.toolCalls[i];
+      setTakeoverStatus(`Ejecutando ${i + 1}/${pendingExecution.toolCalls.length}...`);
       const result = await executeTool(toolCall);
       results.push(result);
+      // Pequeña pausa para efecto visual
+      await new Promise((resolve) => setTimeout(resolve, 300));
     }
 
-    // Agregar resultado
+    // Guardar resultados para después
+    takeoverResultRef.current = results;
+
+    // Mostrar mensaje de éxito
+    setTakeoverStatus(results.every((r) => r.success) ? '¡Cambios aplicados!' : 'Completado');
+
+    // Vibración de éxito
+    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+    // 4. ESPERAR UN MOMENTO PARA EL EFECTO
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+
+    // 5. DESACTIVAR TAKEOVER Y ABRIR CHAT
+    setIsTakeover(false);
+
+    // Pequeña pausa antes de abrir el chat
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    // 6. ABRIR EL CHAT Y MOSTRAR RESULTADO
+    setIsOpen(true);
+
+    // Verificar si debe limpiar la UI del chat
+    if (checkAndClearUIChat(results)) {
+      setPendingExecution(null);
+      takeoverResultRef.current = null;
+      return;
+    }
+
+    // Agregar resultado al chat
     const resultMessage: ChatMessage = {
       id: `result-${Date.now()}`,
       role: 'hank',
-      content: results.every((r) => r.success) ? '✅ ¡Ejecutado!' : '⚠️ Algunas acciones fallaron.',
+      content: results.every((r) => r.success)
+        ? '✅ ¡Hecho! Los cambios fueron aplicados.'
+        : '⚠️ Algunas acciones fallaron.',
       timestamp: new Date(),
-      results,
+      results: results.length > 1 ? results : undefined,
     };
+
+    // Si solo hay un resultado, mostrar su mensaje
+    if (results.length === 1 && results[0].message) {
+      resultMessage.content = `✅ ${results[0].message}`;
+    }
 
     setMessages((prev) => prev.filter((m) => !m.pendingConfirmation).concat(resultMessage));
     setPendingExecution(null);
+    takeoverResultRef.current = null;
 
     setTimeout(() => {
       flatListRef.current?.scrollToEnd({ animated: true });
     }, 100);
-  }, [pendingExecution, executeTool]);
+  }, [pendingExecution, executeTool, checkAndClearUIChat]);
 
   // Cancelar ejecución pendiente
   const handleCancelExecution = useCallback(async () => {
@@ -910,14 +1420,19 @@ export const HankOverlay: React.FC = () => {
   // -------------------------------------------------------------------------
   return (
     <>
-      {/* FAB Button - Always visible */}
-      <HankFAB
-        onPress={handleOpen}
-        onLongPressStart={handleLongPressStart}
-        onLongPressEnd={handleLongPressEnd}
-        isProcessing={isProcessing || isTranscribing}
-        isListening={isListening || isRecording}
-      />
+      {/* HANK TAKEOVER - Efecto fullscreen cuando ejecuta cambios */}
+      <HankTakeover isActive={isTakeover} statusText={takeoverStatus} />
+
+      {/* FAB Button - Always visible (oculto durante takeover) */}
+      {!isTakeover && (
+        <HankFAB
+          onPress={handleOpen}
+          onLongPressStart={handleLongPressStart}
+          onLongPressEnd={handleLongPressEnd}
+          isProcessing={isProcessing || isTranscribing}
+          isListening={isListening || isRecording}
+        />
+      )}
 
       {/* Chat Panel Modal */}
       <Modal visible={isOpen} transparent animationType="none" onRequestClose={handleClose}>
@@ -981,7 +1496,7 @@ export const HankOverlay: React.FC = () => {
                 renderItem={({ item }) => <MessageBubble message={item} />}
                 ListFooterComponent={
                   <>
-                    {isProcessing && <ThinkingIndicator />}
+                    {(isProcessing || isLongPressProcessing) && <ThinkingIndicator />}
                     {pendingExecution && (
                       <ConfirmationButtons
                         onConfirm={handleConfirmExecution}

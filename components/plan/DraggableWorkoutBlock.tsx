@@ -2,7 +2,7 @@
 // DRAGGABLE WORKOUT BLOCK - Wrapper con Drag & Drop
 // ============================================================================
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   useAnimatedStyle,
@@ -45,6 +45,9 @@ interface DraggableWorkoutBlockProps {
   onMoveUp: () => void;
   onMoveDown: () => void;
   onDragEnd: (newIndex: number) => void;
+  onDragStart?: () => void;
+  onDragCancel?: () => void;
+  onPositionChange?: (targetIndex: number) => void;
   onPressRoutine?: () => void;
   itemHeight?: number;
 }
@@ -56,13 +59,18 @@ export const DraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
   onMoveUp,
   onMoveDown,
   onDragEnd,
+  onDragStart,
+  onDragCancel,
+  onPositionChange,
   onPressRoutine,
   itemHeight = 150, // Altura estimada de cada item
 }) => {
   const translateY = useSharedValue(0);
   const scale = useSharedValue(1);
   const zIndex = useSharedValue(1);
-  const isDragging = useSharedValue(false);
+  const isDraggingShared = useSharedValue(false);
+  const [isDraggingState, setIsDraggingState] = useState(false);
+  const lastReportedIndex = useSharedValue(currentIndex);
 
   const triggerHaptic = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
@@ -72,26 +80,50 @@ export const DraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
+  const setDragging = (value: boolean) => {
+    setIsDraggingState(value);
+  };
+
+  const handleDragStart = () => {
+    if (onDragStart) onDragStart();
+  };
+
   const handleDragEnd = (newIndex: number) => {
+    if (onDragCancel) onDragCancel();
     onDragEnd(newIndex);
+  };
+
+  const handleDragCancel = () => {
+    if (onDragCancel) onDragCancel();
+  };
+
+  const reportPositionChange = (targetIndex: number) => {
+    if (onPositionChange) onPositionChange(targetIndex);
   };
 
   const panGesture = Gesture.Pan()
     .activateAfterLongPress(400) // Activar después de 400ms de mantener presionado
     .onStart(() => {
-      isDragging.value = true;
+      isDraggingShared.value = true;
+      lastReportedIndex.value = currentIndex;
       zIndex.value = 100;
-      scale.value = withSpring(1.02);
+      scale.value = withSpring(0.95, { damping: 15 });
+      runOnJS(setDragging)(true);
       runOnJS(triggerHaptic)();
+      runOnJS(handleDragStart)();
     })
     .onUpdate((event) => {
       translateY.value = event.translationY;
 
       // Calcular cuántas posiciones se ha movido
       const movedPositions = Math.round(event.translationY / itemHeight);
+      let targetIndex = currentIndex + movedPositions;
+      targetIndex = Math.max(0, Math.min(totalItems - 1, targetIndex));
 
-      // Haptic feedback cuando cruza umbral de posición
-      if (Math.abs(movedPositions) > 0 && Math.abs(event.translationY % itemHeight) < 20) {
+      // Solo reportar si cambió el índice objetivo
+      if (targetIndex !== lastReportedIndex.value) {
+        lastReportedIndex.value = targetIndex;
+        runOnJS(reportPositionChange)(targetIndex);
         runOnJS(triggerLightHaptic)();
       }
     })
@@ -107,22 +139,37 @@ export const DraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
       translateY.value = withSpring(0, { damping: 15, stiffness: 150 });
       scale.value = withSpring(1);
       zIndex.value = 1;
-      isDragging.value = false;
+      isDraggingShared.value = false;
+      runOnJS(setDragging)(false);
 
-      // Si cambió de posición, notificar
+      // Notificar fin del drag
       if (newIndex !== currentIndex) {
         runOnJS(handleDragEnd)(newIndex);
+      } else {
+        runOnJS(handleDragCancel)();
+      }
+    })
+    .onFinalize(() => {
+      // Asegurar que se resetea el estado si el gesto se cancela
+      if (isDraggingShared.value) {
+        translateY.value = withSpring(0, { damping: 15, stiffness: 150 });
+        scale.value = withSpring(1);
+        zIndex.value = 1;
+        isDraggingShared.value = false;
+        runOnJS(setDragging)(false);
+        runOnJS(handleDragCancel)();
       }
     });
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: translateY.value }, { scale: scale.value }],
     zIndex: zIndex.value,
-    opacity: isDragging.value ? 0.95 : 1,
-    shadowOpacity: isDragging.value ? 0.3 : 0,
-    shadowRadius: isDragging.value ? 10 : 0,
-    shadowOffset: { width: 0, height: isDragging.value ? 10 : 0 },
+    opacity: isDraggingShared.value ? 0.95 : 1,
+    shadowOpacity: isDraggingShared.value ? 0.4 : 0,
+    shadowRadius: isDraggingShared.value ? 15 : 0,
+    shadowOffset: { width: 0, height: isDraggingShared.value ? 8 : 0 },
     shadowColor: '#DC2626',
+    elevation: isDraggingShared.value ? 10 : 0,
   }));
 
   return (
@@ -135,6 +182,7 @@ export const DraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
           isFirst={currentIndex === 0}
           isLast={currentIndex >= totalItems - 1}
           onPressRoutine={onPressRoutine}
+          isCompressed={isDraggingState}
         />
       </Animated.View>
     </GestureDetector>

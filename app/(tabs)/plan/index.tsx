@@ -3,8 +3,9 @@
 // Línea de tiempo con Comidas, Stacks y Bloque de Entrenamiento
 // ============================================================================
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { View, Text, ScrollView, Pressable, Alert, RefreshControl } from 'react-native';
+import Animated, { useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { Plus, Pill } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
@@ -25,6 +26,25 @@ import {
   recalculateAllMealsForNewCount,
   calculateMealWithUserMacros,
 } from '../../../services/hank/nutrition';
+
+// ============================================================================
+// ANIMATED WRAPPER - Para animar items durante drag
+// ============================================================================
+interface AnimatedTimelineItemProps {
+  children: React.ReactNode;
+  offset: number;
+}
+
+const AnimatedTimelineItem: React.FC<AnimatedTimelineItemProps> = ({ children, offset }) => {
+  const animatedStyle = useAnimatedStyle(
+    () => ({
+      transform: [{ translateY: withSpring(offset, { damping: 20, stiffness: 300 }) }],
+    }),
+    [offset]
+  );
+
+  return <Animated.View style={animatedStyle}>{children}</Animated.View>;
+};
 
 // ============================================================================
 // TYPES
@@ -104,6 +124,41 @@ const getMealName = (index: number, total: number): string => {
   return `COMIDA ${index + 1}`;
 };
 
+/**
+ * Convierte texto de hora a formato TIME válido (HH:MM)
+ * Acepta: "7 pm", "7pm", "19:00", "7:30 am", "14:30", etc.
+ */
+const parseTimeToSQL = (timeStr: string): string | null => {
+  if (!timeStr || !timeStr.trim()) return null;
+
+  const input = timeStr.trim().toLowerCase();
+
+  // Si ya está en formato HH:MM o HH:MM:SS, validar y retornar
+  if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(input)) {
+    const [hours, minutes] = input.split(':').map(Number);
+    if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
+      return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+    }
+  }
+
+  // Parsear formatos con AM/PM
+  const ampmMatch = input.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?$/);
+  if (ampmMatch) {
+    let hours = parseInt(ampmMatch[1], 10);
+    const minutes = ampmMatch[2] ? parseInt(ampmMatch[2], 10) : 0;
+    const period = ampmMatch[3]?.replace('.', '');
+
+    if (period === 'pm' && hours < 12) hours += 12;
+    if (period === 'am' && hours === 12) hours = 0;
+
+    if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
+      return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+    }
+  }
+
+  return null;
+};
+
 // ============================================================================
 // COMPONENT
 // ============================================================================
@@ -128,6 +183,8 @@ export default function PlanScreen() {
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [timePickerMealId, setTimePickerMealId] = useState<string | null>(null);
   const [timePickerCurrentTime, setTimePickerCurrentTime] = useState('12:00');
+  const [timePickerMode, setTimePickerMode] = useState<'meal' | 'stack'>('meal');
+  const [timePickerStackTime, setTimePickerStackTime] = useState<string | null>(null);
   const [showStackManager, setShowStackManager] = useState(false);
   const [showAddOption, setShowAddOption] = useState(false);
   const [addOptionMealId, setAddOptionMealId] = useState<string | null>(null);
@@ -146,6 +203,8 @@ export default function PlanScreen() {
   } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [isDraggingWorkout, setIsDraggingWorkout] = useState(false);
+  const [dragTargetIndex, setDragTargetIndex] = useState<number | null>(null);
 
   // ============================================================================
   // DATA FETCHING
@@ -301,13 +360,49 @@ export default function PlanScreen() {
 
       // Fetch current training day from profiles
       // El sistema usa días de entrenamiento (0, 1, 2...) no días de la semana
+      // IMPORTANTE: Usar la misma lógica de GYM para determinar el día actual
       const { data: profileData } = await supabase
         .from('profiles')
-        .select('training_current_day, training_routine_names')
+        .select(
+          'training_current_day, training_routine_names, training_last_access, training_frequency'
+        )
         .eq('id', user.id)
         .single();
 
-      const currentTrainingDay = profileData?.training_current_day ?? 0;
+      // Calcular el día de entrenamiento correcto
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayISO = today.toISOString();
+
+      let currentTrainingDay = profileData?.training_current_day ?? 0;
+      const frequency = profileData?.training_frequency ?? 3;
+
+      // Verificar si debemos avanzar al siguiente día
+      if (profileData?.training_last_access) {
+        const lastAccess = new Date(profileData.training_last_access);
+        lastAccess.setHours(0, 0, 0, 0);
+        const lastAccessISO = lastAccess.toISOString();
+
+        // Si han pasado uno o más días, avanzar al siguiente día de entrenamiento
+        if (todayISO > lastAccessISO) {
+          currentTrainingDay = (profileData.training_current_day || 0) + 1;
+          if (currentTrainingDay >= frequency) {
+            currentTrainingDay = 0; // Reiniciar ciclo
+          }
+
+          // Actualizar en Supabase para sincronizar con GYM
+          await supabase
+            .from('profiles')
+            .update({
+              training_last_access: todayISO,
+              training_current_day: currentTrainingDay,
+            })
+            .eq('id', user.id);
+
+          console.warn(`🏋️ PLAN: Día avanzado automáticamente a ${currentTrainingDay}`);
+        }
+      }
+
       const routineNames = profileData?.training_routine_names || {};
       console.warn(`🏋️ PLAN: Día de entrenamiento actual: ${currentTrainingDay}`);
       console.warn(`🏋️ PLAN: Nombres de rutinas:`, routineNames);
@@ -441,28 +536,50 @@ export default function PlanScreen() {
     if (!meal) return;
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setTimePickerMode('meal');
     setTimePickerMealId(mealId);
     setTimePickerCurrentTime(meal.time);
     setShowTimePicker(true);
   };
 
+  // Handler para cambiar hora de un grupo de stacks
+  const handleStackTimeChange = (currentTime: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setTimePickerMode('stack');
+    setTimePickerStackTime(currentTime);
+    setTimePickerCurrentTime(currentTime);
+    setShowTimePicker(true);
+  };
+
   // Guardar nueva hora desde el modal
   const handleSaveTime = async (newTime: string) => {
-    if (!timePickerMealId) return;
-
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-    // Update and re-sort
-    const updated = meals
-      .map((m) => (m.id === timePickerMealId ? { ...m, time: newTime } : m))
-      .sort((a, b) => a.time.localeCompare(b.time));
+    if (timePickerMode === 'meal' && timePickerMealId) {
+      // Update meal time
+      const updated = meals
+        .map((m) => (m.id === timePickerMealId ? { ...m, time: newTime } : m))
+        .sort((a, b) => a.time.localeCompare(b.time));
 
-    setMeals(updated);
+      setMeals(updated);
+      await supabase.from('meals').update({ time: newTime }).eq('id', timePickerMealId);
+      setTimePickerMealId(null);
+    } else if (timePickerMode === 'stack' && timePickerStackTime) {
+      // Update all stack items with the old time to the new time
+      const itemsToUpdate = stackItems.filter((item) => item.time === timePickerStackTime);
 
-    // Persist
-    await supabase.from('meals').update({ time: newTime }).eq('id', timePickerMealId);
+      for (const item of itemsToUpdate) {
+        await supabase.from('supplement_stack').update({ time: newTime }).eq('id', item.id);
+      }
 
-    setTimePickerMealId(null);
+      // Update local state
+      setStackItems((prev) =>
+        prev.map((item) => (item.time === timePickerStackTime ? { ...item, time: newTime } : item))
+      );
+
+      setTimePickerStackTime(null);
+      console.warn('✅ STACK: Hora actualizada de', timePickerStackTime, 'a', newTime);
+    }
   };
 
   // Parsear input de hora flexible a formato 24h
@@ -898,23 +1015,39 @@ export default function PlanScreen() {
       const {
         data: { user },
       } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        console.warn('⚠️ STACK: No hay usuario autenticado');
+        return;
+      }
 
-      await supabase.from('supplement_stack').insert({
+      // Convertir hora a formato SQL válido
+      const parsedTime = item.time ? parseTimeToSQL(item.time) : null;
+
+      console.warn('📦 STACK: Insertando compuesto:', item.name, 'Hora:', parsedTime);
+
+      const { error } = await supabase.from('supplement_stack').insert({
         user_id: user.id,
         name: item.name,
         dose: item.dose,
         type: item.type,
         notes: item.notes,
-        time: item.time || null,
+        time: parsedTime,
         is_pre_workout: item.isPreWorkout || false,
         is_post_workout: item.isPostWorkout || false,
         days_of_week: item.daysOfWeek || [0, 1, 2, 3, 4, 5, 6],
       });
 
+      if (error) {
+        console.error('❌ STACK: Error insertando:', error.message);
+        Alert.alert('Error', `No se pudo agregar: ${error.message}`);
+        return;
+      }
+
+      console.warn('✅ STACK: Compuesto agregado exitosamente');
       fetchData();
     } catch (error) {
       console.error('Error adding stack item:', error);
+      Alert.alert('Error', 'No se pudo agregar el compuesto');
     }
   };
 
@@ -1024,6 +1157,8 @@ export default function PlanScreen() {
 
   // Handler for drag & drop
   const handleDragEnd = async (newIndex: number) => {
+    setDragTargetIndex(null);
+    setIsDraggingWorkout(false);
     await saveWorkoutPosition(newIndex);
   };
 
@@ -1188,28 +1323,69 @@ export default function PlanScreen() {
               </Text>
             </View>
           ) : (
-            timeline.map((item) => {
+            timeline.map((item, timelineIndex) => {
+              // Altura del bloque de entrenamiento comprimido (para crear espacio)
+              const WORKOUT_COMPRESSED_HEIGHT = 85;
+
+              // Calcular offset de animación basado en la posición del drag
+              const getAnimatedOffset = () => {
+                if (!isDraggingWorkout || dragTargetIndex === null) return 0;
+                if (item.type === 'workout') return 0;
+
+                const workoutCurrentPos = workoutPosIndex;
+                const workoutTargetPos = dragTargetIndex;
+
+                // Si el bloque se mueve hacia abajo
+                if (workoutTargetPos > workoutCurrentPos) {
+                  // Los items entre current+1 y target deben subir para abrir espacio abajo
+                  if (timelineIndex > workoutCurrentPos && timelineIndex <= workoutTargetPos) {
+                    return -WORKOUT_COMPRESSED_HEIGHT;
+                  }
+                }
+                // Si el bloque se mueve hacia arriba
+                else if (workoutTargetPos < workoutCurrentPos) {
+                  // Los items entre target y current-1 deben bajar para abrir espacio arriba
+                  if (timelineIndex >= workoutTargetPos && timelineIndex < workoutCurrentPos) {
+                    return WORKOUT_COMPRESSED_HEIGHT;
+                  }
+                }
+                return 0;
+              };
+
               if (item.type === 'meal') {
                 const meal = item.data as Meal;
                 const mealIndex = meals.findIndex((m) => m.id === meal.id);
+                const offset = getAnimatedOffset();
                 return (
-                  <MealCard
-                    key={meal.id}
-                    meal={meal}
-                    mealName={getMealName(mealIndex, meals.length)}
-                    onSwap={handleSwap}
-                    onTimeChange={handleTimeChange}
-                    onDelete={handleDeleteMeal}
-                    onDeleteOption={handleDeleteOption}
-                    onEdit={handleEditMeal}
-                    onAddOption={handleAddOption}
-                  />
+                  <AnimatedTimelineItem key={meal.id} offset={offset}>
+                    <MealCard
+                      meal={meal}
+                      mealName={getMealName(mealIndex, meals.length)}
+                      onSwap={handleSwap}
+                      onTimeChange={handleTimeChange}
+                      onDelete={handleDeleteMeal}
+                      onDeleteOption={handleDeleteOption}
+                      onEdit={handleEditMeal}
+                      onAddOption={handleAddOption}
+                      isCompressed={isDraggingWorkout}
+                    />
+                  </AnimatedTimelineItem>
                 );
               }
 
               if (item.type === 'stack') {
                 const stack = item.data as Stack;
-                return <StackCard key={stack.id} stack={stack} />;
+                const offset = getAnimatedOffset();
+                return (
+                  <AnimatedTimelineItem key={stack.id} offset={offset}>
+                    <StackCard
+                      stack={stack}
+                      onTimeChange={handleStackTimeChange}
+                      onItemDelete={handleRemoveStackItem}
+                      isCompressed={isDraggingWorkout}
+                    />
+                  </AnimatedTimelineItem>
+                );
               }
 
               if (item.type === 'workout') {
@@ -1223,8 +1399,19 @@ export default function PlanScreen() {
                     onMoveUp={() => handleMoveWorkout('up')}
                     onMoveDown={() => handleMoveWorkout('down')}
                     onDragEnd={handleDragEnd}
+                    onDragStart={() => {
+                      setIsDraggingWorkout(true);
+                      setDragTargetIndex(workoutPosIndex);
+                    }}
+                    onDragCancel={() => {
+                      setIsDraggingWorkout(false);
+                      setDragTargetIndex(null);
+                    }}
+                    onPositionChange={(targetIndex) => {
+                      setDragTargetIndex(targetIndex);
+                    }}
                     onPressRoutine={() => router.push('/(tabs)/gym')}
-                    itemHeight={160}
+                    itemHeight={isDraggingWorkout ? 85 : 160}
                   />
                 );
               }

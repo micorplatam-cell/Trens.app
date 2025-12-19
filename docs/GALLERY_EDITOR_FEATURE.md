@@ -235,7 +235,7 @@ const [mediaType, setMediaType] = useState<'photo' | 'video'>('photo');
 
 - [ ] Múltiples fotos por ejercicio (carousel)
 - [ ] Compartir ejercicio con foto en redes sociales
-- [ ] IA para analizar forma del ejercicio (Axis IA integration)
+- [ ] IA para analizar forma del ejercicio (Hank IA integration)
 
 ---
 

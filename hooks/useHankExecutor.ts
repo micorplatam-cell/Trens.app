@@ -7,6 +7,7 @@ import {
   gymAddExercise,
   gymRemoveExercise,
   gymReplaceExercise,
+  gymGetTodayRoutine,
   gymListExercises,
   assetUpdateField,
   assetRead,
@@ -30,7 +31,13 @@ import {
   planGetMeals,
   planAddSupplement,
   planRemoveSupplement,
+  planUpdateSupplementTime,
   planGetStack,
+  // Omniscient Tools
+  getFullUserContext,
+  planGetMealDetails,
+  // System Tools
+  hankClearHistory,
   TOOL_DEFINITIONS,
 } from '../services/hank/tools';
 import { calculateMacrosWithAI, analyzeDailyNutrition } from '../services/hank/nutrition';
@@ -89,6 +96,13 @@ export const useHankExecutor = (
               p.oldExerciseName as string,
               p.newExerciseName as string,
               p.trainingDay as number | undefined
+            );
+            break;
+
+          case 'GYM_GET_TODAY_ROUTINE':
+            result = await gymGetTodayRoutine(
+              userId,
+              (p.trainingDay as number) ?? currentTrainingDay
             );
             break;
 
@@ -325,6 +339,17 @@ export const useHankExecutor = (
             break;
           }
 
+          // ============================================================================
+          // OMNISCIENT TOOLS - HANK es Dios en TRENS
+          // ============================================================================
+          case 'GET_FULL_USER_CONTEXT':
+            result = await getFullUserContext(userId);
+            break;
+
+          case 'PLAN_GET_MEAL_DETAILS':
+            result = await planGetMealDetails(userId, p.mealIdentifier as string);
+            break;
+
           case 'PLAN_GET_MEALS':
             result = await planGetMeals(userId);
             break;
@@ -340,6 +365,10 @@ export const useHankExecutor = (
 
           case 'PLAN_REMOVE_SUPPLEMENT':
             result = await planRemoveSupplement(userId, p.name as string);
+            break;
+
+          case 'PLAN_UPDATE_SUPPLEMENT_TIME':
+            result = await planUpdateSupplementTime(userId, p.name as string, p.newTime as string);
             break;
 
           case 'PLAN_GET_STACK':
@@ -381,6 +410,11 @@ ${analysis.recommendations.map((r) => `• ${r}`).join('\n')}`,
             }
             break;
           }
+
+          // SYSTEM TOOLS
+          case 'HANK_CLEAR_HISTORY':
+            result = await hankClearHistory(userId);
+            break;
 
           default:
             console.warn(`Herramienta no implementada: ${toolCall.tool}`);

@@ -11,6 +11,7 @@ export type HankToolName =
   | 'GYM_REMOVE_EXERCISE'
   | 'GYM_REPLACE_EXERCISE'
   | 'GYM_MODIFY_SERIES'
+  | 'GYM_GET_TODAY_ROUTINE'
   | 'GYM_LIST_EXERCISES'
   // Asset Tools (LIQUID DATA)
   | 'ASSET_UPDATE_FIELD'
@@ -26,8 +27,13 @@ export type HankToolName =
   | 'ADN_UPDATE_PROFILE'
   | 'ADN_ADD_MEASUREMENT'
   | 'ADN_REMOVE_MEASUREMENT'
+  // OMNISCIENT Tools (HANK es Dios)
+  | 'GET_FULL_USER_CONTEXT'
+  | 'PLAN_GET_MEAL_DETAILS'
   // PLAN Tools (Nutrición y Farmacología)
   | 'PLAN_ADD_MEAL'
+  | 'PLAN_EDIT_MEAL'
+  | 'PLAN_DELETE_MEAL'
   | 'PLAN_REMOVE_MEAL'
   | 'PLAN_UPDATE_MEAL_TIME'
   | 'PLAN_UPDATE_INGREDIENTS'
@@ -35,6 +41,7 @@ export type HankToolName =
   | 'PLAN_GET_MEALS'
   | 'PLAN_ADD_SUPPLEMENT'
   | 'PLAN_REMOVE_SUPPLEMENT'
+  | 'PLAN_UPDATE_SUPPLEMENT_TIME'
   | 'PLAN_GET_STACK'
   | 'PLAN_ANALYZE_NUTRITION'
   // Diet Tools (Legacy)
@@ -43,7 +50,9 @@ export type HankToolName =
   // Logging Tools
   | 'LOG_WORKOUT_SET'
   // Context Tools
-  | 'GET_USER_CONTEXT';
+  | 'GET_USER_CONTEXT'
+  // System Tools
+  | 'HANK_CLEAR_HISTORY';
 
 // ============================================================================
 // TOOL PARAMETER DEFINITIONS (Para Function Calling del LLM)

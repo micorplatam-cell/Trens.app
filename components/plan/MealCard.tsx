@@ -52,6 +52,7 @@ interface MealCardProps {
   onDeleteOption?: (mealId: string, optionId: string) => void;
   onEdit?: (mealId: string) => void;
   onAddOption?: (mealId: string) => void;
+  isCompressed?: boolean;
 }
 
 // ============================================================================
@@ -79,26 +80,13 @@ export const MealCard: React.FC<MealCardProps> = ({
   onDeleteOption,
   onEdit,
   onAddOption,
+  isCompressed = false,
 }) => {
+  // ============================================================================
+  // HOOKS - Siempre deben llamarse primero, antes de cualquier return
+  // ============================================================================
   const scrollViewRef = useRef<ScrollView>(null);
-  const hasMultipleOptions = meal.options.length > 1;
-  const canAddMore = meal.options.length < 5; // Máximo 5 opciones
   const scaleAnim = useSharedValue(1);
-
-  // Formatear hora a AM/PM
-  const displayTime = formatTimeToAMPM(meal.time);
-
-  // Long press handler - Delete option or entire meal
-  const handleLongPress = (optionId: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    // Si hay múltiples opciones, eliminar solo la opción
-    if (hasMultipleOptions && onDeleteOption) {
-      onDeleteOption(meal.id, optionId);
-    } else if (onDelete) {
-      // Si solo hay una opción, eliminar toda la comida
-      onDelete(meal.id);
-    }
-  };
 
   // Navegar a opción específica
   const navigateToOption = useCallback(
@@ -126,6 +114,56 @@ export const MealCard: React.FC<MealCardProps> = ({
     [meal.id, meal.selectedOption, meal.options.length, onSwap]
   );
 
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scaleAnim.value }],
+  }));
+
+  // ============================================================================
+  // DERIVED VALUES
+  // ============================================================================
+  const hasMultipleOptions = meal.options.length > 1;
+  const canAddMore = meal.options.length < 5; // Máximo 5 opciones
+  const displayTime = formatTimeToAMPM(meal.time);
+
+  // ============================================================================
+  // MODO COMPRIMIDO - Para drag & drop (después de los hooks)
+  // ============================================================================
+  if (isCompressed) {
+    const currentOption = meal.options[meal.selectedOption] || meal.options[0];
+    const ingredientNames = currentOption?.ingredients?.map((i) => i.name).join(', ') || '';
+    return (
+      <View className="mb-3 pl-8 relative">
+        <View className="absolute left-2.5 top-3 w-3 h-3 rounded-full bg-savage-red/60 border-2 border-[#111111]" />
+        <View className="bg-[#161616] border border-savage-red/30 rounded-xl px-4 py-3 flex-row items-center justify-between">
+          <View className="flex-1 mr-3">
+            <Text className="text-white text-sm font-bold uppercase mb-1">{mealName}</Text>
+            <Text className="text-zinc-400 text-sm" numberOfLines={1}>
+              {ingredientNames || 'Sin ingredientes'}
+            </Text>
+          </View>
+          <View className="bg-savage-red/20 px-3 py-1.5 rounded-lg">
+            <Text className="text-savage-red text-sm font-bold">{displayTime}</Text>
+          </View>
+        </View>
+      </View>
+    );
+  }
+
+  // ============================================================================
+  // HANDLERS
+  // ============================================================================
+  // Long press handler - Delete option or entire meal
+  const handleLongPress = (optionId: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    // Si hay múltiples opciones, eliminar solo la opción
+    if (hasMultipleOptions && onDeleteOption) {
+      onDeleteOption(meal.id, optionId);
+    } else if (onDelete) {
+      // Si solo hay una opción, eliminar toda la comida
+      onDelete(meal.id);
+    }
+  };
+
   // Handle add option
   const handleAddOption = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -133,10 +171,6 @@ export const MealCard: React.FC<MealCardProps> = ({
       onAddOption(meal.id);
     }
   };
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scaleAnim.value }],
-  }));
 
   // ============================================================================
   // RENDER OPTION CARD
