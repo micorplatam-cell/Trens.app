@@ -39,13 +39,12 @@ import Animated, {
   withSequence,
   Easing,
 } from 'react-native-reanimated';
-import * as FileSystem from 'expo-file-system/legacy';
-import { decode } from 'base64-arraybuffer';
 import { supabase } from '../../../lib/supabase';
 import { useUserRoleContext } from '../../../context/UserRoleContext';
 import { useProContext } from '../../../context/ProContext';
 import { ProUpgradeModal } from '../../../components/pro/ProUpgradeModal';
 import spotify from '../../../services/spotify/spotify';
+import cloudflareStream from '../../../services/cloudflare/stream';
 
 // ============================================================================
 // TIPOS
@@ -135,6 +134,58 @@ export default function ProScreen() {
   // Timer ref
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Flag para evitar múltiples aperturas
+  const hasOpenedCamera = useRef(false);
+
+  // -------------------------------------------------------------------------
+  // AUTO-OPEN CAMERA para TODOS los usuarios
+  // FREE puede grabar y editar, pero no guardar/compartir
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    const autoOpenCamera = async () => {
+      // Solo abrir una vez y si no hay video capturado
+      if (hasOpenedCamera.current || capturedVideo || overlayVisible) return;
+
+      hasOpenedCamera.current = true;
+
+      // Pedir permisos si no los tiene
+      if (!permission?.granted) {
+        const result = await requestPermission();
+        if (!result.granted) return;
+      }
+
+      // Capturar metadata de Spotify si está conectado (solo PRO)
+      if (isPro && spotifyConnected && spotifyPremium) {
+        try {
+          const currentTrack = await spotify.getCurrentTrack();
+          if (currentTrack) {
+            setSpotifyMetadata({
+              enabled: true,
+              trackUri: currentTrack.uri,
+              positionMs: currentTrack.positionMs,
+              trackName: currentTrack.name,
+              artist: currentTrack.artist,
+              albumArt: currentTrack.albumArt,
+            });
+          }
+        } catch (error) {
+          console.warn('No se pudo capturar metadata de Spotify:', error);
+        }
+      }
+
+      setCameraVisible(true);
+    };
+
+    autoOpenCamera();
+  }, [permission?.granted]);
+
+  // Reset flag cuando se cierra la cámara para permitir reapertura
+  useEffect(() => {
+    if (!cameraVisible && !overlayVisible && !capturedVideo) {
+      hasOpenedCamera.current = false;
+    }
+  }, [cameraVisible, overlayVisible, capturedVideo]);
+
   // Animation - Breathing effect para el shutter
   const shutterScale = useSharedValue(1);
   const pulseOpacity = useSharedValue(0.5);
@@ -211,25 +262,19 @@ export default function ProScreen() {
   // -------------------------------------------------------------------------
   // BUTTON PRO HANDLER - CRÍTICO según MASTER
   // Tap PRO → Cámara activa → Grabación
-  // Si NO es PRO → Modal upgrade
+  // FREE también puede grabar, el bloqueo es al guardar
   // -------------------------------------------------------------------------
   const handleProButtonPress = useCallback(async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-    // Si es FREE, mostrar modal de upgrade
-    if (isFree || !permissions.canUseCamera) {
-      setShowUpgradeModal(true);
-      return;
-    }
-
-    // Si es PRO, abrir cámara INMEDIATAMENTE
+    // Pedir permisos de cámara si no los tiene
     if (!permission?.granted) {
       const result = await requestPermission();
       if (!result.granted) return;
     }
 
-    // Capturar metadata de Spotify si está conectado
-    if (spotifyConnected && spotifyPremium) {
+    // Capturar metadata de Spotify si está conectado (solo PRO)
+    if (isPro && spotifyConnected && spotifyPremium) {
       try {
         const currentTrack = await spotify.getCurrentTrack();
         if (currentTrack) {
@@ -253,14 +298,7 @@ export default function ProScreen() {
     setTimeout(() => {
       startRecording();
     }, 500);
-  }, [
-    isFree,
-    permissions.canUseCamera,
-    permission,
-    requestPermission,
-    spotifyConnected,
-    spotifyPremium,
-  ]);
+  }, [isPro, permission, requestPermission, spotifyConnected, spotifyPremium]);
 
   // -------------------------------------------------------------------------
   // CAMERA HANDLERS
@@ -356,52 +394,46 @@ export default function ProScreen() {
   // -------------------------------------------------------------------------
   // SAVE/SHARE HANDLERS - Según MASTER
   // Al compartir: El video se guarda + respeta Público/Bóveda
+  // FREE puede grabar pero NO guardar/compartir
+  // USA CLOUDFLARE STREAM para transcoding y adaptive bitrate
   // -------------------------------------------------------------------------
   const saveVideo = async (share: boolean = false) => {
+    // Si es FREE, mostrar modal de upgrade
+    if (isFree || !permissions.canPublish) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      setShowUpgradeModal(true);
+      return;
+    }
+
     if (!capturedVideo || !user) return;
 
     setSaving(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     try {
-      // 1. LEER EL ARCHIVO DE VIDEO
-      const videoUri = capturedVideo.uri;
-      const fileInfo = await FileSystem.getInfoAsync(videoUri);
-
-      if (!fileInfo.exists) {
-        throw new Error('El archivo de video no existe');
-      }
-
-      // 2. CONVERTIR A BASE64 Y SUBIR A SUPABASE STORAGE
-      const base64 = await FileSystem.readAsStringAsync(videoUri, {
-        encoding: FileSystem.EncodingType.Base64,
+      // 1. SUBIR VIDEO A CLOUDFLARE STREAM
+      const uploadResult = await cloudflareStream.uploadVideo(capturedVideo.uri, {
+        name: `TRENS_${user.id}_${Date.now()}`,
+        exerciseName: proContext.type === 'tactical' ? proContext.exerciseName : undefined,
+        userId: user.id,
+        isPublic: isPublic,
       });
 
-      const fileName = `${user.id}/${Date.now()}.mp4`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('pro-videos')
-        .upload(fileName, decode(base64), {
-          contentType: 'video/mp4',
-          upsert: false,
-        });
-
-      if (uploadError) {
-        console.error('Error subiendo video:', uploadError);
-        throw uploadError;
+      if (!uploadResult.success || !uploadResult.videoId) {
+        throw new Error(uploadResult.error || 'Error subiendo a Cloudflare Stream');
       }
 
-      // 3. OBTENER URL PÚBLICA
-      const { data: urlData } = supabase.storage.from('pro-videos').getPublicUrl(fileName);
-      const videoUrl = urlData.publicUrl;
+      // 2. OBTENER URLs DE REPRODUCCIÓN
+      const playbackUrls = cloudflareStream.getPlaybackUrls(uploadResult.videoId);
 
-      // 4. GUARDAR EN TABLA pro_videos
+      // 3. GUARDAR EN TABLA pro_videos (metadata en Supabase)
       const { error: insertError } = await supabase
         .from('pro_videos')
         .insert({
           user_id: user.id,
-          video_url: videoUrl,
-          thumbnail_url: videoUrl,
+          video_url: playbackUrls.hls, // URL HLS para adaptive bitrate
+          thumbnail_url: playbackUrls.thumbnail, // Thumbnail automático
+          cloudflare_video_id: uploadResult.videoId, // ID de Cloudflare Stream
           duration_seconds: Math.round(capturedVideo.duration),
           context_type: proContext.type,
           exercise_id: proContext.type === 'tactical' ? proContext.exerciseId : null,
@@ -433,7 +465,7 @@ export default function ProScreen() {
         throw insertError;
       }
 
-      // 5. COMPARTIR SI SE SOLICITA
+      // 4. COMPARTIR SI SE SOLICITA
       // El video se guarda Y se comparte, respetando Público/Bóveda
       if (share) {
         // Generar mensaje con metadata quemada
@@ -460,7 +492,7 @@ export default function ProScreen() {
 
         await Share.share({
           message: shareMessage,
-          url: videoUrl,
+          url: playbackUrls.hls,
         });
       }
 
@@ -513,109 +545,110 @@ export default function ProScreen() {
   const renderCamera = () => (
     <Modal visible={cameraVisible} animationType="none" presentationStyle="fullScreen">
       <View className="flex-1 bg-black">
+        {/* CameraView sin children */}
         <CameraView
           ref={cameraRef}
-          style={{ flex: 1 }}
+          style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
           facing={cameraFacing}
           mode="video"
           flash={flashMode}
-        >
-          {/* HUD SUPERIOR */}
-          <LinearGradient
-            colors={['rgba(0,0,0,0.7)', 'transparent']}
-            className="absolute top-0 left-0 right-0 h-28"
-          />
-          <View className="absolute top-14 left-0 right-0 px-4 flex-row justify-between items-center">
-            {/* Etiqueta de Contexto (Izquierda) */}
-            <View className="flex-row items-center">
-              <Animated.View style={pulseAnimatedStyle}>
-                <View className="w-3 h-3 bg-savage-red rounded-full mr-2" />
-              </Animated.View>
-              <Text className="text-white font-bold text-sm tracking-wide">
-                {isRecording ? getContextLabel() : 'PRO'}
+        />
+
+        {/* HUD SUPERIOR - Fuera del CameraView */}
+        <LinearGradient
+          colors={['rgba(0,0,0,0.7)', 'transparent']}
+          className="absolute top-0 left-0 right-0 h-28"
+        />
+        <View className="absolute top-14 left-0 right-0 px-4 flex-row justify-between items-center z-10">
+          {/* Etiqueta de Contexto (Izquierda) */}
+          <View className="flex-row items-center">
+            <Animated.View style={pulseAnimatedStyle}>
+              <View className="w-3 h-3 bg-savage-red rounded-full mr-2" />
+            </Animated.View>
+            <Text className="text-white font-bold text-sm tracking-wide">
+              {isRecording ? getContextLabel() : 'PRO'}
+            </Text>
+          </View>
+
+          {/* Herramientas Rápidas (Derecha) */}
+          <View className="flex-row items-center gap-4">
+            <TouchableOpacity onPress={toggleFlash} className="bg-black/40 p-2 rounded-full">
+              {getFlashIcon()}
+            </TouchableOpacity>
+            <TouchableOpacity onPress={flipCamera} className="bg-black/40 p-2 rounded-full">
+              <RotateCcw color="#FFFFFF" size={24} />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={closeCamera} className="bg-black/40 p-2 rounded-full">
+              <X color="#FFFFFF" size={24} />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* CONTADOR TIEMPO (Solo grabando) */}
+        {isRecording && (
+          <View className="absolute top-32 left-0 right-0 items-center z-10">
+            <View className="bg-black/60 px-4 py-2 rounded-full">
+              <Text className="text-white font-mono font-bold text-lg">
+                {formatTime(recordingTime)}
               </Text>
             </View>
-
-            {/* Herramientas Rápidas (Derecha) */}
-            <View className="flex-row items-center gap-4">
-              <TouchableOpacity onPress={toggleFlash} className="bg-black/40 p-2 rounded-full">
-                {getFlashIcon()}
-              </TouchableOpacity>
-              <TouchableOpacity onPress={flipCamera} className="bg-black/40 p-2 rounded-full">
-                <RotateCcw color="#FFFFFF" size={24} />
-              </TouchableOpacity>
-              <TouchableOpacity onPress={closeCamera} className="bg-black/40 p-2 rounded-full">
-                <X color="#FFFFFF" size={24} />
-              </TouchableOpacity>
-            </View>
           </View>
+        )}
 
-          {/* CONTADOR TIEMPO (Solo grabando) */}
-          {isRecording && (
-            <View className="absolute top-32 left-0 right-0 items-center">
-              <View className="bg-black/60 px-4 py-2 rounded-full">
-                <Text className="text-white font-mono font-bold text-lg">
-                  {formatTime(recordingTime)}
+        {/* SPOTIFY INDICATOR (Solo si hay música capturada) */}
+        {isRecording && spotifyMetadata && (
+          <View className="absolute top-44 left-4 right-4 z-10">
+            <View className="bg-black/70 rounded-xl p-3 flex-row items-center border border-green-500/30">
+              <View className="w-10 h-10 bg-green-500 rounded-lg items-center justify-center mr-3">
+                <Music color="#000" size={20} />
+              </View>
+              <View className="flex-1">
+                <Text className="text-white font-bold text-sm" numberOfLines={1}>
+                  {spotifyMetadata.trackName}
+                </Text>
+                <Text className="text-zinc-400 text-xs" numberOfLines={1}>
+                  {spotifyMetadata.artist}
                 </Text>
               </View>
-            </View>
-          )}
-
-          {/* SPOTIFY INDICATOR (Solo si hay música capturada) */}
-          {isRecording && spotifyMetadata && (
-            <View className="absolute top-44 left-4 right-4">
-              <View className="bg-black/70 rounded-xl p-3 flex-row items-center border border-green-500/30">
-                <View className="w-10 h-10 bg-green-500 rounded-lg items-center justify-center mr-3">
-                  <Music color="#000" size={20} />
-                </View>
-                <View className="flex-1">
-                  <Text className="text-white font-bold text-sm" numberOfLines={1}>
-                    {spotifyMetadata.trackName}
-                  </Text>
-                  <Text className="text-zinc-400 text-xs" numberOfLines={1}>
-                    {spotifyMetadata.artist}
-                  </Text>
-                </View>
-                <View className="bg-green-500/20 px-2 py-1 rounded">
-                  <Text className="text-green-500 text-xs font-bold">SYNC</Text>
-                </View>
+              <View className="bg-green-500/20 px-2 py-1 rounded">
+                <Text className="text-green-500 text-xs font-bold">SYNC</Text>
               </View>
             </View>
-          )}
-
-          {/* CONTROLES INFERIORES */}
-          <LinearGradient
-            colors={['transparent', 'rgba(0,0,0,0.8)']}
-            className="absolute bottom-0 left-0 right-0 h-40"
-          />
-          <View className="absolute bottom-12 left-0 right-0 items-center">
-            {/* SHUTTER BUTTON */}
-            <Animated.View style={shutterAnimatedStyle}>
-              <TouchableOpacity
-                onPress={isRecording ? stopRecording : startRecording}
-                activeOpacity={0.8}
-              >
-                <View
-                  className="w-24 h-24 rounded-full items-center justify-center"
-                  style={{
-                    borderWidth: 4,
-                    borderColor: '#DC2626',
-                    shadowColor: '#DC2626',
-                    shadowOffset: { width: 0, height: 0 },
-                    shadowOpacity: 0.8,
-                    shadowRadius: 12,
-                  }}
-                >
-                  {isRecording ? (
-                    <View className="w-8 h-8 bg-savage-red rounded-md" />
-                  ) : (
-                    <View className="w-16 h-16 rounded-full border-2 border-savage-red/50" />
-                  )}
-                </View>
-              </TouchableOpacity>
-            </Animated.View>
           </View>
-        </CameraView>
+        )}
+
+        {/* CONTROLES INFERIORES */}
+        <LinearGradient
+          colors={['transparent', 'rgba(0,0,0,0.8)']}
+          className="absolute bottom-0 left-0 right-0 h-40"
+        />
+        <View className="absolute bottom-12 left-0 right-0 items-center z-10">
+          {/* SHUTTER BUTTON */}
+          <Animated.View style={shutterAnimatedStyle}>
+            <TouchableOpacity
+              onPress={isRecording ? stopRecording : startRecording}
+              activeOpacity={0.8}
+            >
+              <View
+                className="w-24 h-24 rounded-full items-center justify-center"
+                style={{
+                  borderWidth: 4,
+                  borderColor: '#DC2626',
+                  shadowColor: '#DC2626',
+                  shadowOffset: { width: 0, height: 0 },
+                  shadowOpacity: 0.8,
+                  shadowRadius: 12,
+                }}
+              >
+                {isRecording ? (
+                  <View className="w-8 h-8 bg-savage-red rounded-md" />
+                ) : (
+                  <View className="w-16 h-16 rounded-full border-2 border-savage-red/50" />
+                )}
+              </View>
+            </TouchableOpacity>
+          </Animated.View>
+        </View>
       </View>
     </Modal>
   );
