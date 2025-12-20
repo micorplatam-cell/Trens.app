@@ -16,6 +16,7 @@ import {
   Platform,
   Dimensions,
   Pressable,
+  PanResponder,
 } from 'react-native';
 import Animated, {
   useAnimatedStyle,
@@ -30,7 +31,16 @@ import Animated, {
   cancelAnimation,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
-import { Bot, Send, Mic, MicOff, Sparkles, ChevronDown, Check, X } from 'lucide-react-native';
+import {
+  GitlabIcon as Bot,
+  Send,
+  Mic,
+  MicOff,
+  Sparkles,
+  ChevronDown,
+  Check,
+  X,
+} from 'lucide-react-native';
 import { useHank } from '../../context/HankContext';
 import { useVoiceInput } from '../../hooks/useVoiceInput';
 import { callGemini } from '../../services/hank/gemini';
@@ -63,7 +73,7 @@ interface DBUIMessage {
 // CONSTANTS
 // ============================================================================
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
-const PANEL_HEIGHT = SCREEN_HEIGHT * 0.55;
+const PANEL_HEIGHT = SCREEN_HEIGHT * 0.8;
 const LONG_PRESS_DURATION = 400; // ms para activar long press
 
 // ============================================================================
@@ -764,6 +774,10 @@ export const HankOverlay: React.FC = () => {
   const takeoverResultRef = useRef<HankToolResult[] | null>(null);
 
   const flatListRef = useRef<FlatList>(null);
+
+  // Animated value para cierre por gesto
+  const translateY = useSharedValue(0);
+
   const {
     executeCommand,
     executeTool,
@@ -774,6 +788,7 @@ export const HankOverlay: React.FC = () => {
     userProfile,
     availableExercises,
     clearConversation,
+    saveMessageToSupabase,
   } = useHank();
 
   // Voice input hook
@@ -784,6 +799,33 @@ export const HankOverlay: React.FC = () => {
     stopRecording,
     error: voiceError,
   } = useVoiceInput();
+
+  // -------------------------------------------------------------------------
+  // PAN RESPONDER - Cerrar deslizando hacia abajo
+  // -------------------------------------------------------------------------
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 5,
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0) {
+          translateY.value = gestureState.dy;
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 150) {
+          setIsOpen(false);
+          setTimeout(() => {
+            translateY.value = 0;
+          }, 300);
+        } else {
+          // Vibración cuando vuelve arriba
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          translateY.value = withTiming(0, { duration: 200 });
+        }
+      },
+    })
+  ).current;
 
   // -------------------------------------------------------------------------
   // HELPER: Verificar si debe limpiar la UI del chat
@@ -901,10 +943,20 @@ export const HankOverlay: React.FC = () => {
   const panelY = useSharedValue(PANEL_HEIGHT);
 
   useEffect(() => {
-    panelY.value = withSpring(isOpen ? 0 : PANEL_HEIGHT, {
-      damping: 20,
-      stiffness: 200,
-    });
+    if (isOpen) {
+      // Abrir sin rebote, con vibración al llegar arriba
+      panelY.value = withTiming(0, { duration: 300 }, () => {
+        // Vibración cuando llega arriba
+        'worklet';
+        // No podemos llamar Haptics directamente en worklet, usar runOnJS
+      });
+      // Vibración después de 300ms
+      setTimeout(() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      }, 300);
+    } else {
+      panelY.value = withTiming(PANEL_HEIGHT, { duration: 300 });
+    }
   }, [isOpen, panelY]);
 
   const panelStyle = useAnimatedStyle(() => ({
@@ -973,72 +1025,72 @@ export const HankOverlay: React.FC = () => {
 
   const handleMicPress = async () => {
     if (isRecording) {
-      // Detener grabación y transcribir
-      console.log('🎤 Deteniendo grabación...');
-      const transcription = await stopRecording();
-
-      if (transcription) {
-        // Poner el texto transcrito en el input y enviarlo automáticamente
-        setInputText(transcription);
-
-        // Enviar automáticamente
-        const userMessage: ChatMessage = {
-          id: Date.now().toString(),
-          role: 'user',
-          content: transcription,
-          timestamp: new Date(),
-        };
-        setMessages((prev) => [...prev, userMessage]);
-
-        // Agregar indicador de procesamiento
-        const thinkingMessage: ChatMessage = {
-          id: `thinking-${Date.now()}`,
-          role: 'hank',
-          content: '🎤 ' + transcription,
-          timestamp: new Date(),
-        };
-        setMessages((prev) => [...prev, thinkingMessage]);
-
-        // Ejecutar comando
-        const results = await executeCommand(transcription);
-
-        // Remover thinking
-        setMessages((prev) => prev.filter((m) => !m.id.startsWith('thinking-')));
-
-        // Verificar si debe limpiar la UI del chat
-        if (checkAndClearUIChat(results)) {
-          setInputText('');
-          return; // Ya se limpió, no agregar más mensajes
-        }
-
-        const hankMessage: ChatMessage = {
-          id: `hank-${Date.now()}`,
-          role: 'hank',
-          content: results.length > 0 ? results[0].message : 'Comando ejecutado.',
-          timestamp: new Date(),
-          // Solo mostrar results si hay más de uno (evita duplicación)
-          results: results.length > 1 ? results : undefined,
-        };
-        setMessages((prev) => [...prev, hankMessage]);
-        setInputText('');
-
-        setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: true });
-        }, 100);
-      } else if (voiceError) {
-        // Mostrar error
-        const errorMessage: ChatMessage = {
-          id: `error-${Date.now()}`,
-          role: 'hank',
-          content: `❌ ${voiceError}`,
-          timestamp: new Date(),
-        };
-        setMessages((prev) => [...prev, errorMessage]);
-      }
+      // Detener grabación manualmente (cancelar auto-stop)
+      console.log('🎤 Cancelando grabación...');
+      await stopRecording();
+      // No procesar nada, solo detener
     } else {
-      // Iniciar grabación
-      console.log('🎤 Iniciando grabación...');
-      await startRecording();
+      // Iniciar grabación CON auto-stop (detección de silencio)
+      console.log('🎤 Iniciando grabación con auto-stop...');
+      await startRecording(true, async (transcription) => {
+        // Callback ejecutado automáticamente cuando auto-stop se activa
+        console.log('🎤 Auto-stop activado, procesando transcripción...');
+
+        if (transcription) {
+          // Agregar mensaje del usuario
+          const userMessage: ChatMessage = {
+            id: Date.now().toString(),
+            role: 'user',
+            content: transcription,
+            timestamp: new Date(),
+          };
+          setMessages((prev) => [...prev, userMessage]);
+
+          // Agregar indicador de procesamiento
+          const thinkingMessage: ChatMessage = {
+            id: `thinking-${Date.now()}`,
+            role: 'hank',
+            content: '🎤 ' + transcription,
+            timestamp: new Date(),
+          };
+          setMessages((prev) => [...prev, thinkingMessage]);
+
+          // Ejecutar comando
+          const results = await executeCommand(transcription);
+
+          // Remover thinking
+          setMessages((prev) => prev.filter((m) => !m.id.startsWith('thinking-')));
+
+          // Verificar si debe limpiar la UI del chat
+          if (checkAndClearUIChat(results)) {
+            setInputText('');
+            return;
+          }
+
+          const hankMessage: ChatMessage = {
+            id: `hank-${Date.now()}`,
+            role: 'hank',
+            content: results.length > 0 ? results[0].message : 'Comando ejecutado.',
+            timestamp: new Date(),
+            results: results.length > 1 ? results : undefined,
+          };
+          setMessages((prev) => [...prev, hankMessage]);
+          setInputText('');
+
+          setTimeout(() => {
+            flatListRef.current?.scrollToEnd({ animated: true });
+          }, 100);
+        } else if (voiceError) {
+          // Mostrar error
+          const errorMessage: ChatMessage = {
+            id: `error-${Date.now()}`,
+            role: 'hank',
+            content: `❌ ${voiceError}`,
+            timestamp: new Date(),
+          };
+          setMessages((prev) => [...prev, errorMessage]);
+        }
+      });
     }
   };
 
@@ -1052,8 +1104,8 @@ export const HankOverlay: React.FC = () => {
     // Vibración fuerte para indicar que está escuchando
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
 
-    // Iniciar grabación
-    await startRecording();
+    // Iniciar grabación SIN auto-stop (modo manual)
+    await startRecording(false);
   }, [startRecording]);
 
   const handleLongPressEnd = useCallback(async () => {
@@ -1079,6 +1131,9 @@ export const HankOverlay: React.FC = () => {
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, userMessage]);
+
+      // Guardar mensaje de voz en Supabase
+      await saveMessageToSupabase('user', transcription);
 
       // Construir contexto para Gemini
       const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
@@ -1124,6 +1179,7 @@ export const HankOverlay: React.FC = () => {
             'PLAN_GET_MEAL_DETAILS',
             'PLAN_GET_STACK',
             'PLAN_ANALYZE_NUTRITION',
+            'PLAN_CALCULATE_MACROS', // Solo lee y calcula, no modifica
             // Contexto OMNISCIENTE
             'GET_USER_CONTEXT',
             'GET_FULL_USER_CONTEXT',
@@ -1267,6 +1323,7 @@ export const HankOverlay: React.FC = () => {
               timestamp: new Date(),
             };
             setMessages((prev) => [...prev, hankMessage]);
+            await saveMessageToSupabase('model', finalMessage);
           } else {
             // Mostrar respuesta de Gemini si no hubo resultados de herramientas
             const hankMessage: ChatMessage = {
@@ -1276,6 +1333,7 @@ export const HankOverlay: React.FC = () => {
               timestamp: new Date(),
             };
             setMessages((prev) => [...prev, hankMessage]);
+            await saveMessageToSupabase('model', result.message || 'Información obtenida.');
           }
         } else {
           // Es solo una pregunta, mostrar respuesta directamente
@@ -1286,6 +1344,7 @@ export const HankOverlay: React.FC = () => {
             timestamp: new Date(),
           };
           setMessages((prev) => [...prev, hankMessage]);
+          await saveMessageToSupabase('model', result.message || 'No entendí tu comando.');
         }
       } catch (error) {
         console.error('Error analizando comando:', error);
@@ -1296,6 +1355,7 @@ export const HankOverlay: React.FC = () => {
           timestamp: new Date(),
         };
         setMessages((prev) => [...prev, errorMessage]);
+        await saveMessageToSupabase('model', '❌ Error al procesar tu comando.');
       } finally {
         // Siempre apagar el indicador de procesamiento
         setIsLongPressProcessing(false);
@@ -1314,6 +1374,7 @@ export const HankOverlay: React.FC = () => {
     availableExercises,
     checkAndClearUIChat,
     executeTool,
+    saveMessageToSupabase,
   ]);
 
   // Confirmar ejecución pendiente - CON EFECTO HANK TAKEOVER
@@ -1391,13 +1452,14 @@ export const HankOverlay: React.FC = () => {
     }
 
     setMessages((prev) => prev.filter((m) => !m.pendingConfirmation).concat(resultMessage));
+    await saveMessageToSupabase('model', resultMessage.content);
     setPendingExecution(null);
     takeoverResultRef.current = null;
 
     setTimeout(() => {
       flatListRef.current?.scrollToEnd({ animated: true });
     }, 100);
-  }, [pendingExecution, executeTool, checkAndClearUIChat]);
+  }, [pendingExecution, executeTool, checkAndClearUIChat, saveMessageToSupabase]);
 
   // Cancelar ejecución pendiente
   const handleCancelExecution = useCallback(async () => {
@@ -1456,6 +1518,7 @@ export const HankOverlay: React.FC = () => {
                 borderTopRightRadius: 24,
                 borderTopWidth: 1,
                 borderColor: 'rgba(220, 38, 38, 0.3)',
+                transform: [{ translateY: translateY }],
               },
               panelStyle,
             ]}
@@ -1464,8 +1527,11 @@ export const HankOverlay: React.FC = () => {
               behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
               className="flex-1"
             >
-              {/* Header */}
-              <View className="flex-row items-center justify-between px-5 py-4 border-b border-zinc-800">
+              {/* Header con PanResponder para cerrar deslizando */}
+              <View
+                {...panResponder.panHandlers}
+                className="flex-row items-center justify-between px-5 py-4 border-b border-zinc-800"
+              >
                 <View className="flex-row items-center">
                   <View className="w-10 h-10 rounded-full bg-red-600/20 items-center justify-center mr-3">
                     <Bot size={22} color="#DC2626" />

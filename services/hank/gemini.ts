@@ -582,16 +582,34 @@ export async function callGemini(
       console.warn('⚠️ Gemini escribió código en lugar de function call, parseando...');
 
       // Intentar extraer el nombre de la función y parámetros del código
-      const codeMatch = textMessage.match(/(?:print\()?default_api\.(\w+)\(([^)]*)\)/);
+      const codeMatch = textMessage.match(/(?:print\()?default_api\.(\w+)\(([^)]*)\)/s);
       if (codeMatch) {
         const [, funcName, paramsStr] = codeMatch;
 
-        // Parsear parámetros simples (trainingDay=0, etc.)
+        // Parsear parámetros - manejar tanto simples como arrays
         const params: Record<string, unknown> = {};
-        const paramMatches = paramsStr.matchAll(/(\w+)=([^,\s)]+)/g);
-        for (const match of paramMatches) {
+
+        // Extraer time primero (parámetro simple)
+        const timeMatch = paramsStr.match(/time\s*=\s*["']([^"']+)["']/);
+        if (timeMatch) params.time = timeMatch[1];
+
+        // Extraer ingredients como array
+        const ingredientsMatch = paramsStr.match(/ingredients\s*=\s*\[([^\]]+)\]/);
+        if (ingredientsMatch) {
+          // Parsear ingredientes - buscar nombres
+          const ingredientsList: Array<{ name: string }> = [];
+          const nameMatches = ingredientsMatch[1].matchAll(/name\s*[:=]\s*["']?([^"',}]+)["']?/g);
+          for (const match of nameMatches) {
+            ingredientsList.push({ name: match[1].trim() });
+          }
+          params.ingredients = JSON.stringify(ingredientsList);
+        }
+
+        // Fallback para otros parámetros simples
+        const simpleParamMatches = paramsStr.matchAll(/(\w+)\s*=\s*(?![\[{])([^,\s)]+)/g);
+        for (const match of simpleParamMatches) {
           const [, key, value] = match;
-          // Convertir valores
+          if (key === 'time' || key === 'ingredients') continue; // Ya procesados
           if (value === 'true') params[key] = true;
           else if (value === 'false') params[key] = false;
           else if (/^\d+$/.test(value)) params[key] = parseInt(value);

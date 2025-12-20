@@ -49,6 +49,15 @@ interface UserProfile {
   goal: string;
   injuries: string;
   allergies: string;
+  // Campos de ultra personalización
+  age?: number;
+  sex?: string;
+  body_fat_percentage?: number;
+  muscle_mass?: number;
+  activity_level?: string;
+  training_experience?: string;
+  metabolic_rate?: string;
+  training_days_per_week?: number;
 }
 
 interface Measurement {
@@ -561,6 +570,15 @@ export default function AdnScreen() {
                 height: profile.height,
                 injuries: profile.injuries,
                 allergies: profile.allergies,
+                // Biometría avanzada
+                age: profile.age,
+                sex: profile.sex,
+                body_fat_percentage: profile.body_fat_percentage,
+                muscle_mass: profile.muscle_mass,
+                activity_level: profile.activity_level,
+                training_experience: profile.training_experience,
+                metabolic_rate: profile.metabolic_rate,
+                training_days_per_week: profile.training_days_per_week,
               }}
               measurements={measurements}
               onUpdate={fetchData}

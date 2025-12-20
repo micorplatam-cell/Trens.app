@@ -207,6 +207,31 @@ export default function PlanScreen() {
   const [dragTargetIndex, setDragTargetIndex] = useState<number | null>(null);
 
   // ============================================================================
+  // HELPER: Obtener perfil completo con medidas corporales Y macros cacheados
+  // ============================================================================
+  const getFullProfileWithMeasurements = async (userId: string) => {
+    // Obtener perfil (incluyendo macros cacheados)
+    const { data: profile } = await supabase
+      .from('user_profiles')
+      .select(
+        'weight, height, goal, age, sex, body_fat_percentage, muscle_mass, activity_level, training_experience, metabolic_rate, training_days_per_week, cached_daily_macros, cached_macros_meal_count, cached_macros_updated_at'
+      )
+      .eq('user_id', userId)
+      .single();
+
+    // Obtener medidas corporales
+    const { data: measurements } = await supabase
+      .from('body_measurements')
+      .select('name, value, is_dominant')
+      .eq('user_id', userId);
+
+    return {
+      profile,
+      bodyMeasurements: measurements || [],
+    };
+  };
+
+  // ============================================================================
   // DATA FETCHING
   // ============================================================================
   const fetchData = useCallback(async () => {
@@ -216,44 +241,23 @@ export default function PlanScreen() {
       } = await supabase.auth.getUser();
       if (!user) return;
 
-      // Fetch plan
-      const { data: planData } = await supabase
-        .from('nutrition_plans')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('is_active', true)
-        .single();
+      // Ya no usamos nutrition_plans, directamente cargamos meals
+      setPlanName('MI PLAN');
 
-      if (planData) {
-        setPlanName(planData.name || 'MI PLAN');
-      }
-
-      // Fetch meals with options and ingredients
-      const { data: mealsData } = await supabase
+      // Fetch meals - columnas reales de la tabla meals
+      const { data: mealsData, error: mealsError } = await supabase
         .from('meals')
-        .select(
-          `
-          id,
-          time,
-          selected_option,
-          meal_options (
-            id,
-            name,
-            option_index,
-            meal_ingredients (
-              id,
-              name,
-              quantity,
-              portion,
-              sort_order
-            )
-          )
-        `
-        )
+        .select('id, name, scheduled_time, ingredients, is_completed, position')
         .eq('user_id', user.id)
-        .order('time', { ascending: true });
+        .order('scheduled_time', { ascending: true });
 
-      if (mealsData) {
+      console.warn('🍽️ PLAN: Meals query result:', {
+        count: mealsData?.length || 0,
+        error: mealsError?.message,
+        meals: mealsData,
+      });
+
+      if (mealsData && mealsData.length > 0) {
         // Calcular macros objetivo por comida
         let perMealMacros: {
           calories: number;
@@ -262,65 +266,120 @@ export default function PlanScreen() {
           fat: number;
         } | null = null;
 
-        try {
-          const { data: profile } = await supabase
-            .from('user_profiles')
-            .select('weight, height, goal')
-            .eq('user_id', user.id)
-            .single();
+        // Obtener perfil con macros cacheados
+        const { profile, bodyMeasurements } = await getFullProfileWithMeasurements(user.id);
 
-          if (profile) {
-            const dailyMacros = await calculateUserDailyMacros({
-              weight: profile.weight || '75 KG',
-              height: profile.height || '1.75 M',
-              goal: profile.goal || 'MANTENER',
-              mealCount: mealsData.length || 3,
-            });
-            perMealMacros = dailyMacros.perMeal;
+        // Verificar si podemos usar macros cacheados de la DB
+        const dbCachedMacros = profile?.cached_daily_macros as any;
+        const dbCachedMealCount = profile?.cached_macros_meal_count as number;
+        const canUseDBCache =
+          dbCachedMacros && dbCachedMacros.perMeal && dbCachedMealCount === mealsData.length;
+
+        if (canUseDBCache) {
+          // Usar macros de la base de datos
+          if (__DEV__) {
+            console.log('💾 PLAN: Usando macros cacheados de DB');
           }
-        } catch (error) {
-          console.error('Error calculating daily macros:', error);
+          perMealMacros = dbCachedMacros.perMeal;
+        } else {
+          // Calcular nuevos macros con IA
+          if (__DEV__) {
+            console.log('🧠 PLAN: Calculando macros con IA...');
+          }
+          try {
+            if (profile) {
+              const dailyMacros = await calculateUserDailyMacros({
+                weight: profile.weight || '75 KG',
+                height: profile.height || '1.75 M',
+                goal: profile.goal || 'MANTENER',
+                mealCount: mealsData.length || 3,
+                // Datos adicionales para ultra personalización
+                age: profile.age || undefined,
+                sex: profile.sex || undefined,
+                bodyFatPercentage: profile.body_fat_percentage || undefined,
+                muscleMass: profile.muscle_mass || undefined,
+                activityLevel: profile.activity_level || 'MODERADO',
+                trainingExperience: profile.training_experience || undefined,
+                metabolicRate: profile.metabolic_rate || undefined,
+                trainingDaysPerWeek: profile.training_days_per_week || undefined,
+                // Medidas corporales
+                bodyMeasurements: bodyMeasurements,
+              });
+              perMealMacros = dailyMacros.perMeal;
+
+              // Guardar en DB para próximas cargas
+              await supabase
+                .from('user_profiles')
+                .update({
+                  cached_daily_macros: dailyMacros,
+                  cached_macros_meal_count: mealsData.length,
+                  cached_macros_updated_at: new Date().toISOString(),
+                })
+                .eq('user_id', user.id);
+
+              if (__DEV__) {
+                console.log('💾 PLAN: Macros guardados en DB para cache');
+              }
+            }
+          } catch (error) {
+            console.error('Error calculating daily macros:', error);
+          }
         }
 
-        const formattedMeals: Meal[] = mealsData.map((meal) => ({
-          id: meal.id,
-          time: meal.time?.slice(0, 5) || '12:00',
-          selectedOption: meal.selected_option || 0,
-          targetMacros: perMealMacros || undefined,
-          options: (meal.meal_options || [])
-            .sort(
-              (a: { option_index: number }, b: { option_index: number }) =>
-                a.option_index - b.option_index
-            )
-            .map(
-              (opt: {
-                id: string;
-                name: string;
-                meal_ingredients: {
-                  id: string;
-                  name: string;
-                  quantity: string;
-                  portion?: string;
-                  sort_order: number;
-                }[];
-              }) => ({
+        const formattedMeals: Meal[] = mealsData.map((meal: any) => {
+          // Si tiene ingredients como JSONB (nuevo formato)
+          const jsonIngredients = meal.ingredients || [];
+
+          // Si tiene meal_options relacionadas (formato antiguo)
+          const hasOptions = meal.meal_options && meal.meal_options.length > 0;
+
+          let options;
+          if (hasOptions) {
+            // Formato con opciones relacionadas
+            options = meal.meal_options
+              .sort((a: any, b: any) => (a.position || 0) - (b.position || 0))
+              .map((opt: any) => ({
                 id: opt.id,
                 name: opt.name || 'Opción',
-                ingredients: (opt.meal_ingredients || [])
-                  .sort(
-                    (a: { sort_order: number }, b: { sort_order: number }) =>
-                      a.sort_order - b.sort_order
-                  )
-                  .map((ing: { id: string; name: string; quantity: string; portion?: string }) => ({
-                    id: ing.id,
-                    name: ing.name,
-                    quantity: ing.quantity,
-                    portion: ing.portion,
-                  })),
-              })
-            ),
-        }));
+                ingredients: (opt.ingredients || []).map((ing: any, idx: number) => ({
+                  id: ing.id || `ing-${idx}`,
+                  name: ing.name,
+                  quantity: ing.quantity || '~100g',
+                  portion: ing.portion,
+                })),
+              }));
+          } else if (jsonIngredients.length > 0) {
+            // Formato JSONB directo - crear una opción por defecto
+            options = [
+              {
+                id: `opt-${meal.id}`,
+                name: meal.name || 'Opción Principal',
+                ingredients: jsonIngredients.map((ing: any, idx: number) => ({
+                  id: ing.id || `ing-${idx}`,
+                  name: ing.name,
+                  quantity: ing.quantity || '~100g',
+                  portion: ing.portion,
+                })),
+              },
+            ];
+          } else {
+            options = [];
+          }
+
+          return {
+            id: meal.id,
+            time: meal.scheduled_time?.slice(0, 5) || '12:00',
+            selectedOption: 0,
+            targetMacros: perMealMacros || undefined,
+            options,
+          };
+        });
         setMeals(formattedMeals);
+
+        // Guardar macros por comida en el estado para uso posterior
+        if (perMealMacros) {
+          setMealMacros(perMealMacros);
+        }
       }
 
       // Fetch supplement stack
@@ -348,14 +407,14 @@ export default function PlanScreen() {
       // Fetch workout block position
       const { data: posData, error: posError } = await supabase
         .from('workout_block_position')
-        .select('position_index')
+        .select('position')
         .eq('user_id', user.id)
         .order('updated_at', { ascending: false })
         .limit(1);
 
       console.warn('🏋️ PLAN: Posición cargada:', posData, posError);
       if (posData && posData.length > 0) {
-        setWorkoutPosIndex(posData[0].position_index);
+        setWorkoutPosIndex(posData[0].position);
       }
 
       // Fetch current training day from profiles
@@ -408,14 +467,14 @@ export default function PlanScreen() {
       console.warn(`🏋️ PLAN: Nombres de rutinas:`, routineNames);
 
       // Fetch exercises for current training day
-      // Cada ejercicio es un registro individual con asset_type='gym_exercise'
+      // Cada ejercicio es un registro individual con type='exercise'
       const { data: exercisesData, error: exercisesError } = await supabase
         .from('user_assets')
-        .select('id, name, asset_url, training_days, metadata')
+        .select('id, name, media_url, training_days, metadata')
         .eq('user_id', user.id)
-        .eq('asset_type', 'gym_exercise')
+        .eq('type', 'exercise')
         .is('deleted_at', null)
-        .order('order', { ascending: true });
+        .order('created_at', { ascending: true });
 
       console.warn(`🏋️ PLAN: Total ejercicios encontrados: ${exercisesData?.length || 0}`);
       if (exercisesError) {
@@ -459,7 +518,7 @@ export default function PlanScreen() {
 
         // Formatear ejercicios para el slider
         const formattedExercises = todayExercisesFiltered.map((item: any, idx: number) => {
-          const url = item.asset_url || '';
+          const url = item.media_url || '';
           const isVideo = isVideoUrl(url);
 
           // Para videos, intentar obtener thumbnail_url del metadata, o usar videoUrl
@@ -944,23 +1003,16 @@ export default function PlanScreen() {
           const newMealCount = meals.length + 1;
           let targetMacrosForNewMeal = newMealMacros;
 
-          if (!targetMacrosForNewMeal) {
-            // Recalcular si no hay macros precalculados
-            const { data: profile } = await supabase
-              .from('user_profiles')
-              .select('weight, height, goal')
-              .eq('user_id', user.id)
-              .single();
-
-            if (profile) {
-              const dailyMacros = await calculateUserDailyMacros({
-                weight: profile.weight || '75 KG',
-                height: profile.height || '1.75 M',
-                goal: profile.goal || 'MANTENER',
-                mealCount: newMealCount,
-              });
-              targetMacrosForNewMeal = dailyMacros.perMeal;
-            }
+          // Si no hay macros precalculados, usar mealMacros existente ajustado
+          if (!targetMacrosForNewMeal && mealMacros) {
+            // Ajustar macros para nueva cantidad de comidas
+            const factor = meals.length / newMealCount;
+            targetMacrosForNewMeal = {
+              calories: Math.round(mealMacros.calories * factor),
+              protein: Math.round(mealMacros.protein * factor),
+              carbs: Math.round(mealMacros.carbs * factor),
+              fat: Math.round(mealMacros.fat * factor),
+            };
           }
 
           // Usar calculateMealWithUserMacros si hay targetMacros
@@ -1068,34 +1120,8 @@ export default function PlanScreen() {
     const mealIndex = meals.findIndex((m) => m.id === mealId);
     const mealName = getMealName(mealIndex, meals.length);
 
-    // Calcular macros por comida si no existen
-    let macros = meal.targetMacros;
-    if (!macros) {
-      try {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        if (user) {
-          const { data: profile } = await supabase
-            .from('user_profiles')
-            .select('weight, height, goal')
-            .eq('user_id', user.id)
-            .single();
-
-          if (profile) {
-            const dailyMacros = await calculateUserDailyMacros({
-              weight: profile.weight || '75 KG',
-              height: profile.height || '1.75 M',
-              goal: profile.goal || 'MANTENER',
-              mealCount: meals.length || 3,
-            });
-            macros = dailyMacros.perMeal;
-          }
-        }
-      } catch (error) {
-        console.error('Error calculating macros:', error);
-      }
-    }
+    // Usar targetMacros de la comida o mealMacros del estado (ya calculado)
+    const macros = meal.targetMacros || mealMacros;
 
     setAddOptionMealId(mealId);
     setAddOptionMealName(mealName);
@@ -1183,7 +1209,7 @@ export default function PlanScreen() {
         // Actualizar el existente
         const { error } = await supabase
           .from('workout_block_position')
-          .update({ position_index: newIndex, updated_at: new Date().toISOString() })
+          .update({ position: newIndex, updated_at: new Date().toISOString() })
           .eq('id', existing.id);
         console.warn(
           '🏋️ PLAN: Actualizando posición:',
@@ -1194,7 +1220,7 @@ export default function PlanScreen() {
         // Insertar nuevo
         const { error } = await supabase
           .from('workout_block_position')
-          .insert({ user_id: user.id, position_index: newIndex });
+          .insert({ user_id: user.id, position: newIndex });
         console.warn(
           '🏋️ PLAN: Insertando posición:',
           newIndex,
@@ -1423,32 +1449,20 @@ export default function PlanScreen() {
 
         {/* Add Meal Button */}
         <Pressable
-          onPress={async () => {
+          onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            // Calcular macros para la nueva comida (n+1 comidas)
-            try {
-              const {
-                data: { user },
-              } = await supabase.auth.getUser();
-              if (user) {
-                const { data: profile } = await supabase
-                  .from('user_profiles')
-                  .select('weight, height, goal')
-                  .eq('user_id', user.id)
-                  .single();
-
-                if (profile) {
-                  const dailyMacros = await calculateUserDailyMacros({
-                    weight: profile.weight || '75 KG',
-                    height: profile.height || '1.75 M',
-                    goal: profile.goal || 'MANTENER',
-                    mealCount: meals.length + 1, // Nueva comida
-                  });
-                  setNewMealMacros(dailyMacros.perMeal);
-                }
-              }
-            } catch (error) {
-              console.error('Error calculating macros for new meal:', error);
+            // Usar mealMacros existente ajustado para n+1 comidas
+            if (mealMacros && meals.length > 0) {
+              const newMealCount = meals.length + 1;
+              const currentMealCount = meals.length;
+              // Ajustar macros: total diario / nueva cantidad de comidas
+              const adjustedMacros = {
+                calories: Math.round((mealMacros.calories * currentMealCount) / newMealCount),
+                protein: Math.round((mealMacros.protein * currentMealCount) / newMealCount),
+                carbs: Math.round((mealMacros.carbs * currentMealCount) / newMealCount),
+                fat: Math.round((mealMacros.fat * currentMealCount) / newMealCount),
+              };
+              setNewMealMacros(adjustedMacros);
             }
             setShowAddMeal(true);
           }}

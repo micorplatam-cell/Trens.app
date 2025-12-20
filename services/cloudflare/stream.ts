@@ -74,7 +74,7 @@ export interface TusUploadResponse {
 // ============================================================================
 class CloudflareStreamService {
   private headers = {
-    'Authorization': `Bearer ${API_TOKEN}`,
+    Authorization: `Bearer ${API_TOKEN}`,
     'Content-Type': 'application/json',
   };
 
@@ -99,7 +99,7 @@ class CloudflareStreamService {
 
       // 2. Crear FormData para upload
       const formData = new FormData();
-      
+
       // Agregar el archivo de video
       formData.append('file', {
         uri: videoUri,
@@ -109,20 +109,23 @@ class CloudflareStreamService {
 
       // Agregar metadata
       if (metadata) {
-        formData.append('meta', JSON.stringify({
-          name: metadata.name || `TRENS_${Date.now()}`,
-          exerciseName: metadata.exerciseName,
-          userId: metadata.userId,
-          isPublic: metadata.isPublic,
-          uploadedAt: new Date().toISOString(),
-        }));
+        formData.append(
+          'meta',
+          JSON.stringify({
+            name: metadata.name || `TRENS_${Date.now()}`,
+            exerciseName: metadata.exerciseName,
+            userId: metadata.userId,
+            isPublic: metadata.isPublic,
+            uploadedAt: new Date().toISOString(),
+          })
+        );
       }
 
       // 3. Subir a Cloudflare Stream
       const response = await fetch(API_BASE, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${API_TOKEN}`,
+          Authorization: `Bearer ${API_TOKEN}`,
         },
         body: formData,
       });
@@ -131,9 +134,9 @@ class CloudflareStreamService {
 
       if (!data.success) {
         console.error('Error Cloudflare Stream:', data.errors);
-        return { 
-          success: false, 
-          error: data.errors?.[0]?.message || 'Error subiendo video' 
+        return {
+          success: false,
+          error: data.errors?.[0]?.message || 'Error subiendo video',
         };
       }
 
@@ -146,12 +149,11 @@ class CloudflareStreamService {
         dashUrl: video.playback.dash,
         thumbnailUrl: video.thumbnail,
       };
-
     } catch (error) {
       console.error('Error en uploadVideo:', error);
-      return { 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Error desconocido' 
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Error desconocido',
       };
     }
   }
@@ -191,12 +193,11 @@ class CloudflareStreamService {
         uploadUrl: location || undefined,
         videoId: streamMediaId || undefined,
       };
-
     } catch (error) {
       console.error('Error creando TUS upload:', error);
-      return { 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Error desconocido' 
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Error desconocido',
       };
     }
   }
@@ -219,7 +220,6 @@ class CloudflareStreamService {
       }
 
       return data.result;
-
     } catch (error) {
       console.error('Error en getVideo:', error);
       return null;
@@ -238,7 +238,7 @@ class CloudflareStreamService {
   // ESPERAR A QUE VIDEO ESTÉ LISTO (con polling)
   // --------------------------------------------------------------------------
   async waitForReady(
-    videoId: string, 
+    videoId: string,
     maxWaitMs: number = 120000, // 2 minutos máximo
     pollIntervalMs: number = 3000 // cada 3 segundos
   ): Promise<StreamVideo | null> {
@@ -246,9 +246,9 @@ class CloudflareStreamService {
 
     while (Date.now() - startTime < maxWaitMs) {
       const video = await this.getVideo(videoId);
-      
+
       if (!video) return null;
-      
+
       if (video.readyToStream) {
         return video;
       }
@@ -259,7 +259,7 @@ class CloudflareStreamService {
       }
 
       // Esperar antes del siguiente poll
-      await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
     }
 
     console.warn('Timeout esperando video listo');
@@ -278,7 +278,6 @@ class CloudflareStreamService {
 
       const data = await response.json();
       return data.success === true;
-
     } catch (error) {
       console.error('Error eliminando video:', error);
       return false;
@@ -303,7 +302,6 @@ class CloudflareStreamService {
       }
 
       return data.result || [];
-
     } catch (error) {
       console.error('Error en listVideos:', error);
       return [];
@@ -320,7 +318,7 @@ class CloudflareStreamService {
       thumbnail: `https://${STREAM_SUBDOMAIN}/${videoId}/thumbnails/thumbnail.jpg`,
       thumbnailGif: `https://${STREAM_SUBDOMAIN}/${videoId}/thumbnails/thumbnail.gif`,
       // Thumbnail en tiempo específico (segundos)
-      thumbnailAt: (seconds: number) => 
+      thumbnailAt: (seconds: number) =>
         `https://${STREAM_SUBDOMAIN}/${videoId}/thumbnails/thumbnail.jpg?time=${seconds}s`,
       // Iframe embed
       iframe: `https://${STREAM_SUBDOMAIN}/${videoId}/iframe`,
@@ -334,7 +332,7 @@ class CloudflareStreamService {
   // --------------------------------------------------------------------------
   private encodeMetadata(metadata?: Record<string, any>): string {
     if (!metadata) return '';
-    
+
     return Object.entries(metadata)
       .filter(([_, value]) => value !== undefined)
       .map(([key, value]) => {

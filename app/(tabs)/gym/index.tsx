@@ -39,6 +39,7 @@ import {
   Eye,
   EyeOff,
   Share2,
+  RotateCcw,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -58,6 +59,7 @@ import { useHank } from '../../../context/HankContext';
 import { LinearGradient } from 'expo-linear-gradient';
 import spotify, { SpotifyTrack, SpotifyPlaybackState } from '../../../services/spotify/spotify';
 import { useUserRole } from '../../../hooks/useUserRole';
+import cloudflareR2 from '../../../services/cloudflare/r2';
 
 // ============================================================================
 // HELPERS
@@ -311,6 +313,19 @@ export default function GymScreen() {
     player.loop = true;
   });
 
+  // Video Player para preview de video capturado
+  const [capturedVideoUri, setCapturedVideoUri] = useState<string | null>(null);
+  const videoPlayer = useVideoPlayer(capturedVideoUri || '', (player) => {
+    player.loop = true;
+  });
+
+  // Play preview video cuando se captura
+  useEffect(() => {
+    if (capturedVideoUri && videoPlayer) {
+      videoPlayer.play();
+    }
+  }, [capturedVideoUri, videoPlayer]);
+
   // Controlar play/pause del video cuando abre/cierra el viewer
   useEffect(() => {
     if (videoViewerVisible && historialPlayer) {
@@ -332,6 +347,11 @@ export default function GymScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<any>(null);
   const [captureProcessing, setCaptureProcessing] = useState(false);
+  const [cameraMode, setCameraMode] = useState<'photo' | 'video'>('photo');
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [cameraFacing, setCameraFacing] = useState<'front' | 'back'>('back');
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Ref para evitar loops en sincronización de contexto
   const lastSyncedExerciseId = useRef<string | null>(null);
@@ -893,33 +913,93 @@ export default function GymScreen() {
     const targetDayIndex = dayIndex !== null ? dayIndex : selectedDayIndex;
 
     try {
-      // Cargar TODOS los ejercicios del usuario y filtrar en cliente
-      // Ordenar por 'order' y luego por 'created_at' para consistencia
-      const { data, error } = await supabase
-        .from('user_assets')
-        .select('*')
+      // NUEVA ARQUITECTURA: Cargar desde exercises + user_exercise_config
+      // 1. Cargar configuraciones del usuario
+      const { data: userConfigs, error: configError } = await supabase
+        .from('user_exercise_config')
+        .select(
+          `
+          id,
+          exercise_id,
+          training_days,
+          display_order,
+          config,
+          custom_media_url,
+          personal_records,
+          notes,
+          created_at,
+          updated_at,
+          exercises (
+            id,
+            name,
+            description,
+            muscle_group,
+            secondary_muscles,
+            equipment,
+            difficulty,
+            default_media_url,
+            thumbnail_url,
+            video_url,
+            sport_id,
+            alternative_exercises
+          )
+        `
+        )
         .eq('user_id', user.id)
-        .eq('asset_type', 'gym_exercise')
-        .is('deleted_at', null) // Solo ejercicios activos
-        .order('order', { ascending: true, nullsFirst: false })
+        .order('display_order', { ascending: true, nullsFirst: false })
         .order('created_at', { ascending: true });
 
-      if (error) throw error;
+      if (configError) throw configError;
 
-      // Filtrar por día de entrenamiento usando array training_days
+      console.log('🔍 DEBUG userConfigs:', JSON.stringify(userConfigs?.[0], null, 2));
+
+      // Mapear al formato que espera el código existente
+      const data =
+        userConfigs?.map((item: any) => {
+          // El join puede venir como 'exercises' (objeto) o array dependiendo de la FK
+          const exercise = item.exercises;
+          return {
+            id: item.id, // user_exercise_config.id
+            exercise_id: item.exercise_id, // referencia al ejercicio global
+            user_id: user.id,
+            type: 'exercise',
+            name: exercise?.name || 'UNNAMED',
+            media_url:
+              item.custom_media_url || exercise?.default_media_url || exercise?.thumbnail_url || '',
+            training_days: item.training_days || [0],
+            order: item.display_order || 0,
+            deleted_at: null,
+            created_at: item.created_at,
+            updated_at: item.updated_at,
+            metadata: {
+              sets: item.config?.sets || '4x10',
+              rest: item.config?.rest || '90s',
+              category: exercise?.muscle_group || 'OTRO',
+              difficulty: exercise?.difficulty || 'INTERMEDIO',
+              series_by_day: item.config?.series_by_day || {},
+              custom_series: item.config?.custom_series || null,
+              description: exercise?.description,
+              equipment: exercise?.equipment,
+              video_url: exercise?.video_url,
+              alternative_exercises: exercise?.alternative_exercises || [],
+            },
+          };
+        }) || [];
+
+      // Filtrar los datos ya mapeados por día de entrenamiento
       const filteredData =
         data?.filter((item: any) => {
-          const itemDays = item.training_days || [0]; // Default [0] si no existe
+          const itemDays = item.training_days || [0];
           return itemDays.includes(targetDayIndex);
         }) || [];
 
-      console.log(`� TOTAL EJERCICIOS EN DB: ${data?.length || 0}`);
+      console.log(`📊 TOTAL EJERCICIOS EN DB: ${data?.length || 0}`);
       console.log(
         '  - TODOS:',
         data?.map((e: any) => ({
           name: e.name,
           id: e.id?.substring(0, 8),
-          hasCustomImage: !e.asset_url?.includes('unsplash'),
+          hasCustomImage: !e.media_url?.includes('unsplash'),
           training_days: e.training_days,
           created: e.created_at?.substring(0, 10),
         }))
@@ -931,82 +1011,48 @@ export default function GymScreen() {
           '  - Filtrados:',
           filteredData.map((e: any) => ({
             name: e.name,
-            hasCustomImage: !e.asset_url?.includes('unsplash'),
+            hasCustomImage: !e.media_url?.includes('unsplash'),
             training_days: e.training_days,
           }))
         );
       }
 
       if (filteredData && filteredData.length > 0) {
-        // Cargar alternativas desde user_exercise_alternatives
-        const { data: alternativesData } = await supabase
-          .from('user_exercise_alternatives')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('order_index', { ascending: true });
-
-        // Cargar los datos completos de las alternativas
-        const alternativeIds = alternativesData?.map((a: any) => a.alternative_exercise_id) || [];
+        // NUEVA ARQUITECTURA: Las alternativas están en exercises.alternative_exercises (array de UUIDs)
+        // Recopilar todos los IDs de alternativas de todos los ejercicios filtrados
+        const allAlternativeIds: string[] = [];
+        filteredData.forEach((item: any) => {
+          const altIds = item.metadata?.alternative_exercises || [];
+          altIds.forEach((id: string) => {
+            if (id && !allAlternativeIds.includes(id)) {
+              allAlternativeIds.push(id);
+            }
+          });
+        });
 
         console.log('🔍 DEBUG ALTERNATIVAS:');
-        console.log('  - Total relaciones:', alternativesData?.length || 0);
-        console.log('  - IDs de alternativas:', alternativeIds);
+        console.log('  - IDs de alternativas encontrados:', allAlternativeIds.length);
 
-        const { data: alternativeAssets } = await supabase
-          .from('user_assets')
-          .select('*')
-          .in('id', alternativeIds);
+        // Cargar los datos de los ejercicios alternativos desde la tabla exercises
+        let alternativeExercisesData: any[] = [];
+        if (allAlternativeIds.length > 0) {
+          const { data: altData } = await supabase
+            .from('exercises')
+            .select('id, name, thumbnail_url, default_media_url, muscle_group, difficulty')
+            .in('id', allAlternativeIds);
 
-        console.log('  - Assets cargados:', alternativeAssets?.length || 0);
-        if (alternativeAssets && alternativeAssets.length > 0) {
+          alternativeExercisesData = altData || [];
+          console.log('  - Alternativas cargadas:', alternativeExercisesData.length);
           console.log(
-            '  - Assets details:',
-            alternativeAssets.map((a: any) => ({
-              id: a.id,
-              name: a.name,
-              url: a.asset_url,
-            }))
+            '  - Detalles:',
+            alternativeExercisesData.map((a: any) => ({ id: a.id.substring(0, 8), name: a.name }))
           );
-        }
-
-        // AUTO-REPARACIÓN: Detectar y corregir IDs obsoletos (verificar contra TODOS los ejercicios, no solo filteredData)
-        const orphanedRelations =
-          alternativesData?.filter((rel: any) => {
-            const mainExists = data?.some((ex: any) => ex.id === rel.main_exercise_id);
-            return !mainExists;
-          }) || [];
-
-        if (orphanedRelations.length > 0 && !autoRepairDone.current) {
-          autoRepairDone.current = true;
-          console.log(
-            '🗑️ AUTO-CLEANUP: Eliminando',
-            orphanedRelations.length,
-            'relaciones huérfanas'
-          );
-
-          // ELIMINAR relaciones huérfanas en lugar de reasignarlas
-          const { error: deleteError } = await supabase
-            .from('user_exercise_alternatives')
-            .delete()
-            .in(
-              'id',
-              orphanedRelations.map((o: any) => o.id)
-            );
-
-          if (deleteError) {
-            console.error('❌ Error eliminando relaciones huérfanas:', deleteError);
-          } else {
-            console.log('✅ Relaciones huérfanas eliminadas correctamente');
-          }
-
-          // Continuar con el mapeo normal (sin recargar)
         }
 
         const mappedExercises: Exercise[] = filteredData.map((item, index) => {
           try {
-            // Buscar alternativas vinculadas a este ejercicio
-            const alternativeRelations =
-              alternativesData?.filter((rel: any) => rel.main_exercise_id === item.id) || [];
+            // Obtener IDs de alternativas de este ejercicio
+            const alternativeIds = item.metadata?.alternative_exercises || [];
 
             // Cargar estructura personalizada del DÍA ACTUAL
             // Nueva estructura: series_by_day[day] | Fallback: custom_series (legacy)
@@ -1036,26 +1082,27 @@ export default function GymScreen() {
                   }))
                 : generateDefaultSeries(item.metadata?.sets || '4x10');
 
-            // Mapear alternativas CON las series del ejercicio principal (del día actual)
-            const alternatives: ExerciseAlternative[] = alternativeRelations.map((rel: any) => {
-              const asset = alternativeAssets?.find(
-                (a: any) => a.id === rel.alternative_exercise_id
-              );
+            // Mapear alternativas desde exercises.alternative_exercises
+            const alternatives: ExerciseAlternative[] = alternativeIds
+              .map((altId: string) => {
+                const altExercise = alternativeExercisesData.find((a: any) => a.id === altId);
+                if (!altExercise) return null;
 
-              return {
-                id: asset?.id || '',
-                name: asset?.name || 'UNKNOWN',
-                image_url: asset?.asset_url || '',
-                videos: [], // Las alternativas usan la imagen/video del asset_url
-                series: seriesForState, // Usar las mismas series del ejercicio principal
-              };
-            });
+                return {
+                  id: altExercise.id,
+                  name: altExercise.name,
+                  image_url: altExercise.default_media_url || altExercise.thumbnail_url || '',
+                  videos: [],
+                  series: seriesForState, // Usar las mismas series del ejercicio principal
+                };
+              })
+              .filter(Boolean) as ExerciseAlternative[];
 
             return {
               id: item.id,
               name: item.name || 'UNNAMED',
               sets: item.metadata?.sets || '0x0',
-              image_url: item.asset_url || '',
+              image_url: item.media_url || '',
               order: item.order || 0,
               series: seriesForState,
               training_days: item.training_days || [0],
@@ -1114,16 +1161,35 @@ export default function GymScreen() {
 
   const loadTemplates = async () => {
     try {
+      // NUEVA ARQUITECTURA: Cargar desde exercises (catálogo global)
       const { data, error } = await supabase
-        .from('asset_templates')
+        .from('exercises')
         .select('*')
-        .eq('asset_type', 'gym_exercise')
-        .order('category', { ascending: true });
+        .eq('is_active', true)
+        .order('muscle_group', { ascending: true })
+        .order('name', { ascending: true });
 
       if (error) throw error;
 
       if (data) {
-        setTemplates(data as AssetTemplate[]);
+        // Mapear al formato AssetTemplate para compatibilidad
+        const mappedTemplates: AssetTemplate[] = data.map((ex: any) => ({
+          id: ex.id,
+          name: ex.name,
+          description: ex.description || '',
+          image_url: ex.default_media_url || '',
+          category: ex.muscle_group || 'OTRO',
+          difficulty: ex.difficulty || 'INTERMEDIO',
+          default_metadata: {
+            sets: '4x10',
+            rest: '90s',
+            equipment: ex.equipment,
+            secondary_muscles: ex.secondary_muscles,
+            video_url: ex.video_url,
+            sport_id: ex.sport_id,
+          },
+        }));
+        setTemplates(mappedTemplates);
       }
     } catch (error) {
       console.error('💥 Error loading templates:', error);
@@ -1134,20 +1200,28 @@ export default function GymScreen() {
     if (!user) return;
 
     try {
+      // NUEVA ARQUITECTURA: Cargar desde user_exercise_config + exercises
       const { data, error } = await supabase
-        .from('user_assets')
-        .select('name, asset_url')
-        .eq('user_id', user.id)
-        .eq('asset_type', 'gym_exercise')
-        .is('deleted_at', null);
+        .from('user_exercise_config')
+        .select(
+          `
+          id,
+          custom_media_url,
+          exercises:exercise_id (
+            name,
+            default_media_url
+          )
+        `
+        )
+        .eq('user_id', user.id);
 
       if (error) throw error;
 
       if (data) {
         setAllUserExercises(
-          data.map((ex) => ({
-            name: ex.name,
-            image_url: ex.asset_url,
+          data.map((config: any) => ({
+            name: config.exercises?.name || 'UNNAMED',
+            image_url: config.custom_media_url || config.exercises?.default_media_url || '',
           }))
         );
       }
@@ -1349,17 +1423,17 @@ export default function GymScreen() {
         base64: false,
       });
 
-      // Comprimir y hacer cuadrada la imagen (1:1)
+      // Comprimir a 720p y hacer cuadrada la imagen (1:1)
       const manipulatedImage = await manipulateAsync(
         photo.uri,
         [
-          { resize: { width: 1080 } },
+          { resize: { width: 720 } },
           {
             crop: {
               originX: 0,
               originY: 0,
-              width: 1080,
-              height: 1080,
+              width: 720,
+              height: 720,
             },
           },
         ],
@@ -1373,6 +1447,85 @@ export default function GymScreen() {
     } finally {
       setCaptureProcessing(false);
     }
+  };
+
+  // ============================================================================
+  // VIDEO RECORDING FUNCTIONS
+  // ============================================================================
+  const startVideoRecording = async () => {
+    if (!cameraRef.current || isRecording) return;
+
+    try {
+      setIsRecording(true);
+      setRecordingTime(0);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+
+      // Timer para mostrar tiempo de grabación (máximo 10 segundos)
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingTime((prev) => {
+          if (prev >= 10) {
+            // Auto-stop at 10 seconds
+            stopVideoRecording();
+            return 10;
+          }
+          return prev + 1;
+        });
+      }, 1000);
+
+      const video = await cameraRef.current.recordAsync({
+        maxDuration: 10, // Máximo 10 segundos
+        quality: '720p', // Compresión a 720p
+      });
+
+      if (video?.uri) {
+        setCapturedVideoUri(video.uri);
+      }
+    } catch (error) {
+      console.error('💥 Error recording video:', error);
+      setIsRecording(false);
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+      }
+    }
+  };
+
+  const stopVideoRecording = async () => {
+    if (!cameraRef.current || !isRecording) return;
+
+    try {
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+
+      cameraRef.current.stopRecording();
+      setIsRecording(false);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (error) {
+      console.error('💥 Error stopping recording:', error);
+      setIsRecording(false);
+    }
+  };
+
+  const saveVideo = async () => {
+    if (!capturedVideoUri) return;
+
+    try {
+      setCaptureProcessing(true);
+      await uploadExerciseMedia(capturedVideoUri, 'video');
+      setCapturedVideoUri(null);
+      setCameraModalVisible(false);
+    } catch (error) {
+      console.error('💥 Error saving video:', error);
+      alert('Error al guardar video');
+    } finally {
+      setCaptureProcessing(false);
+    }
+  };
+
+  const discardVideo = () => {
+    setCapturedVideoUri(null);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
   const uploadExerciseMedia = async (uri: string, type: 'photo' | 'video') => {
@@ -1398,57 +1551,33 @@ export default function GymScreen() {
 
       if (!currentExercise) return;
 
-      // Eliminar el archivo anterior del storage si existe
-      if (currentExercise.image_url) {
-        const oldPath = currentExercise.image_url.split('/').pop();
-        if (oldPath && oldPath !== currentExercise.image_url) {
+      // Eliminar el archivo anterior de R2 si existe
+      if (currentExercise.image_url && currentExercise.image_url.includes('media.trens.app')) {
+        const oldKey = cloudflareR2.getKeyFromUrl(currentExercise.image_url);
+        if (oldKey) {
           try {
-            await supabase.storage
-              .from('exercise-media')
-              .remove([`${user.id}/${exerciseIdToUpdate}/${oldPath}`]);
+            await cloudflareR2.deleteFile(oldKey);
+            console.log('🗑️ Archivo anterior eliminado de R2');
           } catch (deleteError) {
-            console.warn('No se pudo eliminar archivo anterior:', deleteError);
+            console.warn('No se pudo eliminar archivo anterior de R2:', deleteError);
           }
         }
       }
 
-      // Leer archivo como base64
-      const base64 = await FileSystem.readAsStringAsync(uri, {
-        encoding: 'base64',
-      });
+      // Subir a Cloudflare R2
+      const result = await cloudflareR2.uploadExerciseMedia(uri, user.id, exerciseIdToUpdate, type);
 
-      const fileExt = type === 'photo' ? 'jpg' : 'mp4';
-      const fileName = `exercise_${Date.now()}.${fileExt}`;
-      const filePath = `${user.id}/${exerciseIdToUpdate}/${fileName}`;
-
-      // Convertir base64 a ArrayBuffer
-      const byteCharacters = atob(base64);
-      const byteNumbers = new Array(byteCharacters.length);
-      for (let i = 0; i < byteCharacters.length; i++) {
-        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      if (!result.success || !result.url) {
+        throw new Error(result.error || 'Error subiendo a R2');
       }
-      const byteArray = new Uint8Array(byteNumbers);
 
-      // Upload a Supabase Storage
-      const { data, error } = await supabase.storage
-        .from('exercise-media')
-        .upload(filePath, byteArray, {
-          contentType: type === 'photo' ? 'image/jpeg' : 'video/mp4',
-          upsert: true,
-        });
+      console.log('📹 Media uploaded to R2:', { type, url: result.url });
 
-      if (error) throw error;
-
-      // Obtener URL pública
-      const { data: urlData } = supabase.storage.from('exercise-media').getPublicUrl(filePath);
-
-      console.log('📹 Media uploaded:', { type, filePath, url: urlData.publicUrl });
-
-      // Actualizar en la base de datos
-      console.log('💾 Actualizando DB:', { exerciseIdToUpdate, newUrl: urlData.publicUrl });
+      // Actualizar en la base de datos (user_exercise_config)
+      console.log('💾 Actualizando DB:', { exerciseIdToUpdate, newUrl: result.url });
       const { error: updateError, data: updateData } = await supabase
-        .from('user_assets')
-        .update({ asset_url: urlData.publicUrl })
+        .from('user_exercise_config')
+        .update({ custom_media_url: result.url })
         .eq('id', exerciseIdToUpdate)
         .select();
 
@@ -1458,14 +1587,14 @@ export default function GymScreen() {
       // Actualizar estado local - puede ser ejercicio principal o alternativa
       const updatedExercises = exercises.map((ex) => {
         if (ex.id === exerciseIdToUpdate) {
-          return { ...ex, image_url: urlData.publicUrl };
+          return { ...ex, image_url: result.url };
         }
         // Si es alternativa, actualizar dentro del array de alternatives
         if (ex.alternatives && ex.alternatives.length > 0) {
           return {
             ...ex,
             alternatives: ex.alternatives.map((alt) =>
-              alt.id === exerciseIdToUpdate ? { ...alt, image_url: urlData.publicUrl } : alt
+              alt.id === exerciseIdToUpdate ? { ...alt, image_url: result.url } : alt
             ),
           };
         }
@@ -1485,10 +1614,10 @@ export default function GymScreen() {
           const exists = prev.find((ex) => ex.name === exerciseName);
           if (exists) {
             return prev.map((ex) =>
-              ex.name === exerciseName ? { ...ex, image_url: urlData.publicUrl } : ex
+              ex.name === exerciseName ? { ...ex, image_url: result.url } : ex
             );
           } else {
-            return [...prev, { name: exerciseName, image_url: urlData.publicUrl }];
+            return [...prev, { name: exerciseName, image_url: result.url }];
           }
         });
       }
@@ -1617,26 +1746,27 @@ export default function GymScreen() {
 
     setAdding(true);
     try {
-      // Verificar si ya existe un ejercicio con el mismo nombre (SIN importar el día)
-      const { data: existingExercise, error: searchError } = await supabase
-        .from('user_assets')
+      // NUEVA ARQUITECTURA: Usar user_exercise_config en lugar de user_assets
+      // El template.id ahora es el exercise_id del catálogo global
+
+      // Verificar si ya existe configuración para este ejercicio
+      const { data: existingConfig, error: searchError } = await supabase
+        .from('user_exercise_config')
         .select('*')
         .eq('user_id', user.id)
-        .eq('asset_type', 'gym_exercise')
-        .eq('name', template.name)
-        .is('deleted_at', null)
+        .eq('exercise_id', template.id)
         .maybeSingle();
 
       if (searchError) {
-        console.error('Error buscando ejercicio existente:', searchError);
+        console.error('Error buscando configuración existente:', searchError);
       }
 
       let data;
       let error;
 
-      if (existingExercise) {
+      if (existingConfig) {
         // El ejercicio YA EXISTE - agregar este día a su array training_days
-        const currentDays = existingExercise.training_days || [0];
+        const currentDays = existingConfig.training_days || [0];
 
         if (currentDays.includes(selectedDayIndex)) {
           alert('Este ejercicio ya está agregado en este día de entrenamiento');
@@ -1647,122 +1777,70 @@ export default function GymScreen() {
         // Agregar el nuevo día al array
         const updatedDays = [...currentDays, selectedDayIndex].sort();
 
-        // Obtener metadata actual para copiar series al nuevo día
-        const currentMetadata = existingExercise.metadata || {};
-        const seriesByDay = (currentMetadata.series_by_day as Record<string, any[]>) || {};
+        // Obtener config actual para copiar series al nuevo día
+        const currentConfig = existingConfig.config || {};
+        const seriesByDay = (currentConfig.series_by_day as Record<string, any[]>) || {};
 
         // Si el usuario configuró series personalizadas, usarlas para el nuevo día
-        // Si no, usar las series del primer día existente o las series legacy
         if (customSeries && customSeries.length > 0) {
           seriesByDay[String(selectedDayIndex)] = customSeries;
         } else {
-          // Copiar series del primer día configurado o usar custom_series legacy
-          const firstDaySeries =
-            seriesByDay[String(currentDays[0])] || (currentMetadata.custom_series as any[]) || [];
+          // Copiar series del primer día configurado
+          const firstDaySeries = seriesByDay[String(currentDays[0])] || [];
           if (firstDaySeries.length > 0) {
             seriesByDay[String(selectedDayIndex)] = [...firstDaySeries];
           }
         }
 
         const result = await supabase
-          .from('user_assets')
+          .from('user_exercise_config')
           .update({
             training_days: updatedDays,
             updated_at: new Date().toISOString(),
-            metadata: {
-              ...currentMetadata,
+            config: {
+              ...currentConfig,
               series_by_day: seriesByDay,
             },
           })
-          .eq('id', existingExercise.id)
+          .eq('id', existingConfig.id)
           .select()
           .single();
 
         data = result.data;
         error = result.error;
       } else {
-        // Verificar si existe un ejercicio eliminado con el mismo nombre
-        const { data: existingDeleted } = await supabase
-          .from('user_assets')
-          .select('*')
-          .eq('user_id', user.id)
-          .eq('asset_type', 'gym_exercise')
-          .eq('name', template.name)
-          .not('deleted_at', 'is', null)
-          .maybeSingle();
-
-        if (existingDeleted) {
-          // Reactivar ejercicio eliminado (mantiene asset_url personalizado)
-          const seriesByDay: Record<string, any[]> = {};
-          if (customSeries) {
-            seriesByDay[String(selectedDayIndex)] = customSeries;
-          }
-
-          const result = await supabase
-            .from('user_assets')
-            .update({
-              deleted_at: null,
-              training_days: [selectedDayIndex], // Asignar al día seleccionado
-              order: exercises.length,
-              updated_at: new Date().toISOString(),
-              metadata: {
-                sets: customSeries
-                  ? `${customSeries.length}x${customSeries[0]?.reps || 10}`
-                  : template.default_metadata.sets,
-                rest: template.default_metadata.rest,
-                category: template.category,
-                difficulty: template.difficulty,
-                series_by_day: customSeries ? seriesByDay : {},
-                custom_series: customSeries || null, // Legacy compatibility
-              },
-            })
-            .eq('id', existingDeleted.id)
-            .select()
-            .single();
-
-          data = result.data;
-          error = result.error;
-        } else {
-          // Crear NUEVO ejercicio con imagen por defecto
-          const seriesByDay: Record<string, any[]> = {};
-          if (customSeries) {
-            seriesByDay[String(selectedDayIndex)] = customSeries;
-          }
-
-          const result = await supabase
-            .from('user_assets')
-            .insert({
-              user_id: user.id,
-              asset_type: 'gym_exercise',
-              name: template.name,
-              asset_url: template.image_url,
-              training_days: [selectedDayIndex], // Array con el día seleccionado
-              metadata: {
-                sets: customSeries
-                  ? `${customSeries.length}x${customSeries[0]?.reps || 10}`
-                  : template.default_metadata.sets,
-                rest: template.default_metadata.rest,
-                category: template.category,
-                difficulty: template.difficulty,
-                series_by_day: customSeries ? seriesByDay : {},
-                custom_series: customSeries || null, // Legacy compatibility
-              },
-              order: exercises.length,
-            })
-            .select()
-            .single();
-
-          data = result.data;
-          error = result.error;
+        // Crear NUEVA configuración de usuario para este ejercicio
+        const seriesByDay: Record<string, any[]> = {};
+        if (customSeries) {
+          seriesByDay[String(selectedDayIndex)] = customSeries;
         }
+
+        const result = await supabase
+          .from('user_exercise_config')
+          .insert({
+            user_id: user.id,
+            exercise_id: template.id, // Referencia al ejercicio global
+            training_days: [selectedDayIndex],
+            display_order: exercises.length,
+            config: {
+              sets: customSeries
+                ? `${customSeries.length}x${customSeries[0]?.reps || 10}`
+                : template.default_metadata.sets,
+              rest: template.default_metadata.rest,
+              series_by_day: customSeries ? seriesByDay : {},
+              custom_series: customSeries || null,
+            },
+          })
+          .select()
+          .single();
+
+        data = result.data;
+        error = result.error;
       }
 
       if (error) throw error;
 
       if (data) {
-        // No crear alternativas automáticamente
-        // El usuario las vinculará manualmente más adelante
-
         // Convertir SeriesConfig a Series para el estado local
         const seriesForState: Series[] = customSeries
           ? customSeries.map((s) => ({
@@ -1778,24 +1856,24 @@ export default function GymScreen() {
               reps: s.reps.toString(),
               note: s.note || undefined,
             }))
-          : generateDefaultSeries(data.metadata.sets);
+          : generateDefaultSeries(data.config?.sets || template.default_metadata.sets);
 
         const newExercise: Exercise = {
-          id: data.id,
-          name: data.name,
-          sets: data.metadata.sets,
-          image_url: data.asset_url,
-          order: data.order,
+          id: data.id, // user_exercise_config.id
+          name: template.name,
+          sets: data.config?.sets || template.default_metadata.sets,
+          image_url: template.image_url,
+          order: data.display_order || 0,
           series: seriesForState,
           training_days: data.training_days || [selectedDayIndex],
-          videos: [], // Sin historial al principio
-          alternatives: [], // Se cargarán en próximo loadExercises
+          videos: [],
+          alternatives: [],
         };
 
         setExercises([...exercises, newExercise]);
         setModalVisible(false);
 
-        // Recargar ejercicios para obtener alternativas (sin cambiar modo)
+        // Recargar ejercicios
         setTimeout(() => loadExercises(), 500);
       }
     } catch (error) {
@@ -1811,23 +1889,24 @@ export default function GymScreen() {
   // ============================================================================
   const deleteExercise = async (id: string) => {
     try {
-      // Obtener el ejercicio actual
-      const { data: exercise, error: fetchError } = await supabase
-        .from('user_assets')
+      // NUEVA ARQUITECTURA: Usar user_exercise_config
+      // Obtener la configuración actual
+      const { data: config, error: fetchError } = await supabase
+        .from('user_exercise_config')
         .select('training_days')
         .eq('id', id)
         .single();
 
       if (fetchError) throw fetchError;
 
-      const currentDays = exercise?.training_days || [0];
+      const currentDays = config?.training_days || [0];
 
       if (currentDays.length > 1) {
         // Si está en MÚLTIPLES días, solo REMOVER el día actual del array
         const updatedDays = currentDays.filter((day: number) => day !== selectedDayIndex);
 
         const { error } = await supabase
-          .from('user_assets')
+          .from('user_exercise_config')
           .update({
             training_days: updatedDays,
             updated_at: new Date().toISOString(),
@@ -1836,11 +1915,8 @@ export default function GymScreen() {
 
         if (error) throw error;
       } else {
-        // Si está en UN SOLO día, hacer soft delete completo
-        const { error } = await supabase
-          .from('user_assets')
-          .update({ deleted_at: new Date().toISOString() })
-          .eq('id', id);
+        // Si está en UN SOLO día, eliminar la configuración completa
+        const { error } = await supabase.from('user_exercise_config').delete().eq('id', id);
 
         if (error) throw error;
       }
@@ -2143,27 +2219,26 @@ export default function GymScreen() {
               if (existingExercise) {
                 // Actualizar ejercicio existente - solo el día actual
                 try {
-                  // Obtener metadata actual para preservar series de otros días
-                  const { data: currentAsset } = await supabase
-                    .from('user_assets')
-                    .select('metadata')
+                  // NUEVA ARQUITECTURA: Obtener config actual para preservar series de otros días
+                  const { data: currentConfig } = await supabase
+                    .from('user_exercise_config')
+                    .select('config')
                     .eq('id', selectedTemplate.id)
                     .single();
 
-                  const currentMetadata = currentAsset?.metadata || {};
+                  const currentConfigData = currentConfig?.config || {};
                   const seriesByDay =
-                    (currentMetadata.series_by_day as Record<string, any[]>) || {};
+                    (currentConfigData.series_by_day as Record<string, any[]>) || {};
                   seriesByDay[String(selectedDayIndex)] = seriesConfig;
 
                   const { error } = await supabase
-                    .from('user_assets')
+                    .from('user_exercise_config')
                     .update({
-                      metadata: {
+                      config: {
                         ...selectedTemplate.default_metadata,
-                        ...currentMetadata,
+                        ...currentConfigData,
                         sets: `${seriesConfig.length}x${seriesConfig[0]?.reps || 10}`,
                         series_by_day: seriesByDay,
-                        // NO sobrescribir custom_series - solo series_by_day
                       },
                     })
                     .eq('id', selectedTemplate.id);
@@ -2390,31 +2465,45 @@ export default function GymScreen() {
           renderItem={({ item, index }) => (
             <TouchableOpacity
               onPress={async () => {
-                // Cargar template del ejercicio para editarlo
+                // NUEVA ARQUITECTURA: Cargar config del ejercicio para editarlo
                 const { data } = await supabase
-                  .from('user_assets')
-                  .select('*')
+                  .from('user_exercise_config')
+                  .select(
+                    `
+                    id,
+                    config,
+                    custom_media_url,
+                    exercises:exercise_id (
+                      id,
+                      name,
+                      description,
+                      muscle_group,
+                      difficulty,
+                      default_media_url
+                    )
+                  `
+                  )
                   .eq('id', item.id)
                   .single();
 
                 if (data) {
                   const template: AssetTemplate = {
                     id: data.id,
-                    name: data.name,
-                    description: data.metadata?.description || '',
-                    image_url: data.asset_url || '',
-                    category: data.metadata?.category || 'OTRO',
-                    difficulty: data.metadata?.difficulty || 'MEDIO',
-                    default_metadata: data.metadata || {},
+                    name: data.exercises?.name || item.name,
+                    description: data.exercises?.description || '',
+                    image_url: data.custom_media_url || data.exercises?.default_media_url || '',
+                    category: data.exercises?.muscle_group || 'OTRO',
+                    difficulty: data.exercises?.difficulty || 'INTERMEDIO',
+                    default_metadata: data.config || {},
                   };
 
                   // Cargar series existentes del DÍA ACTUAL
-                  const seriesByDay = data.metadata?.series_by_day as
+                  const seriesByDay = data.config?.series_by_day as
                     | Record<string, SeriesConfig[]>
                     | undefined;
                   const existingSeries: SeriesConfig[] =
                     seriesByDay?.[String(selectedDayIndex)] || // Primero series_by_day del día actual
-                    (data.metadata?.custom_series as SeriesConfig[] | undefined) || // Fallback legacy
+                    (data.config?.custom_series as SeriesConfig[] | undefined) || // Fallback legacy
                     [];
                   setSeriesConfig(existingSeries);
                   setSelectedTemplate(template);
@@ -2894,83 +2983,249 @@ export default function GymScreen() {
     </Modal>
   );
 
-  const renderCameraModal = () => (
-    <Modal
-      visible={cameraModalVisible}
-      animationType="slide"
-      transparent={false}
-      onRequestClose={() => setCameraModalVisible(false)}
-    >
-      <View className="flex-1 bg-savage-black">
-        {/* HEADER */}
-        <View className="absolute top-0 left-0 right-0 z-50 bg-black/90 px-6 pt-14 pb-4">
-          <View className="flex-row justify-between items-center mb-2">
-            <TouchableOpacity
-              onPress={() => {
-                setCameraModalVisible(false);
-              }}
-            >
-              <X color="#FFFFFF" size={28} />
-            </TouchableOpacity>
-            <Text className="text-savage-text font-bold text-lg tracking-wider">CAPTURAR FOTO</Text>
-            <View className="w-7" />
-          </View>
-          <Text className="text-zinc-500 text-center text-sm">
-            {exercises[currentExerciseIndex]?.name}
-          </Text>
-        </View>
-
-        {/* CAMERA VIEW - FORMATO CUADRADO */}
-        <View className="flex-1 justify-center items-center bg-black">
-          <View className="w-full aspect-square overflow-hidden">
-            <CameraView ref={cameraRef} className="flex-1" facing="back" />
-          </View>
-        </View>
-
-        {/* PROCESSING INDICATOR */}
-        {captureProcessing && (
-          <View className="absolute inset-0 bg-black/80 justify-center items-center">
-            <ActivityIndicator size="large" color="#DC2626" />
-            <Text className="text-white mt-4 font-bold">PROCESANDO...</Text>
-          </View>
-        )}
-
-        {/* CONTROLS */}
-        <View className="absolute bottom-0 left-0 right-0 pb-10 pt-6">
-          <LinearGradient
-            colors={['transparent', 'rgba(0,0,0,0.9)', '#000']}
-            className="absolute inset-0"
-          />
-          {/* BOTÓN GALERÍA */}
-          <View className="flex-row justify-center mb-6">
-            <TouchableOpacity
-              onPress={() => {
-                setCameraModalVisible(false);
-                setTimeout(() => pickFromGallery(), 300);
-              }}
-              className="bg-zinc-900 px-6 py-3 rounded-full border border-zinc-700"
-            >
-              <Text className="text-white font-bold">📁 SELECCIONAR DE GALERÍA</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* CAPTURE BUTTON */}
-          <View className="items-center">
-            <TouchableOpacity
-              onPress={capturePhoto}
-              disabled={captureProcessing}
-              className="w-20 h-20 rounded-full border-4 border-white bg-transparent items-center justify-center"
-            >
-              <View className="w-16 h-16 rounded-full bg-white" />
-            </TouchableOpacity>
-            <Text className="text-zinc-500 text-xs mt-4 tracking-wider">
-              TOCA PARA CAPTURAR FOTO
+  const renderCameraModal = () => {
+    // Verificar permisos primero
+    if (!permission?.granted) {
+      return (
+        <Modal
+          visible={cameraModalVisible}
+          animationType="slide"
+          transparent={true}
+          onRequestClose={() => setCameraModalVisible(false)}
+        >
+          <View className="flex-1 bg-black justify-center items-center px-8">
+            <Text className="text-white text-xl font-bold mb-4 text-center">
+              📸 PERMISOS DE CÁMARA
             </Text>
+            <Text className="text-zinc-400 text-center mb-8">
+              Necesitamos acceso a tu cámara para capturar fotos y videos de tus ejercicios.
+            </Text>
+            <TouchableOpacity
+              onPress={requestPermission}
+              className="bg-savage-red px-8 py-4 rounded-full mb-4"
+            >
+              <Text className="text-white font-bold">PERMITIR CÁMARA</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setCameraModalVisible(false)} className="px-8 py-4">
+              <Text className="text-zinc-500 font-bold">CANCELAR</Text>
+            </TouchableOpacity>
           </View>
+        </Modal>
+      );
+    }
+
+    return (
+      <Modal
+        visible={cameraModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => {
+          setCameraModalVisible(false);
+          setCapturedVideoUri(null);
+          setIsRecording(false);
+          setRecordingTime(0);
+        }}
+      >
+        {/* Container que NO tapa la barra de navegación */}
+        <View className="flex-1 bg-black pt-12 pb-24">
+          {/* VIDEO PREVIEW MODE - Si hay video capturado */}
+          {capturedVideoUri ? (
+            <View className="flex-1">
+              {/* Header con opciones de video */}
+              <View className="bg-black px-6 py-4">
+                <View className="flex-row justify-between items-center">
+                  <TouchableOpacity
+                    onPress={discardVideo}
+                    className="bg-zinc-900 px-4 py-2 rounded-full"
+                  >
+                    <Text className="text-white font-bold">✕ DESCARTAR</Text>
+                  </TouchableOpacity>
+                  <Text className="text-savage-text font-bold text-lg">PREVIEW VIDEO</Text>
+                  <TouchableOpacity
+                    onPress={saveVideo}
+                    disabled={captureProcessing}
+                    className="bg-savage-red px-4 py-2 rounded-full"
+                  >
+                    <Text className="text-white font-bold">
+                      {captureProcessing ? '...' : '✓ GUARDAR'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                <Text className="text-zinc-500 text-center text-sm mt-2">
+                  {recordingTime}s de video • Máx 10s
+                </Text>
+              </View>
+
+              {/* Video Preview */}
+              <View className="flex-1 justify-center items-center px-4">
+                <View className="w-full aspect-square overflow-hidden bg-zinc-900 rounded-lg">
+                  <VideoView
+                    player={videoPlayer}
+                    style={{ flex: 1, width: '100%', height: '100%' }}
+                    contentFit="cover"
+                    nativeControls={false}
+                  />
+                </View>
+              </View>
+
+              {/* Info */}
+              <View className="py-4 bg-black">
+                <Text className="text-zinc-400 text-center text-sm">
+                  El video se subirá comprimido a 720p
+                </Text>
+              </View>
+            </View>
+          ) : (
+            <>
+              {/* HEADER */}
+              <View className="bg-black px-6 pb-4 border-b border-zinc-900">
+                <View className="flex-row justify-between items-center mb-3">
+                  <TouchableOpacity
+                    onPress={() => {
+                      setCameraModalVisible(false);
+                      setIsRecording(false);
+                      setRecordingTime(0);
+                      if (recordingTimerRef.current) {
+                        clearInterval(recordingTimerRef.current);
+                      }
+                    }}
+                  >
+                    <X color="#FFFFFF" size={28} />
+                  </TouchableOpacity>
+                  <Text className="text-savage-text font-bold text-lg tracking-wider">
+                    {cameraMode === 'photo' ? '📸 FOTO' : '🎬 VIDEO'}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setCameraFacing(cameraFacing === 'back' ? 'front' : 'back');
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    }}
+                  >
+                    <RotateCcw color="#FFFFFF" size={24} />
+                  </TouchableOpacity>
+                </View>
+                <Text className="text-zinc-500 text-center text-sm">
+                  {exercises[currentExerciseIndex]?.name}
+                </Text>
+              </View>
+
+              {/* MODE TOGGLE */}
+              <View className="flex-row justify-center py-4 bg-black border-b border-zinc-900">
+                <TouchableOpacity
+                  onPress={() => {
+                    setCameraMode('photo');
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  }}
+                  className={`px-6 py-2 rounded-l-full ${cameraMode === 'photo' ? 'bg-savage-red' : 'bg-zinc-800'}`}
+                >
+                  <Text
+                    className={`font-bold ${cameraMode === 'photo' ? 'text-white' : 'text-zinc-400'}`}
+                  >
+                    📸 FOTO
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => {
+                    setCameraMode('video');
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  }}
+                  className={`px-6 py-2 rounded-r-full ${cameraMode === 'video' ? 'bg-savage-red' : 'bg-zinc-800'}`}
+                >
+                  <Text
+                    className={`font-bold ${cameraMode === 'video' ? 'text-white' : 'text-zinc-400'}`}
+                  >
+                    🎬 VIDEO
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* CAMERA VIEW - FORMATO CUADRADO CON DIMENSIONES FIJAS */}
+              <View className="flex-1 justify-center items-center bg-black px-4">
+                <View
+                  className="w-full overflow-hidden rounded-lg bg-zinc-900"
+                  style={{ aspectRatio: 1 }}
+                >
+                  <CameraView
+                    ref={cameraRef}
+                    style={{ flex: 1, width: '100%', height: '100%' }}
+                    facing={cameraFacing}
+                    mode={cameraMode === 'video' ? 'video' : 'picture'}
+                  />
+                  {/* Recording indicator */}
+                  {isRecording && (
+                    <View className="absolute top-4 left-4 flex-row items-center bg-savage-red px-3 py-1 rounded-full">
+                      <View className="w-3 h-3 rounded-full bg-white mr-2" />
+                      <Text className="text-white font-bold font-mono">{recordingTime}s / 10s</Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+
+              {/* PROCESSING INDICATOR */}
+              {captureProcessing && (
+                <View className="absolute inset-0 bg-black/80 justify-center items-center z-50">
+                  <ActivityIndicator size="large" color="#DC2626" />
+                  <Text className="text-white mt-4 font-bold">PROCESANDO...</Text>
+                </View>
+              )}
+
+              {/* CONTROLS */}
+              <View className="bg-black py-4 border-t border-zinc-900">
+                {/* BOTÓN GALERÍA */}
+                <View className="flex-row justify-center mb-4">
+                  <TouchableOpacity
+                    onPress={() => {
+                      setCameraModalVisible(false);
+                      setTimeout(() => pickFromGallery(), 300);
+                    }}
+                    className="bg-zinc-900 px-6 py-3 rounded-full border border-zinc-700"
+                    disabled={isRecording}
+                  >
+                    <Text className="text-white font-bold">📁 GALERÍA</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* CAPTURE/RECORD BUTTON */}
+                <View className="items-center">
+                  {cameraMode === 'photo' ? (
+                    <>
+                      <TouchableOpacity
+                        onPress={capturePhoto}
+                        disabled={captureProcessing}
+                        className="w-20 h-20 rounded-full border-4 border-white bg-transparent items-center justify-center"
+                      >
+                        <View className="w-16 h-16 rounded-full bg-white" />
+                      </TouchableOpacity>
+                      <Text className="text-zinc-500 text-xs mt-3 tracking-wider">
+                        TOCA PARA FOTO
+                      </Text>
+                    </>
+                  ) : (
+                    <>
+                      <TouchableOpacity
+                        onPress={isRecording ? stopVideoRecording : startVideoRecording}
+                        disabled={captureProcessing}
+                        className={`w-20 h-20 rounded-full border-4 ${isRecording ? 'border-savage-red' : 'border-white'} bg-transparent items-center justify-center`}
+                      >
+                        {isRecording ? (
+                          <View className="w-8 h-8 rounded-sm bg-savage-red" />
+                        ) : (
+                          <View className="w-16 h-16 rounded-full bg-savage-red" />
+                        )}
+                      </TouchableOpacity>
+                      <Text className="text-zinc-500 text-xs mt-3 tracking-wider">
+                        {isRecording ? 'TOCA PARA DETENER' : 'TOCA PARA GRABAR (MÁX 10s)'}
+                      </Text>
+                    </>
+                  )}
+                </View>
+              </View>
+            </>
+          )}
         </View>
-      </View>
-    </Modal>
-  );
+      </Modal>
+    );
+  };
 
   const renderVideoViewer = () => {
     return (

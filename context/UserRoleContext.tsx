@@ -68,8 +68,8 @@ export function UserRoleProvider({ children }: { children: ReactNode }) {
     try {
       const { data: roleData, error: roleError } = await supabase
         .from('user_roles')
-        .select('role, spotify_connected, spotify_premium')
-        .eq('id', userId)
+        .select('role')
+        .eq('user_id', userId)
         .single();
 
       if (roleError) {
@@ -77,7 +77,7 @@ export function UserRoleProvider({ children }: { children: ReactNode }) {
         if (roleError.code === 'PGRST116') {
           const { error: insertError } = await supabase
             .from('user_roles')
-            .insert({ id: userId, role: 'free' });
+            .insert({ user_id: userId, role: 'free' });
 
           if (!insertError) {
             setRole('free');
@@ -87,8 +87,9 @@ export function UserRoleProvider({ children }: { children: ReactNode }) {
         }
       } else if (roleData) {
         setRole(roleData.role as UserRole);
-        setSpotifyConnected(roleData.spotify_connected || false);
-        setSpotifyPremium(roleData.spotify_premium || false);
+        // Spotify ya no está en user_roles, se maneja por separado
+        setSpotifyConnected(false);
+        setSpotifyPremium(false);
       }
     } catch (err) {
       console.error('Error fetching user role:', err);

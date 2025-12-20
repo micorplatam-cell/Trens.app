@@ -173,9 +173,14 @@ export interface HankContextState {
 
   // Conversation management
   clearConversation: () => Promise<void>;
+  saveMessageToSupabase: (role: 'user' | 'model', content: string) => Promise<void>;
 
   // Data refresh trigger (incrementa cuando HANK modifica datos)
   refreshTrigger: number;
+
+  // Macro cache invalidation (incrementa cuando se actualizan datos del perfil)
+  macroCacheInvalidate: number;
+  invalidateMacroCache: () => void;
 
   // LLM Integration
   getToolDefinitions: () => ToolDefinition[];

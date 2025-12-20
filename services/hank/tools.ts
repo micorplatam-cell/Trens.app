@@ -5,6 +5,7 @@
 
 import { supabase } from '../../lib/supabase';
 import type { HankToolResult, ToolDefinition } from '../../types/hank';
+import { calculateMacrosWithAI } from './nutrition';
 
 // ============================================================================
 // TIPOS INTERNOS
@@ -1474,6 +1475,8 @@ export async function adnRemoveMeasurement(
 
 /**
  * Agrega una comida al plan nutricional
+ * Usa la tabla meals con ingredients como JSONB
+ * Calcula gramos automáticamente con IA basándose en macros
  */
 export async function planAddMeal(
   userId: string,
@@ -1481,69 +1484,84 @@ export async function planAddMeal(
   ingredients: Array<{ name: string; quantity?: string; portion?: string }>
 ): Promise<HankToolResult> {
   try {
-    // Get or create active plan
-    let { data: plan } = await supabase
-      .from('nutrition_plans')
-      .select('id')
-      .eq('user_id', userId)
-      .eq('is_active', true)
-      .single();
-
-    if (!plan) {
-      const { data: newPlan, error: planError } = await supabase
-        .from('nutrition_plans')
-        .insert({ user_id: userId, name: 'MI PLAN', is_active: true })
-        .select()
+    // Obtener contexto del usuario para cálculos personalizados
+    let userContext: { goal?: string; weight?: number; mealCount?: number } = {};
+    try {
+      const { data: profile } = await supabase
+        .from('user_profiles')
+        .select('weight, goal')
+        .eq('user_id', userId)
         .single();
 
-      if (planError) throw planError;
-      plan = newPlan;
+      if (profile) {
+        // Extraer peso numérico (ej: '75 KG' -> 75)
+        const weightMatch = profile.weight?.match(/(\d+)/);
+        userContext = {
+          weight: weightMatch ? parseInt(weightMatch[1]) : 75,
+          goal: profile.goal || 'MANTENER',
+          mealCount: 4, // Estimación típica
+        };
+      }
+    } catch (e) {
+      // Sin perfil, usar defaults
+      userContext = { weight: 75, goal: 'MANTENER', mealCount: 4 };
     }
 
-    if (!plan) {
-      return { success: false, message: 'No se pudo obtener el plan.' };
-    }
+    // Calcular macros y gramos óptimos con IA
+    const ingredientsWithId = ingredients.map((ing, idx) => ({
+      id: `ing-${idx}`,
+      name: ing.name,
+      quantity: ing.quantity || '',
+      portion: ing.portion || '',
+    }));
 
-    // Create meal
+    console.warn(
+      '🧮 Calculando gramos óptimos para:',
+      ingredientsWithId.map((i) => i.name)
+    );
+    const calculatedIngredients = await calculateMacrosWithAI(ingredientsWithId, userContext);
+
+    // Formatear ingredientes como JSONB array con los gramos calculados
+    const ingredientsJson = calculatedIngredients.map((ing, idx) => ({
+      name: ing.name,
+      quantity: ing.quantity || '~100g',
+      portion: ing.portion || '',
+      calories: ing.nutritionInfo?.calories,
+      protein: ing.nutritionInfo?.protein,
+      carbs: ing.nutritionInfo?.carbs,
+      fat: ing.nutritionInfo?.fat,
+      order: idx,
+    }));
+
+    // Crear nombre de comida basado en hora
+    const hour = parseInt(time.split(':')[0], 10);
+    let mealName = 'Comida';
+    if (hour >= 5 && hour < 11) mealName = 'Desayuno';
+    else if (hour >= 11 && hour < 15) mealName = 'Almuerzo';
+    else if (hour >= 15 && hour < 18) mealName = 'Merienda';
+    else if (hour >= 18 && hour < 22) mealName = 'Cena';
+    else mealName = 'Snack';
+
+    // Crear comida directamente en meals
     const { data: mealData, error: mealError } = await supabase
       .from('meals')
       .insert({
-        plan_id: plan.id,
         user_id: userId,
-        time: time,
+        name: mealName,
+        scheduled_time: time,
+        ingredients: ingredientsJson,
+        is_completed: false,
       })
       .select()
       .single();
 
     if (mealError) throw mealError;
 
-    // Create meal option
-    const { data: optionData, error: optError } = await supabase
-      .from('meal_options')
-      .insert({
-        meal_id: mealData.id,
-        name: 'Opción Principal',
-        option_index: 0,
-      })
-      .select()
-      .single();
-
-    if (optError) throw optError;
-
-    // Create ingredients
-    const ingredientsToInsert = ingredients.map((ing, idx) => ({
-      option_id: optionData.id,
-      name: ing.name,
-      quantity: ing.quantity || '~100g',
-      portion: ing.portion || '',
-      sort_order: idx,
-    }));
-
-    await supabase.from('meal_ingredients').insert(ingredientsToInsert);
+    const ingredientNames = ingredients.map((i) => i.name).join(', ');
 
     return {
       success: true,
-      message: `✅ Comida agregada a las ${time} con ${ingredients.length} ingredientes.`,
+      message: `✅ ${mealName} agregado a las ${time}: ${ingredientNames}`,
       data: { mealId: mealData.id },
       affectedRecords: 1,
     };
@@ -1613,18 +1631,40 @@ export async function planRemoveMeal(
 export async function planUpdateMealTime(
   userId: string,
   newTime: string,
-  options: { mealId?: string; position?: string }
+  options: { mealId?: string; position?: string; currentTime?: string }
 ): Promise<HankToolResult> {
   try {
     let mealId = options.mealId;
     let mealName = 'comida';
 
+    // Buscar por hora actual si se proporciona
+    if (!mealId && options.currentTime) {
+      const { data: meals } = await supabase
+        .from('meals')
+        .select('id, name, scheduled_time')
+        .eq('user_id', userId);
+
+      if (meals && meals.length > 0) {
+        // Buscar comida que coincida con la hora (formato flexible)
+        const targetTime = options.currentTime.replace(/[^0-9:]/g, '');
+        const meal = meals.find((m) => {
+          const mealTime = m.scheduled_time?.slice(0, 5) || '';
+          return mealTime === targetTime || mealTime.startsWith(targetTime.split(':')[0]);
+        });
+        if (meal) {
+          mealId = meal.id;
+          mealName = meal.name || 'comida';
+        }
+      }
+    }
+
+    // Buscar por posición si no se encontró por hora
     if (!mealId && options.position) {
       const { data: meals } = await supabase
         .from('meals')
         .select('id, name')
         .eq('user_id', userId)
-        .order('time', { ascending: true });
+        .order('scheduled_time', { ascending: true });
 
       if (meals && meals.length > 0) {
         if (options.position === 'first') {
@@ -1641,17 +1681,30 @@ export async function planUpdateMealTime(
           }
         }
       }
-    } else if (mealId) {
-      // Obtener nombre si tenemos mealId directamente
-      const { data: meal } = await supabase.from('meals').select('name').eq('id', mealId).single();
-      if (meal?.name) mealName = meal.name;
+    }
+
+    // Si solo hay una comida, usarla directamente
+    if (!mealId) {
+      const { data: meals } = await supabase.from('meals').select('id, name').eq('user_id', userId);
+
+      if (meals && meals.length === 1) {
+        mealId = meals[0].id;
+        mealName = meals[0].name || 'comida';
+      }
     }
 
     if (!mealId) {
-      return { success: false, message: 'No encontré la comida especificada.' };
+      return {
+        success: false,
+        message:
+          'No encontré la comida especificada. Intenta decir "cambia la hora de mi desayuno a las 7".',
+      };
     }
 
-    const { error } = await supabase.from('meals').update({ time: newTime }).eq('id', mealId);
+    const { error } = await supabase
+      .from('meals')
+      .update({ scheduled_time: newTime })
+      .eq('id', mealId);
 
     if (error) throw error;
 
@@ -2025,31 +2078,17 @@ export async function planGetMealDetails(
 }
 
 /**
- * Obtiene todas las comidas del día
+ * Obtiene todas las comidas del día con sus macros
  */
 export async function planGetMeals(userId: string): Promise<HankToolResult> {
   try {
     const { data: meals, error } = await supabase
       .from('meals')
       .select(
-        `
-        id,
-        time,
-        selected_option,
-        meal_options (
-          id,
-          name,
-          meal_ingredients (
-            id,
-            name,
-            quantity,
-            portion
-          )
-        )
-      `
+        'id, name, scheduled_time, ingredients, calories, protein_g, carbs_g, fat_g, is_completed'
       )
       .eq('user_id', userId)
-      .order('time', { ascending: true });
+      .order('scheduled_time', { ascending: true });
 
     if (error) throw error;
 
@@ -2061,33 +2100,67 @@ export async function planGetMeals(userId: string): Promise<HankToolResult> {
       };
     }
 
-    // Format response
-    const formatTime = (t: string) => {
+    // Format response con macros
+    const formatTime = (t: string | null) => {
+      if (!t) return '??:??';
       const [h, m] = t.split(':').map(Number);
       const period = h >= 12 ? 'PM' : 'AM';
       const h12 = h % 12 || 12;
       return `${h12}:${m.toString().padStart(2, '0')} ${period}`;
     };
 
+    // Calcular totales
+    let totalCals = 0,
+      totalP = 0,
+      totalC = 0,
+      totalF = 0;
+
     const mealsSummary = meals
-      .map((m, i) => {
-        const option = (
-          m.meal_options as {
-            name: string;
-            meal_ingredients: { name: string; quantity: string }[];
-          }[]
-        )?.[0];
+      .map((m: any, i: number) => {
+        const ingredients = m.ingredients || [];
+
+        // Sumar macros de ingredientes si están disponibles
+        let mealCals = m.calories || 0;
+        let mealP = m.protein_g || 0;
+        let mealC = m.carbs_g || 0;
+        let mealF = m.fat_g || 0;
+
+        // Si no hay macros a nivel de comida, sumar de ingredientes
+        if (!mealCals && ingredients.length > 0) {
+          ingredients.forEach((ing: any) => {
+            mealCals += ing.calories || 0;
+            mealP += ing.protein || 0;
+            mealC += ing.carbs || 0;
+            mealF += ing.fat || 0;
+          });
+        }
+
+        totalCals += mealCals;
+        totalP += mealP;
+        totalC += mealC;
+        totalF += mealF;
+
         const ings =
-          option?.meal_ingredients?.map((ing) => `${ing.name} (${ing.quantity})`).join(', ') ||
+          ingredients.map((ing: any) => `${ing.name} (${ing.quantity || '~100g'})`).join(', ') ||
           'Sin ingredientes';
-        return `${i + 1}. ${formatTime(m.time)}: ${ings}`;
+        const macrosStr =
+          mealCals > 0
+            ? ` | ${Math.round(mealCals)}kcal ${Math.round(mealP)}P ${Math.round(mealC)}C ${Math.round(mealF)}G`
+            : '';
+
+        return `${i + 1}. ${m.name || 'Comida'} (${formatTime(m.scheduled_time)}): ${ings}${macrosStr}`;
       })
       .join('\n');
 
+    const totalsStr =
+      totalCals > 0
+        ? `\n\n📊 TOTAL DEL DÍA: ${Math.round(totalCals)} kcal | ${Math.round(totalP)}g P | ${Math.round(totalC)}g C | ${Math.round(totalF)}g G`
+        : '';
+
     return {
       success: true,
-      message: `🍽️ TUS COMIDAS DE HOY:\n${mealsSummary}`,
-      data: { meals },
+      message: `🍽️ TUS COMIDAS DE HOY:\n${mealsSummary}${totalsStr}`,
+      data: { meals, totals: { calories: totalCals, protein: totalP, carbs: totalC, fat: totalF } },
     };
   } catch (error) {
     console.error('planGetMeals error:', error);

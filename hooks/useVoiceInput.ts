@@ -12,7 +12,10 @@ const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
 interface UseVoiceInputReturn {
   isRecording: boolean;
   isTranscribing: boolean;
-  startRecording: () => Promise<void>;
+  startRecording: (
+    enableAutoStop?: boolean,
+    onAutoStop?: (transcription: string | null) => void
+  ) => Promise<void>;
   stopRecording: () => Promise<string | null>;
   error: string | null;
 }
@@ -22,68 +25,148 @@ export function useVoiceInput(): UseVoiceInputReturn {
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const recordingRef = useRef<Audio.Recording | null>(null);
+  const maxRecordingTimer = useRef<NodeJS.Timeout | null>(null);
+  const silenceCheckInterval = useRef<NodeJS.Timeout | null>(null);
+  const lastSoundTime = useRef<number>(Date.now());
+  const stopRecordingRef = useRef<(() => Promise<string | null>) | null>(null);
+  const onAutoStopCallback = useRef<((transcription: string | null) => void) | null>(null);
+  const isAutoStopTriggered = useRef<boolean>(false);
 
   /**
    * Inicia la grabación de audio
+   * @param enableAutoStop - Si es true, detiene automáticamente por silencio (para botón de mic)
+   *                         Si es false, solo detiene al llamar stopRecording (para long press)
+   * @param onAutoStop - Callback que se ejecuta cuando auto-stop se activa (solo si enableAutoStop = true)
    */
-  const startRecording = useCallback(async () => {
-    try {
-      setError(null);
+  const startRecording = useCallback(
+    async (
+      enableAutoStop: boolean = false,
+      onAutoStop?: (transcription: string | null) => void
+    ) => {
+      try {
+        setError(null);
 
-      // Pedir permisos
-      const { status } = await Audio.requestPermissionsAsync();
-      if (status !== 'granted') {
-        setError('Permiso de micrófono denegado');
-        return;
+        // Guardar callback si se proporciona
+        if (onAutoStop) {
+          onAutoStopCallback.current = onAutoStop;
+        }
+
+        // Reset bandera de auto-stop
+        isAutoStopTriggered.current = false;
+
+        // Pedir permisos
+        const { status } = await Audio.requestPermissionsAsync();
+        if (status !== 'granted') {
+          setError('Permiso de micrófono denegado');
+          return;
+        }
+
+        // Configurar modo de audio
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: true,
+          playsInSilentModeIOS: true,
+        });
+
+        // Crear y empezar grabación con metering habilitado
+        const recording = new Audio.Recording();
+        await recording.prepareToRecordAsync({
+          ...Audio.RecordingOptionsPresets.HIGH_QUALITY,
+          android: {
+            extension: '.m4a',
+            outputFormat: Audio.AndroidOutputFormat.MPEG_4,
+            audioEncoder: Audio.AndroidAudioEncoder.AAC,
+            sampleRate: 16000,
+            numberOfChannels: 1,
+            bitRate: 128000,
+          },
+          ios: {
+            extension: '.m4a',
+            outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
+            audioQuality: Audio.IOSAudioQuality.HIGH,
+            sampleRate: 16000,
+            numberOfChannels: 1,
+            bitRate: 128000,
+          },
+          web: {
+            mimeType: 'audio/webm',
+            bitsPerSecond: 128000,
+          },
+          isMeteringEnabled: true, // Habilitar metering para detección de silencio
+        });
+
+        await recording.startAsync();
+        recordingRef.current = recording;
+        setIsRecording(true);
+        lastSoundTime.current = Date.now();
+
+        // Auto-stop: máximo 15 segundos de grabación
+        maxRecordingTimer.current = setTimeout(async () => {
+          console.warn('⏱️ Tiempo máximo de grabación alcanzado');
+          isAutoStopTriggered.current = true;
+          if (stopRecordingRef.current) {
+            await stopRecordingRef.current();
+          }
+        }, 15000);
+
+        // Auto-stop por silencio: SOLO si enableAutoStop es true (botón de mic en chat)
+        if (enableAutoStop) {
+          silenceCheckInterval.current = setInterval(async () => {
+            if (!recordingRef.current) {
+              if (silenceCheckInterval.current) clearInterval(silenceCheckInterval.current);
+              return;
+            }
+
+            try {
+              const recStatus = await recordingRef.current.getStatusAsync();
+              const metering = recStatus.metering ?? -160;
+
+              // Si hay sonido (metering > -35 dB), actualizar tiempo
+              if (metering > -35) {
+                lastSoundTime.current = Date.now();
+              }
+
+              // Si han pasado 2 segundos sin sonido, parar
+              const silenceDuration = Date.now() - lastSoundTime.current;
+              if (silenceDuration > 2000) {
+                console.warn(`🤫 Silencio detectado (${silenceDuration}ms), deteniendo...`);
+                if (silenceCheckInterval.current) clearInterval(silenceCheckInterval.current);
+                isAutoStopTriggered.current = true;
+                if (stopRecordingRef.current) {
+                  await stopRecordingRef.current();
+                }
+              }
+            } catch (e) {
+              // Ignorar errores de metering
+            }
+          }, 300);
+        }
+
+        console.warn(
+          `🎤 Grabación iniciada ${enableAutoStop ? '(auto-stop habilitado)' : '(manual)'}`
+        );
+      } catch (err) {
+        console.error('Error al iniciar grabación:', err);
+        setError('Error al iniciar grabación');
       }
-
-      // Configurar modo de audio
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-      });
-
-      // Crear y empezar grabación
-      const recording = new Audio.Recording();
-      await recording.prepareToRecordAsync({
-        android: {
-          extension: '.m4a',
-          outputFormat: Audio.AndroidOutputFormat.MPEG_4,
-          audioEncoder: Audio.AndroidAudioEncoder.AAC,
-          sampleRate: 16000,
-          numberOfChannels: 1,
-          bitRate: 128000,
-        },
-        ios: {
-          extension: '.m4a',
-          outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
-          audioQuality: Audio.IOSAudioQuality.HIGH,
-          sampleRate: 16000,
-          numberOfChannels: 1,
-          bitRate: 128000,
-        },
-        web: {
-          mimeType: 'audio/webm',
-          bitsPerSecond: 128000,
-        },
-      });
-
-      await recording.startAsync();
-      recordingRef.current = recording;
-      setIsRecording(true);
-
-      console.warn('🎤 Grabación iniciada');
-    } catch (err) {
-      console.error('Error al iniciar grabación:', err);
-      setError('Error al iniciar grabación');
-    }
-  }, []);
+    },
+    []
+  ); // Sin dependencias - usa refs
 
   /**
    * Detiene la grabación y transcribe con Gemini
    */
   const stopRecording = useCallback(async (): Promise<string | null> => {
     try {
+      // Limpiar timers
+      if (maxRecordingTimer.current) {
+        clearTimeout(maxRecordingTimer.current);
+        maxRecordingTimer.current = null;
+      }
+      if (silenceCheckInterval.current) {
+        clearInterval(silenceCheckInterval.current);
+        silenceCheckInterval.current = null;
+      }
+
       if (!recordingRef.current) {
         return null;
       }
@@ -109,11 +192,20 @@ export function useVoiceInput(): UseVoiceInputReturn {
 
       if (transcription) {
         console.warn('🎤 Transcripción:', transcription);
-        return transcription;
       } else {
         setError('No se pudo transcribir el audio');
-        return null;
       }
+
+      // Si fue activado por auto-stop, ejecutar callback
+      if (isAutoStopTriggered.current && onAutoStopCallback.current) {
+        console.warn('🔄 Ejecutando callback de auto-stop...');
+        onAutoStopCallback.current(transcription);
+        // Limpiar callback y bandera
+        onAutoStopCallback.current = null;
+        isAutoStopTriggered.current = false;
+      }
+
+      return transcription;
     } catch (err) {
       console.error('Error al detener grabación:', err);
       setError('Error al procesar audio');
@@ -122,6 +214,9 @@ export function useVoiceInput(): UseVoiceInputReturn {
       return null;
     }
   }, []);
+
+  // Asignar referencia para que startRecording pueda llamar a stopRecording
+  stopRecordingRef.current = stopRecording;
 
   return {
     isRecording,
@@ -173,7 +268,7 @@ async function transcribeWithGemini(audioUri: string): Promise<string | null> {
                   },
                 },
                 {
-                  text: 'Eres un transcriptor de audio. Escucha atentamente y transcribe EXACTAMENTE lo que dice la persona en español. Si el audio está vacío o no se entiende nada, responde SOLO con la palabra: EMPTY',
+                  text: 'INSTRUCCIÓN: NO respondas ni interpretes. Solo transcribe palabra por palabra lo que escuchas en el audio. Si dice "agrega press de banca" escribe exactamente "agrega press de banca". Si el audio está vacío responde: EMPTY',
                 },
               ],
             },
@@ -198,7 +293,22 @@ async function transcribeWithGemini(audioUri: string): Promise<string | null> {
     console.warn('🎤 Gemini raw response:', text);
 
     if (text && text !== 'EMPTY' && text.trim().length > 1) {
-      return text.trim();
+      // Normalizar cualquier nombre al inicio + coma/dos puntos a "Hank"
+      // Detecta: "Juan, " o "Han, " o "Pedro: " etc. y lo convierte a "Hank, "
+      let normalized = text.trim();
+
+      // Patrón: palabra al inicio (capitalizada o no) seguida de coma o dos puntos
+      const namePattern = /^[A-ZÁÉÍÓÚÑa-záéíóúñ]+[,:](\s)/i;
+      if (namePattern.test(normalized)) {
+        normalized = normalized.replace(namePattern, 'Hank,$1');
+      }
+
+      // Backup: variaciones específicas de HANK en cualquier parte
+      const hankVariations = /\b(juan|jank|janc|ank|hanc|jenk|janck|jhan|jan|han|hank)\b/gi;
+      normalized = normalized.replace(hankVariations, 'Hank');
+
+      console.warn('🎤 Transcripción normalizada:', normalized);
+      return normalized;
     }
 
     return null;

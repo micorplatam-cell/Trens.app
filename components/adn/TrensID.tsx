@@ -1,5 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, ScrollView } from 'react-native';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  ScrollView,
+  ActivityIndicator,
+} from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -7,9 +14,22 @@ import Animated, {
   interpolate,
   Easing,
 } from 'react-native-reanimated';
-import { ChevronDown, X, Edit2, Save, ShieldAlert, Crown, Trash2 } from 'lucide-react-native';
+import {
+  ChevronDown,
+  X,
+  Edit2,
+  Save,
+  ShieldAlert,
+  Crown,
+  Trash2,
+  RefreshCw,
+} from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { supabase } from '../../lib/supabase';
+import {
+  calculateUserDailyMacros,
+  calculateMealWithUserMacros,
+} from '../../services/hank/nutrition';
 
 interface Measurement {
   id: string;
@@ -24,6 +44,15 @@ interface ProfileData {
   height: string;
   injuries: string;
   allergies: string;
+  // Nuevos campos para ultra personalización de macros
+  age?: number;
+  sex?: string;
+  body_fat_percentage?: number;
+  muscle_mass?: number;
+  activity_level?: string;
+  training_experience?: string;
+  metabolic_rate?: string;
+  training_days_per_week?: number;
 }
 
 interface TrensIDProps {
@@ -40,6 +69,8 @@ export default function TrensID({ userId, profileData, measurements, onUpdate }:
   const [showMeasureForm, setShowMeasureForm] = useState(false);
   const [newMeasurement, setNewMeasurement] = useState({ name: '', value: '', is_dominant: false });
   const [isSaving, setIsSaving] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState('');
 
   const expandProgress = useSharedValue(0);
 
@@ -132,7 +163,8 @@ export default function TrensID({ userId, profileData, measurements, onUpdate }:
     }
   };
 
-  const saveChanges = async () => {
+  // Guardar solo los datos del perfil (sin recalcular plan)
+  const saveProfileOnly = async () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setIsSaving(true);
 
@@ -145,6 +177,14 @@ export default function TrensID({ userId, profileData, measurements, onUpdate }:
           height: editData.height,
           injuries: editData.injuries,
           allergies: editData.allergies,
+          age: editData.age || null,
+          sex: editData.sex || null,
+          body_fat_percentage: editData.body_fat_percentage || null,
+          muscle_mass: editData.muscle_mass || null,
+          activity_level: editData.activity_level || 'MODERADO',
+          training_experience: editData.training_experience || 'INTERMEDIO',
+          metabolic_rate: editData.metabolic_rate || 'NORMAL',
+          training_days_per_week: editData.training_days_per_week || 4,
         })
         .eq('user_id', userId);
 
@@ -157,6 +197,161 @@ export default function TrensID({ userId, profileData, measurements, onUpdate }:
       console.error('Error saving profile:', err);
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  // Guardar Y sincronizar con el plan (recalcula macros e ingredientes)
+  const saveAndSyncWithPlan = async () => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setIsSyncing(true);
+    setSyncProgress('Guardando perfil...');
+
+    try {
+      // 1. Guardar perfil e INVALIDAR CACHÉ DE MACROS
+      const { error: profileError } = await supabase
+        .from('user_profiles')
+        .update({
+          goal: editData.goal,
+          weight: editData.weight,
+          height: editData.height,
+          injuries: editData.injuries,
+          allergies: editData.allergies,
+          age: editData.age || null,
+          sex: editData.sex || null,
+          body_fat_percentage: editData.body_fat_percentage || null,
+          muscle_mass: editData.muscle_mass || null,
+          activity_level: editData.activity_level || 'MODERADO',
+          training_experience: editData.training_experience || 'INTERMEDIO',
+          metabolic_rate: editData.metabolic_rate || 'NORMAL',
+          training_days_per_week: editData.training_days_per_week || 4,
+          // Invalidar caché de macros para forzar recalcular
+          cached_daily_macros: null,
+          cached_macros_meal_count: null,
+          cached_macros_updated_at: null,
+        })
+        .eq('user_id', userId);
+
+      if (profileError) throw profileError;
+
+      // 2. Obtener todas las comidas del usuario
+      setSyncProgress('Obteniendo comidas...');
+      const { data: mealsData, error: mealsError } = await supabase
+        .from('meals')
+        .select('id, name, ingredients')
+        .eq('user_id', userId);
+
+      if (mealsError) throw mealsError;
+
+      if (!mealsData || mealsData.length === 0) {
+        setSyncProgress('No hay comidas para sincronizar');
+        setTimeout(() => {
+          onUpdate();
+          setIsExpanded(false);
+          setIsSyncing(false);
+          setSyncProgress('');
+        }, 1000);
+        return;
+      }
+
+      // 3. Calcular nuevos macros con IA usando el perfil actualizado + medidas
+      setSyncProgress('Calculando macros con IA...');
+
+      // Preparar medidas corporales para el cálculo
+      const bodyMeasurementsForCalc = editMeasurements.map((m) => ({
+        name: m.name,
+        value: m.value,
+        is_dominant: m.is_dominant,
+      }));
+
+      const dailyMacros = await calculateUserDailyMacros({
+        weight: editData.weight,
+        height: editData.height,
+        goal: editData.goal,
+        mealCount: mealsData.length,
+        age: editData.age,
+        sex: editData.sex,
+        bodyFatPercentage: editData.body_fat_percentage,
+        muscleMass: editData.muscle_mass,
+        activityLevel: editData.activity_level || 'MODERADO',
+        trainingExperience: editData.training_experience,
+        metabolicRate: editData.metabolic_rate,
+        trainingDaysPerWeek: editData.training_days_per_week,
+        // Incluir todas las medidas corporales
+        bodyMeasurements: bodyMeasurementsForCalc,
+      });
+
+      const perMealMacros = dailyMacros.perMeal;
+      console.warn('🎯 Nuevos macros por comida:', perMealMacros);
+
+      // 4. Recalcular cada comida con IA
+      let processedCount = 0;
+      for (const meal of mealsData) {
+        processedCount++;
+        setSyncProgress(`Recalculando ${processedCount}/${mealsData.length}...`);
+
+        const ingredients = meal.ingredients || [];
+        if (ingredients.length === 0) continue;
+
+        // Preparar ingredientes para recálculo
+        const ingredientsWithIds = ingredients.map((ing: any, i: number) => ({
+          id: `ing-${i}`,
+          name: ing.name,
+          quantity: '', // Vacío para que IA recalcule
+          portion: '',
+        }));
+
+        // Recalcular con IA
+        const calculated = await calculateMealWithUserMacros(ingredientsWithIds, perMealMacros);
+
+        // Actualizar en la base de datos
+        const updatedIngredients = calculated.map((ing) => ({
+          name: ing.name,
+          quantity: ing.quantity,
+          portion: ing.portion || '',
+        }));
+
+        // Calcular macros totales de la comida
+        let totalCals = 0,
+          totalP = 0,
+          totalC = 0,
+          totalF = 0;
+        calculated.forEach((ing) => {
+          totalCals += ing.nutritionInfo?.calories || 0;
+          totalP += ing.nutritionInfo?.protein || 0;
+          totalC += ing.nutritionInfo?.carbs || 0;
+          totalF += ing.nutritionInfo?.fat || 0;
+        });
+
+        await supabase
+          .from('meals')
+          .update({
+            ingredients: updatedIngredients,
+            calories: Math.round(totalCals),
+            protein_g: Math.round(totalP),
+            carbs_g: Math.round(totalC),
+            fat_g: Math.round(totalF),
+          })
+          .eq('id', meal.id);
+      }
+
+      setSyncProgress('✓ Plan sincronizado');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+      setTimeout(() => {
+        onUpdate();
+        setIsExpanded(false);
+        setShowMeasureForm(false);
+        setIsSyncing(false);
+        setSyncProgress('');
+      }, 1500);
+    } catch (err) {
+      console.error('Error syncing with plan:', err);
+      setSyncProgress('Error al sincronizar');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setTimeout(() => {
+        setIsSyncing(false);
+        setSyncProgress('');
+      }, 2000);
     }
   };
 
@@ -302,6 +497,176 @@ export default function TrensID({ userId, profileData, measurements, onUpdate }:
                 </View>
               </View>
 
+              {/* SECCIÓN BIOMETRÍA AVANZADA */}
+              <View className="pt-4 mt-2 border-t border-zinc-800">
+                <Text className="text-savage-red text-[10px] font-bold uppercase tracking-widest mb-3">
+                  🧬 Biometría Avanzada
+                </Text>
+                <View className="flex-row flex-wrap -mx-1">
+                  {/* Edad */}
+                  <View className="w-1/3 px-1 mb-3">
+                    <Text className="text-[9px] text-zinc-500 uppercase font-bold tracking-wider mb-1">
+                      Edad
+                    </Text>
+                    <TextInput
+                      value={editData.age?.toString() || ''}
+                      onChangeText={(text) =>
+                        setEditData({ ...editData, age: parseInt(text) || undefined })
+                      }
+                      keyboardType="numeric"
+                      placeholder="30"
+                      className="bg-black border border-zinc-800 p-3 text-white text-xs font-bold"
+                      placeholderTextColor="#52525b"
+                    />
+                  </View>
+                  {/* Sexo */}
+                  <View className="w-1/3 px-1 mb-3">
+                    <Text className="text-[9px] text-zinc-500 uppercase font-bold tracking-wider mb-1">
+                      Sexo
+                    </Text>
+                    <View className="flex-row gap-1">
+                      <TouchableOpacity
+                        onPress={() => setEditData({ ...editData, sex: 'M' })}
+                        className={`flex-1 p-3 border ${editData.sex === 'M' ? 'bg-savage-red border-savage-red' : 'bg-black border-zinc-800'}`}
+                      >
+                        <Text
+                          className={`text-center text-xs font-bold ${editData.sex === 'M' ? 'text-white' : 'text-zinc-500'}`}
+                        >
+                          M
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => setEditData({ ...editData, sex: 'F' })}
+                        className={`flex-1 p-3 border ${editData.sex === 'F' ? 'bg-savage-red border-savage-red' : 'bg-black border-zinc-800'}`}
+                      >
+                        <Text
+                          className={`text-center text-xs font-bold ${editData.sex === 'F' ? 'text-white' : 'text-zinc-500'}`}
+                        >
+                          F
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                  {/* % Grasa */}
+                  <View className="w-1/3 px-1 mb-3">
+                    <Text className="text-[9px] text-zinc-500 uppercase font-bold tracking-wider mb-1">
+                      % Grasa
+                    </Text>
+                    <TextInput
+                      value={editData.body_fat_percentage?.toString() || ''}
+                      onChangeText={(text) =>
+                        setEditData({
+                          ...editData,
+                          body_fat_percentage: parseFloat(text) || undefined,
+                        })
+                      }
+                      keyboardType="numeric"
+                      placeholder="15"
+                      className="bg-black border border-zinc-800 p-3 text-white text-xs font-bold"
+                      placeholderTextColor="#52525b"
+                    />
+                  </View>
+                  {/* Masa Muscular */}
+                  <View className="w-1/2 px-1 mb-3">
+                    <Text className="text-[9px] text-zinc-500 uppercase font-bold tracking-wider mb-1">
+                      Masa Muscular (kg)
+                    </Text>
+                    <TextInput
+                      value={editData.muscle_mass?.toString() || ''}
+                      onChangeText={(text) =>
+                        setEditData({ ...editData, muscle_mass: parseFloat(text) || undefined })
+                      }
+                      keyboardType="numeric"
+                      placeholder="65"
+                      className="bg-black border border-zinc-800 p-3 text-white text-xs font-bold"
+                      placeholderTextColor="#52525b"
+                    />
+                  </View>
+                  {/* Días de Entreno */}
+                  <View className="w-1/2 px-1 mb-3">
+                    <Text className="text-[9px] text-zinc-500 uppercase font-bold tracking-wider mb-1">
+                      Días/Semana
+                    </Text>
+                    <TextInput
+                      value={editData.training_days_per_week?.toString() || '4'}
+                      onChangeText={(text) =>
+                        setEditData({ ...editData, training_days_per_week: parseInt(text) || 4 })
+                      }
+                      keyboardType="numeric"
+                      placeholder="4"
+                      className="bg-black border border-zinc-800 p-3 text-white text-xs font-bold"
+                      placeholderTextColor="#52525b"
+                    />
+                  </View>
+                </View>
+
+                {/* Nivel de Actividad */}
+                <View className="mb-3">
+                  <Text className="text-[9px] text-zinc-500 uppercase font-bold tracking-wider mb-2">
+                    Nivel de Actividad
+                  </Text>
+                  <View className="flex-row flex-wrap gap-1">
+                    {['SEDENTARIO', 'LIGERO', 'MODERADO', 'ACTIVO', 'MUY ACTIVO'].map((level) => (
+                      <TouchableOpacity
+                        key={level}
+                        onPress={() => setEditData({ ...editData, activity_level: level })}
+                        className={`px-3 py-2 border ${editData.activity_level === level ? 'bg-savage-red border-savage-red' : 'bg-black border-zinc-800'}`}
+                      >
+                        <Text
+                          className={`text-[9px] font-bold ${editData.activity_level === level ? 'text-white' : 'text-zinc-500'}`}
+                        >
+                          {level}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+
+                {/* Experiencia */}
+                <View className="mb-3">
+                  <Text className="text-[9px] text-zinc-500 uppercase font-bold tracking-wider mb-2">
+                    Experiencia
+                  </Text>
+                  <View className="flex-row gap-1">
+                    {['PRINCIPIANTE', 'INTERMEDIO', 'AVANZADO', 'ELITE'].map((exp) => (
+                      <TouchableOpacity
+                        key={exp}
+                        onPress={() => setEditData({ ...editData, training_experience: exp })}
+                        className={`flex-1 py-2 border ${editData.training_experience === exp ? 'bg-savage-red border-savage-red' : 'bg-black border-zinc-800'}`}
+                      >
+                        <Text
+                          className={`text-center text-[8px] font-bold ${editData.training_experience === exp ? 'text-white' : 'text-zinc-500'}`}
+                        >
+                          {exp}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+
+                {/* Metabolismo */}
+                <View className="mb-3">
+                  <Text className="text-[9px] text-zinc-500 uppercase font-bold tracking-wider mb-2">
+                    Metabolismo
+                  </Text>
+                  <View className="flex-row gap-1">
+                    {['LENTO', 'NORMAL', 'RAPIDO'].map((meta) => (
+                      <TouchableOpacity
+                        key={meta}
+                        onPress={() => setEditData({ ...editData, metabolic_rate: meta })}
+                        className={`flex-1 py-2 border ${editData.metabolic_rate === meta ? 'bg-savage-red border-savage-red' : 'bg-black border-zinc-800'}`}
+                      >
+                        <Text
+                          className={`text-center text-[9px] font-bold ${editData.metabolic_rate === meta ? 'text-white' : 'text-zinc-500'}`}
+                        >
+                          {meta}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              </View>
+
               {/* SECCIÓN MEDIDAS */}
               <View className="pt-4 mt-2 border-t border-zinc-800">
                 <View className="flex-row justify-between items-center mb-3">
@@ -421,17 +786,50 @@ export default function TrensID({ userId, profileData, measurements, onUpdate }:
                 </View>
               </View>
 
-              {/* BOTÓN GUARDAR */}
-              <TouchableOpacity
-                onPress={saveChanges}
-                disabled={isSaving}
-                className="bg-white py-4 mt-6 flex-row items-center justify-center gap-2"
-              >
-                <Save size={14} color="#000" />
-                <Text className="text-black font-black uppercase tracking-widest text-xs">
-                  {isSaving ? 'Guardando...' : 'Guardar Ficha'}
+              {/* BOTONES DE GUARDADO */}
+              <View className="mt-6 gap-3">
+                {/* Botón principal: Guardar y Sincronizar */}
+                <TouchableOpacity
+                  onPress={saveAndSyncWithPlan}
+                  disabled={isSyncing || isSaving}
+                  className={`py-4 flex-row items-center justify-center gap-2 ${
+                    isSyncing ? 'bg-savage-red' : 'bg-white'
+                  }`}
+                >
+                  {isSyncing ? (
+                    <>
+                      <ActivityIndicator size="small" color="#fff" />
+                      <Text className="text-white font-black uppercase tracking-widest text-xs">
+                        {syncProgress}
+                      </Text>
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw size={14} color="#000" />
+                      <Text className="text-black font-black uppercase tracking-widest text-xs">
+                        Guardar y Sincronizar Plan
+                      </Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+
+                {/* Botón secundario: Solo guardar ficha */}
+                <TouchableOpacity
+                  onPress={saveProfileOnly}
+                  disabled={isSyncing || isSaving}
+                  className="py-3 flex-row items-center justify-center gap-2 border border-zinc-700"
+                >
+                  <Save size={12} color="#71717a" />
+                  <Text className="text-zinc-500 font-bold uppercase tracking-widest text-[10px]">
+                    {isSaving ? 'Guardando...' : 'Solo Guardar Ficha'}
+                  </Text>
+                </TouchableOpacity>
+
+                {/* Nota explicativa */}
+                <Text className="text-[9px] text-zinc-600 text-center">
+                  Sincronizar recalcula todos los macros e ingredientes de tu plan con IA
                 </Text>
-              </TouchableOpacity>
+              </View>
             </ScrollView>
           )}
         </View>

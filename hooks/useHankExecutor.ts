@@ -294,6 +294,7 @@ export const useHankExecutor = (
             result = await planUpdateMealTime(userId, p.newTime as string, {
               mealId: p.mealId as string | undefined,
               position: p.position as string | undefined,
+              currentTime: p.currentTime as string | undefined,
             });
             break;
 
@@ -306,35 +307,80 @@ export const useHankExecutor = (
             break;
 
           case 'PLAN_CALCULATE_MACROS': {
-            // Get meals first, then calculate macros
+            // Get meals first - ya tiene los macros calculados
             const mealsResult = await planGetMeals(userId);
             if (mealsResult.success && mealsResult.data) {
-              const meals = (
-                mealsResult.data as {
-                  meals: {
-                    time: string;
-                    meal_options: {
-                      meal_ingredients: {
-                        id: string;
-                        name: string;
-                        quantity: string;
-                        portion?: string;
-                      }[];
-                    }[];
-                  }[];
-                }
-              ).meals;
-              const allIngredients = meals.flatMap(
-                (m) => m.meal_options?.[0]?.meal_ingredients || []
-              );
-              const calculated = await calculateMacrosWithAI(allIngredients);
-              result = {
-                success: true,
-                message: `✅ Macros calculados para ${calculated.length} ingredientes.`,
-                data: { calculated },
+              const data = mealsResult.data as {
+                meals: any[];
+                totals?: { calories: number; protein: number; carbs: number; fat: number };
               };
+
+              if (data.meals.length === 0) {
+                result = { success: false, message: 'No hay comidas para mostrar.' };
+              } else if (data.totals && data.totals.calories > 0) {
+                // Ya tiene macros calculados, mostrar resumen
+                const t = data.totals;
+                result = {
+                  success: true,
+                  message: `📊 MACROS DEL DÍA:\n🔥 ${Math.round(t.calories)} kcal\n💪 ${Math.round(t.protein)}g proteína\n🍞 ${Math.round(t.carbs)}g carbohidratos\n🥑 ${Math.round(t.fat)}g grasa`,
+                  data: { totals: t, meals: data.meals },
+                };
+              } else {
+                // No tiene macros guardados - calcular con IA ahora
+                console.warn('🧮 Calculando macros con IA para ingredientes sin datos...');
+
+                // Extraer todos los ingredientes de todas las comidas
+                const allIngredients: Array<{
+                  id: string;
+                  name: string;
+                  quantity: string;
+                  portion?: string;
+                }> = [];
+                let mealNames: string[] = [];
+
+                data.meals.forEach((meal: any) => {
+                  mealNames.push(meal.name || 'Comida');
+                  const ingredients = meal.ingredients || [];
+                  ingredients.forEach((ing: any, idx: number) => {
+                    allIngredients.push({
+                      id: `${meal.id}-${idx}`,
+                      name: ing.name,
+                      quantity: ing.quantity || '~100g',
+                      portion: ing.portion,
+                    });
+                  });
+                });
+
+                if (allIngredients.length === 0) {
+                  result = { success: false, message: 'No hay ingredientes para calcular.' };
+                } else {
+                  // Calcular con IA
+                  const calculated = await calculateMacrosWithAI(allIngredients);
+
+                  // Sumar totales
+                  let totalCals = 0,
+                    totalP = 0,
+                    totalC = 0,
+                    totalF = 0;
+                  calculated.forEach((ing) => {
+                    totalCals += ing.nutritionInfo?.calories || 0;
+                    totalP += ing.nutritionInfo?.protein || 0;
+                    totalC += ing.nutritionInfo?.carbs || 0;
+                    totalF += ing.nutritionInfo?.fat || 0;
+                  });
+
+                  result = {
+                    success: true,
+                    message: `📊 MACROS DE ${mealNames.join(' + ')}:\n🔥 ${Math.round(totalCals)} kcal\n💪 ${Math.round(totalP)}g proteína\n🍞 ${Math.round(totalC)}g carbohidratos\n🥑 ${Math.round(totalF)}g grasa\n\n(Calculado con IA basado en ${allIngredients.length} ingredientes)`,
+                    data: {
+                      calculated,
+                      totals: { calories: totalCals, protein: totalP, carbs: totalC, fat: totalF },
+                    },
+                  };
+                }
+              }
             } else {
-              result = { success: false, message: 'No hay comidas para calcular.' };
+              result = { success: false, message: 'No hay comidas configuradas.' };
             }
             break;
           }

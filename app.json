@@ -31,8 +31,8 @@
       "eas": {
         "projectId": "27fc2ccb-6af3-47ae-902f-94561e739752"
       },
-      "supabaseUrl": "https://bzlgrukmkrftqpvpbpkj.supabase.co",
-      "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ6bGdydWtta3JmdHFwdnBicGtqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ1NTY4MDgsImV4cCI6MjA4MDEzMjgwOH0.vDB1_r6CLCH4lQn8l67Motd29UWdnqgM0O6IH0cQu9c"
+      "supabaseUrl": "https://cnrcrhlrteeqsyhlxhbb.supabase.co",
+      "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNucmNyaGxydGVlcXN5aGx4aGJiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYxODIyODYsImV4cCI6MjA4MTc1ODI4Nn0.9C2orxQ6xSBIt2Y7ua37rvlvPZBxNNIv0eZoYVRM5tE"
     }
   }
 }

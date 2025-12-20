@@ -244,14 +244,30 @@ interface SimpleIngredient {
 }
 
 // ============================================================================
-// USER PROFILE FOR MACROS CALCULATION
+// USER PROFILE FOR MACROS CALCULATION - ULTRA PERSONALIZADO
 // ============================================================================
+interface BodyMeasurement {
+  name: string;
+  value: string;
+  is_dominant?: boolean;
+}
+
 interface UserMacroProfile {
   weight: string; // "80.5 KG"
   height: string; // "1.75 M"
   goal: string; // "GANAR MASA MUSCULAR", "DEFINIR", "MANTENER"
   activityLevel?: string; // "SEDENTARIO", "MODERADO", "ACTIVO", "MUY ACTIVO"
   mealCount: number; // Número de comidas del usuario
+  // Datos adicionales para ultra personalización
+  age?: number; // Edad del usuario
+  sex?: string; // "M", "F", "MASCULINO", "FEMENINO"
+  bodyFatPercentage?: number; // % de grasa corporal
+  muscleMass?: number; // kg de masa muscular
+  trainingExperience?: string; // "PRINCIPIANTE", "INTERMEDIO", "AVANZADO"
+  metabolicRate?: string; // "LENTO", "NORMAL", "RAPIDO"
+  trainingDaysPerWeek?: number; // Días de entrenamiento por semana
+  // Medidas corporales del usuario
+  bodyMeasurements?: BodyMeasurement[];
 }
 
 interface DailyMacros {
@@ -268,81 +284,197 @@ interface DailyMacros {
 }
 
 // ============================================================================
-// CALCULATE USER DAILY MACROS
-// Calcula los macros totales del usuario basado en su perfil
+// CALCULATE USER DAILY MACROS - 100% IA PERSONALIZADA
+// Ultra personalizado con Gemini AI basado en todas las métricas del usuario
 // ============================================================================
 export async function calculateUserDailyMacros(profile: UserMacroProfile): Promise<DailyMacros> {
-  // Extraer peso en kg
+  // Extraer valores numéricos para fallback
   const weightMatch = profile.weight.match(/(\d+\.?\d*)/);
   const weightKg = weightMatch ? parseFloat(weightMatch[1]) : 75;
+  const mealCount = Math.max(profile.mealCount, 1);
 
-  // Extraer altura en metros
-  const heightMatch = profile.height.match(/(\d+\.?\d*)/);
-  const heightM = heightMatch ? parseFloat(heightMatch[1]) : 1.75;
-
-  // Calcular BMR (Basal Metabolic Rate) con Harris-Benedict
-  // Asumiendo hombre adulto por defecto
-  const bmr = 88.362 + 13.397 * weightKg + 4.799 * heightM * 100 - 5.677 * 30; // Edad estimada 30
-
-  // Factor de actividad
-  let activityFactor = 1.55; // Moderadamente activo por defecto
-  switch (profile.activityLevel?.toUpperCase()) {
-    case 'SEDENTARIO':
-      activityFactor = 1.2;
-      break;
-    case 'LIGERO':
-      activityFactor = 1.375;
-      break;
-    case 'MODERADO':
-      activityFactor = 1.55;
-      break;
-    case 'ACTIVO':
-      activityFactor = 1.725;
-      break;
-    case 'MUY ACTIVO':
-      activityFactor = 1.9;
-      break;
+  // Si no hay API key, usar cálculo básico de fallback
+  if (!GEMINI_API_KEY) {
+    console.warn('GEMINI_API_KEY not set, using fallback calculation');
+    return calculateFallbackMacros(weightKg, profile.goal, mealCount);
   }
 
-  // TDEE (Total Daily Energy Expenditure)
-  let tdee = bmr * activityFactor;
+  try {
+    // Construir datos adicionales si existen
+    let additionalData = '';
+    if (profile.age) additionalData += `- Edad: ${profile.age} años\n`;
+    if (profile.sex) additionalData += `- Sexo: ${profile.sex}\n`;
+    if (profile.bodyFatPercentage)
+      additionalData += `- Porcentaje de grasa corporal: ${profile.bodyFatPercentage}%\n`;
+    if (profile.muscleMass) additionalData += `- Masa muscular: ${profile.muscleMass} kg\n`;
+    if (profile.trainingExperience)
+      additionalData += `- Experiencia de entrenamiento: ${profile.trainingExperience}\n`;
+    if (profile.metabolicRate) additionalData += `- Metabolismo: ${profile.metabolicRate}\n`;
+    if (profile.trainingDaysPerWeek)
+      additionalData += `- Días de entrenamiento por semana: ${profile.trainingDaysPerWeek}\n`;
 
-  // Ajuste por objetivo
-  const goalLower = profile.goal.toLowerCase();
-  let proteinMultiplier = 2.0; // g por kg por defecto
-  let carbPercentage = 0.4;
-  let fatPercentage = 0.25;
+    // Construir medidas corporales si existen
+    let bodyMeasurementsData = '';
+    if (profile.bodyMeasurements && profile.bodyMeasurements.length > 0) {
+      bodyMeasurementsData = '\nMEDIDAS CORPORALES:\n';
+      profile.bodyMeasurements.forEach((m) => {
+        const dominant = m.is_dominant ? ' 👑 (DOMINANTE)' : '';
+        bodyMeasurementsData += `- ${m.name}: ${m.value}${dominant}\n`;
+      });
+    }
+
+    const prompt = `Eres un nutricionista deportivo de ÉLITE con 20+ años de experiencia con atletas profesionales y culturistas.
+Tu tarea es calcular los MACROS DIARIOS PERFECTOS de forma ULTRA PERSONALIZADA usando TODA la información disponible.
+
+═══════════════════════════════════════════════════════════════════════════════
+                           DATOS DEL CLIENTE
+═══════════════════════════════════════════════════════════════════════════════
+- Peso actual: ${profile.weight}
+- Altura: ${profile.height}
+- Objetivo principal: ${profile.goal}
+- Nivel de actividad física: ${profile.activityLevel || 'MODERADO'}
+- Número de comidas planificadas: ${profile.mealCount}
+${additionalData ? `\nDATOS BIOMÉTRICOS:\n${additionalData}` : ''}${bodyMeasurementsData}
+
+═══════════════════════════════════════════════════════════════════════════════
+                           INSTRUCCIONES CRÍTICAS
+═══════════════════════════════════════════════════════════════════════════════
+1. USA TODA LA INFORMACIÓN disponible para máxima personalización
+2. Si tiene % de grasa corporal, calcula masa magra y ajusta proteína a esa base
+3. Si tiene medidas corporales (cintura, cuello, cadera), puedes estimar % grasa con fórmula Navy
+4. Si tiene experiencia de entrenamiento, ajusta expectativas y requerimientos
+5. Si tiene metabolismo lento/rápido, ajusta calorías apropiadamente
+6. Analiza las medidas para determinar tipo de cuerpo y ajustar macros
+
+REGLAS DE CÁLCULO POR OBJETIVO:
+• GANAR MASA/VOLUMEN:
+  - Surplus: 10-15% si es principiante, 15-20% si es avanzado
+  - Proteína: 2.0-2.2g por kg de peso (o 2.5-3g por kg de masa magra si disponible)
+  - Carbos: 4-6g por kg para energía anabólica
+  - Grasas: 0.8-1g por kg para hormonas
+
+• DEFINIR/PERDER GRASA:
+  - Déficit: 15-20% moderado, 20-25% agresivo
+  - Proteína: 2.4-2.8g por kg (ALTA para preservar músculo)
+  - Carbos: 2-3g por kg, priorizando pre/post entreno
+  - Grasas: 0.6-0.8g por kg mínimo para hormonas
+
+• MANTENER/RECOMPOSICIÓN:
+  - Calorías de mantenimiento exactas
+  - Proteína: 2.0-2.2g por kg
+  - Distribución equilibrada de carbos y grasas
+
+MATEMÁTICAS OBLIGATORIAS:
+- Los macros por comida × número de comidas = totales diarios EXACTOS
+- 1g proteína = 4 kcal, 1g carbos = 4 kcal, 1g grasa = 9 kcal
+- Verifica que calorías = (proteína×4) + (carbos×4) + (grasa×9)
+
+═══════════════════════════════════════════════════════════════════════════════
+                           RESPUESTA REQUERIDA
+═══════════════════════════════════════════════════════════════════════════════
+RESPONDE ÚNICAMENTE CON ESTE JSON (sin markdown, sin texto adicional):
+{
+  "totalCalories": 2500,
+  "totalProtein": 180,
+  "totalCarbs": 250,
+  "totalFat": 70,
+  "perMeal": {
+    "calories": 625,
+    "protein": 45,
+    "carbs": 62,
+    "fat": 17
+  },
+  "reasoning": "Explicación técnica de 1-2 líneas de por qué estos macros específicos"
+}`;
+
+    const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: 0.2, // Bajo para consistencia
+          maxOutputTokens: 512,
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Gemini API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+    // Limpiar respuesta y extraer JSON
+    let cleanedResponse = textResponse
+      .replace(/```json/gi, '')
+      .replace(/```/g, '')
+      .trim();
+
+    const jsonMatch = cleanedResponse.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error('No JSON found in AI response');
+    }
+
+    const parsed = JSON.parse(jsonMatch[0]);
+
+    // Validar que tenemos todos los campos necesarios
+    if (!parsed.totalCalories || !parsed.totalProtein || !parsed.perMeal) {
+      throw new Error('Incomplete macro data from AI');
+    }
+
+    // Log solo en desarrollo
+    if (__DEV__) {
+      console.log('🧠 AI Macros:', parsed.reasoning || 'Calculado');
+    }
+
+    return {
+      totalCalories: Math.round(parsed.totalCalories),
+      totalProtein: Math.round(parsed.totalProtein),
+      totalCarbs: Math.round(parsed.totalCarbs || 0),
+      totalFat: Math.round(parsed.totalFat || 0),
+      perMeal: {
+        calories: Math.round(parsed.perMeal.calories),
+        protein: Math.round(parsed.perMeal.protein),
+        carbs: Math.round(parsed.perMeal.carbs || 0),
+        fat: Math.round(parsed.perMeal.fat || 0),
+      },
+    };
+  } catch (error) {
+    console.error('calculateUserDailyMacros AI error:', error);
+    // Fallback a cálculo básico si falla la IA
+    return calculateFallbackMacros(weightKg, profile.goal, mealCount);
+  }
+}
+
+// ============================================================================
+// FALLBACK CALCULATION (sin IA)
+// Solo se usa si Gemini no está disponible
+// ============================================================================
+function calculateFallbackMacros(weightKg: number, goal: string, mealCount: number): DailyMacros {
+  const goalLower = goal.toLowerCase();
+  let calories = weightKg * 33; // Base para mantenimiento
+  let proteinMultiplier = 2.0;
 
   if (goalLower.includes('ganar') || goalLower.includes('masa') || goalLower.includes('volumen')) {
-    tdee *= 1.15; // Surplus del 15%
+    calories = weightKg * 38;
     proteinMultiplier = 2.2;
-    carbPercentage = 0.45;
-    fatPercentage = 0.25;
   } else if (
     goalLower.includes('defin') ||
     goalLower.includes('perder') ||
     goalLower.includes('bajar')
   ) {
-    tdee *= 0.85; // Deficit del 15%
-    proteinMultiplier = 2.4; // Más proteína en déficit
-    carbPercentage = 0.3;
-    fatPercentage = 0.3;
-  } else if (goalLower.includes('mantener') || goalLower.includes('recomp')) {
-    proteinMultiplier = 2.0;
-    carbPercentage = 0.4;
-    fatPercentage = 0.25;
+    calories = weightKg * 28;
+    proteinMultiplier = 2.4;
   }
 
-  // Calcular macros
-  const totalCalories = Math.round(tdee);
+  const totalCalories = Math.round(calories);
   const totalProtein = Math.round(weightKg * proteinMultiplier);
-  const proteinCalories = totalProtein * 4;
-  const remainingCalories = totalCalories - proteinCalories;
-  const totalCarbs = Math.round((remainingCalories * carbPercentage) / 4);
-  const totalFat = Math.round((remainingCalories * fatPercentage) / 9);
-
-  // Distribuir entre comidas
-  const mealCount = Math.max(profile.mealCount, 1);
+  const proteinCals = totalProtein * 4;
+  const remaining = totalCalories - proteinCals;
+  const totalCarbs = Math.round((remaining * 0.55) / 4);
+  const totalFat = Math.round((remaining * 0.45) / 9);
 
   return {
     totalCalories,

@@ -133,6 +133,9 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
   // Refresh Trigger - Se incrementa cuando HANK modifica datos para que las pantallas recarguen
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
+  // Macro Cache Invalidation - Se incrementa cuando se actualizan datos del perfil
+  const [macroCacheInvalidate, setMacroCacheInvalidate] = useState(0);
+
   // Dynamic Context
   const [screenContext, setScreenContext] = useState<ScreenContext>(defaultScreenContext);
   const [activeAsset, setActiveAssetState] = useState<ActiveAsset | null>(null);
@@ -924,6 +927,14 @@ IMPORTANTE: Puedes ejecutar múltiples herramientas si la solicitud lo requiere.
 
   // -------------------------------------------------------------------------
   // CONTEXT VALUE
+  /**
+   * Invalidar caché de macros - Llamar cuando se actualicen datos del perfil
+   */
+  const invalidateMacroCache = useCallback(() => {
+    console.warn('🔄 HANK: Invalidando caché de macros');
+    setMacroCacheInvalidate((prev) => prev + 1);
+  }, []);
+
   // -------------------------------------------------------------------------
   const value = useMemo<HankContextState>(
     () => ({
@@ -958,9 +969,14 @@ IMPORTANTE: Puedes ejecutar múltiples herramientas si la solicitud lo requiere.
 
       // Conversation management
       clearConversation,
+      saveMessageToSupabase,
 
       // Data refresh trigger
       refreshTrigger,
+
+      // Macro cache invalidation
+      macroCacheInvalidate,
+      invalidateMacroCache,
 
       // LLM Integration
       getToolDefinitions,
@@ -984,7 +1000,10 @@ IMPORTANTE: Puedes ejecutar múltiples herramientas si la solicitud lo requiere.
       removeAlias,
       executeAlias,
       clearConversation,
+      saveMessageToSupabase,
       refreshTrigger,
+      macroCacheInvalidate,
+      invalidateMacroCache,
       getToolDefinitions,
       getSystemPrompt,
     ]
@@ -1016,7 +1035,10 @@ const defaultHankState: HankContextState = {
   removeAlias: () => {},
   executeAlias: async () => null,
   clearConversation: async () => {},
+  saveMessageToSupabase: async () => {},
   refreshTrigger: 0,
+  macroCacheInvalidate: 0,
+  invalidateMacroCache: () => {},
   getToolDefinitions: () => [],
   getSystemPrompt: () => '',
 };
