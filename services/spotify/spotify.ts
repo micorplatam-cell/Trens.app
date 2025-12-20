@@ -21,6 +21,9 @@ const SPOTIFY_SCOPES = [
   'user-read-currently-playing',
   'streaming',
   'app-remote-control',
+  'playlist-read-private',
+  'playlist-read-collaborative',
+  'user-library-read',
 ].join(' ');
 
 const STORAGE_KEY = '@trens_spotify_token';
@@ -65,6 +68,32 @@ export interface SpotifyVideoMetadata {
   trackName: string;
   artist: string;
   albumArt?: string;
+}
+
+/**
+ * Playlist de Spotify
+ */
+export interface SpotifyPlaylist {
+  id: string;
+  name: string;
+  description: string;
+  imageUrl: string | null;
+  trackCount: number;
+  owner: string;
+}
+
+/**
+ * Track simplificado para listas
+ */
+export interface SpotifyPlaylistTrack {
+  uri: string;
+  id: string;
+  name: string;
+  artist: string;
+  album: string;
+  albumArt: string | null;
+  durationMs: number;
+  addedAt: string;
 }
 
 /**
@@ -248,19 +277,19 @@ class SpotifyService {
    * Usa un flag para evitar múltiples refreshes concurrentes
    */
   private isRefreshing = false;
-  
+
   async refreshAccessToken(): Promise<boolean> {
     if (!this.refreshToken) return false;
-    
+
     // Evitar múltiples refreshes concurrentes
     if (this.isRefreshing) {
       // Esperar a que termine el refresh en curso
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
       return this.isConnected && !!this.accessToken;
     }
 
     this.isRefreshing = true;
-    
+
     try {
       const result = await AuthSession.refreshAsync(
         {
@@ -518,7 +547,8 @@ class SpotifyService {
    * Buscar posición en la canción
    */
   async seek(positionMs: number): Promise<boolean> {
-    await this.apiCall(`/me/player/seek?position_ms=${positionMs}`, 'PUT');
+    const position = Math.floor(positionMs);
+    await this.apiCall(`/me/player/seek?position_ms=${position}`, 'PUT');
     return true;
   }
 
@@ -753,6 +783,132 @@ class SpotifyService {
    */
   getUpgradeCTA(): string {
     return 'Cambia a PRO para controlar la música';
+  }
+
+  // =========================================================================
+  // 📚 PLAYLISTS - Navegar y reproducir desde playlists
+  // =========================================================================
+
+  /**
+   * Obtener las playlists del usuario
+   */
+  async getMyPlaylists(limit: number = 50, offset: number = 0): Promise<SpotifyPlaylist[]> {
+    const data = await this.apiCall<any>(`/me/playlists?limit=${limit}&offset=${offset}`);
+
+    if (!data?.items) return [];
+
+    return data.items.map((item: any) => ({
+      id: item.id,
+      name: item.name,
+      description: item.description || '',
+      imageUrl: item.images?.[0]?.url || null,
+      trackCount: item.tracks?.total || 0,
+      owner: item.owner?.display_name || 'Unknown',
+    }));
+  }
+
+  /**
+   * Obtener los tracks de una playlist
+   */
+  async getPlaylistTracks(
+    playlistId: string,
+    limit: number = 50,
+    offset: number = 0
+  ): Promise<SpotifyPlaylistTrack[]> {
+    const data = await this.apiCall<any>(
+      `/playlists/${playlistId}/tracks?limit=${limit}&offset=${offset}&fields=items(added_at,track(id,uri,name,duration_ms,album(name,images),artists(name)))`
+    );
+
+    if (!data?.items) return [];
+
+    return data.items
+      .filter((item: any) => item.track) // Filtrar tracks eliminados
+      .map((item: any) => ({
+        uri: item.track.uri,
+        id: item.track.id,
+        name: item.track.name,
+        artist: item.track.artists?.map((a: any) => a.name).join(', ') || 'Unknown',
+        album: item.track.album?.name || 'Unknown',
+        albumArt: item.track.album?.images?.[0]?.url || null,
+        durationMs: item.track.duration_ms || 0,
+        addedAt: item.added_at,
+      }));
+  }
+
+  /**
+   * Obtener los "Liked Songs" del usuario
+   */
+  async getLikedSongs(limit: number = 50, offset: number = 0): Promise<SpotifyPlaylistTrack[]> {
+    const data = await this.apiCall<any>(`/me/tracks?limit=${limit}&offset=${offset}`);
+
+    if (!data?.items) return [];
+
+    return data.items
+      .filter((item: any) => item.track)
+      .map((item: any) => ({
+        uri: item.track.uri,
+        id: item.track.id,
+        name: item.track.name,
+        artist: item.track.artists?.map((a: any) => a.name).join(', ') || 'Unknown',
+        album: item.track.album?.name || 'Unknown',
+        albumArt: item.track.album?.images?.[0]?.url || null,
+        durationMs: item.track.duration_ms || 0,
+        addedAt: item.added_at,
+      }));
+  }
+
+  /**
+   * Reproducir un track específico
+   */
+  async playTrack(trackUri: string): Promise<boolean> {
+    return await this.play(trackUri, 0);
+  }
+
+  /**
+   * Reproducir una playlist completa desde el inicio
+   */
+  async playPlaylist(playlistId: string): Promise<boolean> {
+    const contextUri = `spotify:playlist:${playlistId}`;
+    await this.apiCall('/me/player/play', 'PUT', {
+      context_uri: contextUri,
+    });
+    return true;
+  }
+
+  /**
+   * Reproducir una playlist desde un track específico
+   */
+  async playPlaylistFromTrack(playlistId: string, trackUri: string): Promise<boolean> {
+    const contextUri = `spotify:playlist:${playlistId}`;
+    await this.apiCall('/me/player/play', 'PUT', {
+      context_uri: contextUri,
+      offset: { uri: trackUri },
+    });
+    return true;
+  }
+
+  /**
+   * Buscar tracks
+   */
+  async searchTracks(query: string, limit: number = 20): Promise<SpotifyPlaylistTrack[]> {
+    if (!query.trim()) return [];
+
+    const data = await this.apiCall<any>(
+      `/search?q=${encodeURIComponent(query)}&type=track&limit=${limit}`
+    );
+
+    if (!data?.tracks?.items) return [];
+
+    return data.tracks.items.map((track: any) => ({
+      uri: track.uri,
+      id: track.id,
+      name: track.name,
+      artist: track.artists?.map((a: any) => a.name).join(', ') || 'Unknown',
+      album: track.album?.name || 'Unknown',
+      albumArt: track.album?.images?.[0]?.url || null,
+      durationMs: track.duration_ms || 0,
+      addedAt: '',
+    }));
   }
 }
 

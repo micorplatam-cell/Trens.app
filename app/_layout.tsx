@@ -7,6 +7,7 @@ import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { HankProvider } from '../context/HankContext';
 import { HankOverlay } from '../components/hank/HankOverlay';
+import { SpotifyOverlay } from '../components/spotify/SpotifyOverlay';
 import { ProContextProvider, useProContext } from '../context/ProContext';
 import { UserRoleProvider, useUserRoleContext } from '../context/UserRoleContext';
 import '../global.css';
@@ -93,8 +94,10 @@ const HankWrapper = ({ children }: { children: React.ReactNode }) => {
   return (
     <HankProvider userId={user.id}>
       {children}
-      {/* HANK Overlay - Solo visible cuando hay usuario autenticado */}
+      {/* HANK Overlay - Visible en todas partes excepto Feed */}
       <HankOverlay />
+      {/* SPOTIFY Overlay - Visible en todas partes excepto Feed */}
+      <SpotifyOverlay />
     </HankProvider>
   );
 };

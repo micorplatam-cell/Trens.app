@@ -32,10 +32,6 @@ import {
   ChevronDown,
   Play,
   Pause,
-  SkipForward,
-  SkipBack,
-  Wifi,
-  WifiOff,
   Eye,
   EyeOff,
   Share2,
@@ -59,11 +55,7 @@ import Animated, {
 import Slider from '@react-native-community/slider';
 import { useHank } from '../../../context/HankContext';
 import { LinearGradient } from 'expo-linear-gradient';
-import spotify, {
-  SpotifyTrack,
-  SpotifyPlaybackState,
-  SpotifyVideoMetadata,
-} from '../../../services/spotify/spotify';
+import spotify, { SpotifyVideoMetadata } from '../../../services/spotify/spotify';
 import { useUserRoleContext } from '../../../context/UserRoleContext';
 import cloudflareR2 from '../../../services/cloudflare/r2';
 
@@ -303,16 +295,12 @@ export default function GymScreen() {
   const [timeRemaining, setTimeRemaining] = useState(0);
 
   // Modals State
-  const [spotifyModalVisible, setSpotifyModalVisible] = useState(false);
   const [hankModalVisible, setHankModalVisible] = useState(false);
   const [notesModalVisible, setNotesModalVisible] = useState(false);
   const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
 
-  // Spotify State
+  // Spotify State (solo para captura durante grabación)
   const [spotifyConnected, setSpotifyConnected] = useState(false);
-  const [spotifyLoading, setSpotifyLoading] = useState(false);
-  const [spotifyPlayback, setSpotifyPlayback] = useState<SpotifyPlaybackState | null>(null);
-  const [currentTrack, setCurrentTrack] = useState<SpotifyTrack | null>(null);
   const [capturedSpotifyMetadata, setCapturedSpotifyMetadata] =
     useState<SpotifyVideoMetadata | null>(null);
 
@@ -473,48 +461,25 @@ export default function GymScreen() {
   const exerciseListRef = useRef<FlatList>(null);
 
   // -------------------------------------------------------------------------
-  // SPOTIFY: Cargar estado inicial y sincronizar con contexto
+  // SPOTIFY: Cargar estado inicial para captura durante grabación
   // -------------------------------------------------------------------------
   useEffect(() => {
     const initSpotify = async () => {
       // Solo cargar si no está ya conectado en memoria
       if (spotify.isTokenValid()) {
         setSpotifyConnected(true);
-        const playback = await spotify.getPlaybackState();
-        setSpotifyPlayback(playback);
-        setCurrentTrack(playback?.track || null);
         return;
       }
 
       // Intentar cargar desde storage
       const connected = await spotify.loadStoredTokens();
       setSpotifyConnected(connected);
-      if (connected) {
-        const playback = await spotify.getPlaybackState();
-        setSpotifyPlayback(playback);
-        setCurrentTrack(playback?.track || null);
-        // Sincronizar con DB si los tokens son válidos pero no está en DB
-        if (!contextSpotifyConnected) {
-          await updateSpotifyStatus(true, true);
-        }
+      if (connected && !contextSpotifyConnected) {
+        await updateSpotifyStatus(true, true);
       }
     };
     initSpotify();
   }, [contextSpotifyConnected, updateSpotifyStatus]);
-
-  // SPOTIFY: Polling del estado de reproducción cuando está conectado
-  useEffect(() => {
-    if (!spotifyConnected || !spotifyModalVisible) return;
-
-    const pollPlayback = async () => {
-      const playback = await spotify.getPlaybackState();
-      setSpotifyPlayback(playback);
-      setCurrentTrack(playback?.track || null);
-    };
-
-    const interval = setInterval(pollPlayback, 2000);
-    return () => clearInterval(interval);
-  }, [spotifyConnected, spotifyModalVisible]);
 
   // -------------------------------------------------------------------------
   // SYNC ACTIVE EXERCISE WITH HANK CONTEXT
@@ -2779,227 +2744,6 @@ export default function GymScreen() {
     </Modal>
   );
 
-  const renderSpotifyModal = () => {
-    const handleConnect = async () => {
-      setSpotifyLoading(true);
-      const success = await spotify.authenticate();
-      setSpotifyConnected(success);
-      if (success) {
-        const playback = await spotify.getPlaybackState();
-        setSpotifyPlayback(playback);
-        setCurrentTrack(playback?.track || null);
-        // Guardar estado de conexión en Supabase Y en el contexto
-        // Premium = true porque solo Premium puede controlar reproducción
-        await updateSpotifyStatus(true, true);
-        console.log('🎵 Spotify conectado y guardado en DB');
-      }
-      setSpotifyLoading(false);
-    };
-
-    const handleDisconnect = async () => {
-      await spotify.disconnect();
-      setSpotifyConnected(false);
-      setSpotifyPlayback(null);
-      setCurrentTrack(null);
-      // Actualizar estado en Supabase y contexto
-      await updateSpotifyStatus(false, false);
-      console.log('🎵 Spotify desconectado');
-    };
-
-    const handlePlayPause = async () => {
-      await spotify.togglePlayPause();
-      const playback = await spotify.getPlaybackState();
-      setSpotifyPlayback(playback);
-    };
-
-    const handleNext = async () => {
-      await spotify.next();
-      setTimeout(async () => {
-        const playback = await spotify.getPlaybackState();
-        setSpotifyPlayback(playback);
-        setCurrentTrack(playback?.track || null);
-      }, 500);
-    };
-
-    const handlePrevious = async () => {
-      await spotify.previous();
-      setTimeout(async () => {
-        const playback = await spotify.getPlaybackState();
-        setSpotifyPlayback(playback);
-        setCurrentTrack(playback?.track || null);
-      }, 500);
-    };
-
-    return (
-      <Modal
-        visible={spotifyModalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setSpotifyModalVisible(false)}
-      >
-        <View className="flex-1 bg-black/95 justify-end">
-          <View className="bg-zinc-900 rounded-t-3xl p-6 border-t border-green-500/50">
-            {/* HEADER */}
-            <View className="flex-row justify-between items-center mb-6">
-              <View className="flex-row items-center gap-3">
-                <View className="w-10 h-10 bg-green-500 rounded-full items-center justify-center">
-                  <Music color="#000" size={20} />
-                </View>
-                <View>
-                  <Text className="text-white text-lg font-bold">SPOTIFY</Text>
-                  <View className="flex-row items-center gap-1">
-                    {spotifyConnected ? (
-                      <>
-                        <Wifi color="#1DB954" size={12} />
-                        <Text className="text-green-500 text-xs">Conectado</Text>
-                      </>
-                    ) : (
-                      <>
-                        <WifiOff color="#71717A" size={12} />
-                        <Text className="text-zinc-500 text-xs">Desconectado</Text>
-                      </>
-                    )}
-                  </View>
-                </View>
-              </View>
-              <TouchableOpacity
-                onPress={() => setSpotifyModalVisible(false)}
-                className="bg-zinc-800 p-2 rounded-full"
-              >
-                <X color="#71717A" size={20} />
-              </TouchableOpacity>
-            </View>
-
-            {spotifyConnected ? (
-              <>
-                {/* REPRODUCTOR */}
-                <View className="bg-black/50 rounded-2xl p-4 mb-4 border border-zinc-800">
-                  {currentTrack ? (
-                    <View className="flex-row items-center gap-4">
-                      {/* ALBUM ART */}
-                      <View className="w-16 h-16 bg-zinc-800 rounded-lg overflow-hidden">
-                        {currentTrack.albumArt ? (
-                          <Image
-                            source={{ uri: currentTrack.albumArt }}
-                            style={{ width: 64, height: 64 }}
-                            contentFit="cover"
-                          />
-                        ) : (
-                          <View className="w-full h-full items-center justify-center">
-                            <Music color="#1DB954" size={24} />
-                          </View>
-                        )}
-                      </View>
-                      {/* TRACK INFO */}
-                      <View className="flex-1">
-                        <Text className="text-white font-bold text-base" numberOfLines={1}>
-                          {currentTrack.name}
-                        </Text>
-                        <Text className="text-zinc-400 text-sm" numberOfLines={1}>
-                          {currentTrack.artist}
-                        </Text>
-                        <Text className="text-zinc-600 text-xs mt-1">{currentTrack.album}</Text>
-                      </View>
-                    </View>
-                  ) : (
-                    <View className="items-center py-4">
-                      <Music color="#71717A" size={32} />
-                      <Text className="text-zinc-500 text-sm mt-2">No hay reproducción activa</Text>
-                      <Text className="text-zinc-600 text-xs mt-1">
-                        Abre Spotify y reproduce algo
-                      </Text>
-                    </View>
-                  )}
-                </View>
-
-                {/* CONTROLES - SOLO PRO */}
-                {isPro ? (
-                  <View className="flex-row items-center justify-center gap-6 mb-6">
-                    <TouchableOpacity
-                      onPress={handlePrevious}
-                      className="bg-zinc-800 p-3 rounded-full"
-                    >
-                      <SkipBack color="#FFFFFF" size={24} />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={handlePlayPause}
-                      className="bg-green-500 p-4 rounded-full"
-                    >
-                      {spotifyPlayback?.isPlaying ? (
-                        <Pause color="#000000" size={28} />
-                      ) : (
-                        <Play color="#000000" size={28} />
-                      )}
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={handleNext} className="bg-zinc-800 p-3 rounded-full">
-                      <SkipForward color="#FFFFFF" size={24} />
-                    </TouchableOpacity>
-                  </View>
-                ) : (
-                  <View className="mb-6 p-4 bg-zinc-800/50 rounded-xl border border-zinc-700">
-                    <Text className="text-white font-bold text-center mb-1">
-                      Modo Ambiente Activo
-                    </Text>
-                    <Text className="text-zinc-400 text-xs text-center mb-3">
-                      Tu música sigue sonando mientras entrenas
-                    </Text>
-                    <View className="bg-savage-red/20 border border-savage-red/50 rounded-lg p-3">
-                      <Text className="text-savage-red text-xs text-center font-bold">
-                        🔥 PRO: Desbloquea controles de reproducción
-                      </Text>
-                    </View>
-                  </View>
-                )}
-
-                {/* DESCONECTAR */}
-                <TouchableOpacity
-                  onPress={handleDisconnect}
-                  className="border border-zinc-700 p-3 rounded-lg items-center"
-                >
-                  <Text className="text-zinc-500 text-sm">Desconectar Spotify</Text>
-                </TouchableOpacity>
-              </>
-            ) : (
-              <>
-                {/* ESTADO NO CONECTADO */}
-                <View className="items-center py-8">
-                  <View className="w-20 h-20 bg-zinc-800 rounded-full items-center justify-center mb-4">
-                    <Music color="#1DB954" size={40} />
-                  </View>
-                  <Text className="text-white text-lg font-bold mb-2">Conecta Spotify Premium</Text>
-                  <Text className="text-zinc-500 text-center text-sm mb-6">
-                    Controla tu música mientras entrenas{'\n'}
-                    sin salir de TRENS
-                  </Text>
-                </View>
-
-                {/* BOTÓN CONECTAR */}
-                <TouchableOpacity
-                  onPress={handleConnect}
-                  disabled={spotifyLoading}
-                  className={`p-4 rounded-xl items-center ${
-                    spotifyLoading ? 'bg-green-500/50' : 'bg-green-500'
-                  }`}
-                >
-                  {spotifyLoading ? (
-                    <ActivityIndicator color="#000" />
-                  ) : (
-                    <Text className="text-black font-bold text-base">CONECTAR CON SPOTIFY</Text>
-                  )}
-                </TouchableOpacity>
-
-                {/* NOTA LEGAL */}
-                <Text className="text-zinc-600 text-xs text-center mt-4">
-                  Requiere Spotify Premium instalado en tu dispositivo
-                </Text>
-              </>
-            )}
-          </View>
-        </View>
-      </Modal>
-    );
-  };
-
   const renderHankModal = () => (
     <Modal
       visible={hankModalVisible}
@@ -3821,14 +3565,6 @@ export default function GymScreen() {
             </TouchableOpacity>
           )}
         </View>
-
-        {/* SPOTIFY */}
-        <TouchableOpacity
-          onPress={() => setSpotifyModalVisible(true)}
-          className="bg-black/80 p-3 rounded-full border border-zinc-800"
-        >
-          <Music color="#1DB954" size={20} />
-        </TouchableOpacity>
       </View>
 
       {/* VERTICAL SCROLL (ESTILO TIKTOK) */}
@@ -4143,7 +3879,6 @@ export default function GymScreen() {
 
       {/* MODALS */}
       {renderNotesModal()}
-      {renderSpotifyModal()}
       {renderHankModal()}
       {renderVideoViewer()}
       {renderHistorialModal()}

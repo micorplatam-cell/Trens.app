@@ -41,6 +41,7 @@ import {
   Check,
   X,
 } from 'lucide-react-native';
+import { usePathname } from 'expo-router';
 import { useHank } from '../../context/HankContext';
 import { useVoiceInput } from '../../hooks/useVoiceInput';
 import { callGemini } from '../../services/hank/gemini';
@@ -758,6 +759,7 @@ const HankTakeover: React.FC<{ isActive: boolean; statusText: string }> = ({
 // MAIN COMPONENT: HANK OVERLAY
 // ============================================================================
 export const HankOverlay: React.FC = () => {
+  const pathname = usePathname();
   const [isOpen, setIsOpen] = useState(false);
   const [inputText, setInputText] = useState('');
   const [isListening, setIsListening] = useState(false);
@@ -774,6 +776,10 @@ export const HankOverlay: React.FC = () => {
   const takeoverResultRef = useRef<HankToolResult[] | null>(null);
 
   const flatListRef = useRef<FlatList>(null);
+
+  // Ocultar en Feed
+  const isHiddenInFeed =
+    pathname?.includes('feed') || pathname === '/feed/index' || pathname === '/feed';
 
   // Animated value para cierre por gesto
   const translateY = useSharedValue(0);
@@ -1482,6 +1488,12 @@ export const HankOverlay: React.FC = () => {
   // -------------------------------------------------------------------------
   // RENDER
   // -------------------------------------------------------------------------
+
+  // No renderizar en Feed
+  if (isHiddenInFeed) {
+    return null;
+  }
+
   return (
     <>
       {/* HANK TAKEOVER - Efecto fullscreen cuando ejecuta cambios */}
