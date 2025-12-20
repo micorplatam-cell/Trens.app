@@ -25,8 +25,8 @@ export function useVoiceInput(): UseVoiceInputReturn {
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const recordingRef = useRef<Audio.Recording | null>(null);
-  const maxRecordingTimer = useRef<NodeJS.Timeout | null>(null);
-  const silenceCheckInterval = useRef<NodeJS.Timeout | null>(null);
+  const maxRecordingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const silenceCheckInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastSoundTime = useRef<number>(Date.now());
   const stopRecordingRef = useRef<(() => Promise<string | null>) | null>(null);
   const onAutoStopCallback = useRef<((transcription: string | null) => void) | null>(null);

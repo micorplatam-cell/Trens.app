@@ -272,7 +272,7 @@ export default function GymScreen() {
   const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = useWindowDimensions();
   const CONTENT_HEIGHT = SCREEN_HEIGHT - TAB_BAR_HEIGHT;
   const { user } = useAuth();
-  const { isPro, updateSpotifyStatus } = useUserRole(user?.id);
+  const { isPro } = useUserRole(user?.id);
   const { setTacticalContext } = useProContext();
   const isFocused = useIsFocused(); // Detecta si esta pantalla está activa
   const { setActiveAsset, setScreenContext, refreshTrigger } = useHank();
@@ -1587,14 +1587,14 @@ export default function GymScreen() {
       // Actualizar estado local - puede ser ejercicio principal o alternativa
       const updatedExercises = exercises.map((ex) => {
         if (ex.id === exerciseIdToUpdate) {
-          return { ...ex, image_url: result.url };
+          return { ...ex, image_url: result.url || ex.image_url };
         }
         // Si es alternativa, actualizar dentro del array de alternatives
         if (ex.alternatives && ex.alternatives.length > 0) {
           return {
             ...ex,
             alternatives: ex.alternatives.map((alt) =>
-              alt.id === exerciseIdToUpdate ? { ...alt, image_url: result.url } : alt
+              alt.id === exerciseIdToUpdate ? { ...alt, image_url: result.url || alt.image_url } : alt
             ),
           };
         }
@@ -1609,15 +1609,15 @@ export default function GymScreen() {
           .flatMap((ex) => ex.alternatives || [])
           .find((alt) => alt.id === exerciseIdToUpdate)?.name;
 
-      if (exerciseName) {
+      if (exerciseName && result.url) {
         setAllUserExercises((prev) => {
           const exists = prev.find((ex) => ex.name === exerciseName);
           if (exists) {
             return prev.map((ex) =>
-              ex.name === exerciseName ? { ...ex, image_url: result.url } : ex
+              ex.name === exerciseName ? { ...ex, image_url: result.url! } : ex
             );
           } else {
-            return [...prev, { name: exerciseName, image_url: result.url }];
+            return [...prev, { name: exerciseName, image_url: result.url! }];
           }
         });
       }
@@ -2487,13 +2487,23 @@ export default function GymScreen() {
                   .single();
 
                 if (data) {
+                  // Cast: Supabase devuelve el objeto de exercises como objeto, no array
+                  const exerciseInfo = data.exercises as unknown as {
+                    id: string;
+                    name: string;
+                    description: string | null;
+                    muscle_group: string | null;
+                    difficulty: string | null;
+                    default_media_url: string | null;
+                  } | null;
+
                   const template: AssetTemplate = {
                     id: data.id,
-                    name: data.exercises?.name || item.name,
-                    description: data.exercises?.description || '',
-                    image_url: data.custom_media_url || data.exercises?.default_media_url || '',
-                    category: data.exercises?.muscle_group || 'OTRO',
-                    difficulty: data.exercises?.difficulty || 'INTERMEDIO',
+                    name: exerciseInfo?.name || item.name,
+                    description: exerciseInfo?.description || '',
+                    image_url: data.custom_media_url || exerciseInfo?.default_media_url || '',
+                    category: exerciseInfo?.muscle_group || 'OTRO',
+                    difficulty: exerciseInfo?.difficulty || 'INTERMEDIO',
                     default_metadata: data.config || {},
                   };
 
@@ -2678,8 +2688,7 @@ export default function GymScreen() {
         const playback = await spotify.getPlaybackState();
         setSpotifyPlayback(playback);
         setCurrentTrack(playback?.track || null);
-        // Guardar estado de conexión en Supabase (asumimos Premium si conecta)
-        await updateSpotifyStatus(true, true);
+        // TODO: Guardar estado de conexión en Supabase cuando se implemente
       }
       setSpotifyLoading(false);
     };
@@ -2689,8 +2698,7 @@ export default function GymScreen() {
       setSpotifyConnected(false);
       setSpotifyPlayback(null);
       setCurrentTrack(null);
-      // Actualizar estado en Supabase
-      await updateSpotifyStatus(false, false);
+      // TODO: Actualizar estado en Supabase cuando se implemente
     };
 
     const handlePlayPause = async () => {
