@@ -1,11 +1,13 @@
 {
   "expo": {
     "name": "TRENS",
-    "slug": "trens-dev",
+    "slug": "trens",
     "version": "1.0.1",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true
     },
@@ -15,10 +17,17 @@
         "backgroundColor": "#000000"
       },
       "package": "com.trens.app",
-      "permissions": ["CAMERA", "RECORD_AUDIO"]
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO"
+      ]
     },
     "web": {},
-    "plugins": ["expo-router", "expo-web-browser"],
+    "plugins": [
+      "expo-router",
+      "expo-web-browser",
+      "expo-asset"
+    ],
     "scheme": "trensdev",
     "sdkVersion": "54.0.0",
     "experiments": {
