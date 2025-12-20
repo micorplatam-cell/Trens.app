@@ -415,9 +415,7 @@ export default function ProScreen() {
             year: 'numeric',
           });
           const spotifyInfo =
-            attachSpotify && spotifyMetadata
-              ? ` 🎵 ${spotifyMetadata.trackName}`
-              : '';
+            attachSpotify && spotifyMetadata ? ` 🎵 ${spotifyMetadata.trackName}` : '';
 
           const shareTitle =
             proContext.type === 'tactical'

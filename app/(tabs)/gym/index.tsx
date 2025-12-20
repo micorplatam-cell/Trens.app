@@ -1596,7 +1596,9 @@ export default function GymScreen() {
           return {
             ...ex,
             alternatives: ex.alternatives.map((alt) =>
-              alt.id === exerciseIdToUpdate ? { ...alt, image_url: result.url || alt.image_url } : alt
+              alt.id === exerciseIdToUpdate
+                ? { ...alt, image_url: result.url || alt.image_url }
+                : alt
             ),
           };
         }
