@@ -1342,7 +1342,9 @@ export default function GymScreen() {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images', 'videos'],
         allowsEditing: false,
-        quality: 0.8,
+        quality: 0.5, // Reducido para optimizar tamaño de videos
+        videoMaxDuration: 10, // Máximo 10 segundos
+        videoQuality: 1, // Calidad media (0=baja, 1=media, 2=alta) - iOS only
       });
 
       if (!result.canceled && result.assets[0]) {
@@ -1474,7 +1476,7 @@ export default function GymScreen() {
 
       const video = await cameraRef.current.recordAsync({
         maxDuration: 10, // Máximo 10 segundos
-        quality: '720p', // Compresión a 720p
+        quality: '480p', // Compresión a 480p para reducir tamaño (~1-2MB)
       });
 
       if (video?.uri) {
@@ -3079,7 +3081,7 @@ export default function GymScreen() {
               {/* Info */}
               <View className="py-4 bg-black">
                 <Text className="text-zinc-400 text-center text-sm">
-                  El video se subirá comprimido a 720p
+                  Video comprimido a 480p (~1-2MB)
                 </Text>
               </View>
             </View>
