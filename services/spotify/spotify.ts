@@ -102,6 +102,23 @@ class SpotifyService {
     return this.isConnected && !!this.accessToken && this.expiresAt > Date.now();
   }
 
+  /**
+   * Verificar si necesita re-autenticación (tokens inválidos/revocados)
+   */
+  needsReauth(): boolean {
+    return !this.isConnected && !this.refreshToken;
+  }
+
+  /**
+   * Obtener estado de conexión para UI
+   */
+  getConnectionStatus(): { connected: boolean; needsReauth: boolean } {
+    return {
+      connected: this.isConnected,
+      needsReauth: this.needsReauth(),
+    };
+  }
+
   // --------------------------------------------------------------------------
   // AUTENTICACIÓN
   // --------------------------------------------------------------------------
@@ -228,10 +245,22 @@ class SpotifyService {
 
   /**
    * Refrescar el access token
+   * Usa un flag para evitar múltiples refreshes concurrentes
    */
+  private isRefreshing = false;
+  
   async refreshAccessToken(): Promise<boolean> {
     if (!this.refreshToken) return false;
+    
+    // Evitar múltiples refreshes concurrentes
+    if (this.isRefreshing) {
+      // Esperar a que termine el refresh en curso
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      return this.isConnected && !!this.accessToken;
+    }
 
+    this.isRefreshing = true;
+    
     try {
       const result = await AuthSession.refreshAsync(
         {
@@ -247,12 +276,18 @@ class SpotifyService {
       this.isConnected = true;
 
       await this.saveTokens();
-      console.warn('🎵 Spotify: Token refrescado');
       return true;
-    } catch (error) {
-      console.error('🎵 Spotify: Error refrescando token:', error);
+    } catch (error: any) {
+      // Si el refresh token fue revocado, limpiar todo y forzar re-login
+      const errorMessage = error?.message || '';
+      if (errorMessage.includes('revoked') || errorMessage.includes('invalid')) {
+        console.warn('🎵 Spotify: Token revocado - necesita re-autenticación');
+        await this.disconnect();
+      }
       this.isConnected = false;
       return false;
+    } finally {
+      this.isRefreshing = false;
     }
   }
 
@@ -266,13 +301,6 @@ class SpotifyService {
     this.isConnected = false;
     await AsyncStorage.removeItem(STORAGE_KEY);
     console.warn('🎵 Spotify: Desconectado');
-  }
-
-  /**
-   * Verificar si está conectado
-   */
-  getConnectionStatus(): boolean {
-    return this.isConnected && this.expiresAt > Date.now();
   }
 
   // --------------------------------------------------------------------------
