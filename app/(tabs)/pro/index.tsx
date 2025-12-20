@@ -264,6 +264,35 @@ export default function ProScreen() {
     setIsRecording(true);
     setRecordingTime(0);
 
+    // 🎵 PRO: Capturar metadata de Spotify JUSTO ANTES de grabar
+    // Esto garantiza que positionMs sea exacto al momento de grabación
+    // Spotify SIGUE sonando - el usuario escucha su música con audífonos
+    if (isPro && spotifyConnected && spotifyPremium) {
+      try {
+        const currentTrack = await spotify.getCurrentTrack();
+        if (currentTrack) {
+          const capturedMetadata = {
+            enabled: true,
+            trackUri: currentTrack.uri,
+            positionMs: currentTrack.positionMs, // Posición EXACTA del momento épico
+            trackName: currentTrack.name,
+            artist: currentTrack.artist,
+            albumArt: currentTrack.albumArt,
+          };
+          setSpotifyMetadata(capturedMetadata);
+          console.log(
+            '🎵 Spotify metadata capturado:',
+            capturedMetadata.trackName,
+            'en',
+            capturedMetadata.positionMs,
+            'ms'
+          );
+        }
+      } catch (error) {
+        console.warn('No se pudo capturar metadata de Spotify:', error);
+      }
+    }
+
     // Timer
     timerRef.current = setInterval(() => {
       setRecordingTime((prev) => prev + 1);

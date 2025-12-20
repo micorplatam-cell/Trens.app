@@ -8,7 +8,10 @@ import {
   FlatList,
   ViewToken,
   RefreshControl,
+  Alert,
 } from 'react-native';
+import { useFocusEffect } from 'expo-router';
+import { Lock } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import {
   Heart,
@@ -44,6 +47,7 @@ interface FeedVideo {
     trackUri?: string;
     trackName?: string;
     artist?: string;
+    positionMs?: number;
   } | null;
   created_at: string;
   // Usuario
@@ -77,6 +81,8 @@ const FeedVideoItem = memo(
     onSave,
     onUserPress,
     spotifyPremium,
+    isPro,
+    onSpotifyUpgrade,
   }: {
     item: FeedVideo;
     isActive: boolean;
@@ -88,30 +94,90 @@ const FeedVideoItem = memo(
     onSave: (videoId: string) => void;
     onUserPress: (userId: string) => void;
     spotifyPremium: boolean;
+    isPro: boolean;
+    onSpotifyUpgrade: () => void;
   }) => {
-    const player = useVideoPlayer(item.video_url, (p) => {
+    // Helper: Arreglar URLs de Cloudflare Stream incompletas
+    const fixCloudflareUrl = (url: string): string => {
+      if (!url) return url;
+      // Si es una URL de Cloudflare Stream y no tiene el path HLS, agregarlo
+      if (url.includes('cloudflarestream.com') && !url.includes('/manifest/')) {
+        return `${url}/manifest/video.m3u8`;
+      }
+      return url;
+    };
+
+    const videoUrl = fixCloudflareUrl(item.video_url);
+
+    // Determinar si este video tiene Spotify sync disponible
+    const hasSpotifySync = !!(
+      item.spotify?.enabled &&
+      item.spotify.trackUri &&
+      spotifyPremium &&
+      isPro
+    );
+    const [isVideoLoading, setIsVideoLoading] = useState(true);
+    const [videoError, setVideoError] = useState<string | null>(null);
+    const hasBeenReady = useRef(false); // Una vez listo, no volver a loading
+
+    const player = useVideoPlayer(videoUrl, (p) => {
       p.loop = true;
-      p.muted = isMuted;
+      // Si hay Spotify, mutear el video para que solo suene Spotify
+      p.muted = hasSpotifySync ? true : isMuted;
     });
+
+    // Detectar cuando el video está listo o tiene error
+    useEffect(() => {
+      if (player) {
+        // Listener para el estado del player
+        const statusSub = player.addListener('statusChange', (statusEvent: any) => {
+          const status = typeof statusEvent === 'string' ? statusEvent : statusEvent?.status;
+
+          if (status === 'readyToPlay') {
+            hasBeenReady.current = true;
+            setIsVideoLoading(false);
+            setVideoError(null);
+          } else if (status === 'error') {
+            setIsVideoLoading(false);
+            setVideoError('Error al cargar video');
+            console.error('🎥 FEED Player error:', item.id);
+          }
+          // NO volvemos a loading si ya estuvo ready
+        });
+
+        // Check inicial por duration
+        if (player.duration > 0) {
+          hasBeenReady.current = true;
+          setIsVideoLoading(false);
+        }
+
+        return () => {
+          statusSub.remove();
+        };
+      }
+    }, [player, videoUrl]);
 
     // Control de reproducción basado en isActive
     useEffect(() => {
+      // Actualizar mute según Spotify
+      player.muted = hasSpotifySync ? true : isMuted;
+
       if (isActive) {
         player.play();
 
-        // Si tiene Spotify y usuario es Premium, reproducir canción
-        if (item.spotify?.enabled && item.spotify.trackUri && spotifyPremium) {
-          spotify.play(item.spotify.trackUri).catch(console.warn);
+        // Si tiene Spotify, usuario es PRO y Premium, sincronizar desde posición exacta
+        if (hasSpotifySync) {
+          const positionMs = item.spotify!.positionMs || 0;
+          spotify.syncWithVideo(item.spotify!.trackUri!, positionMs).catch(console.warn);
         }
       } else {
         player.pause();
+        // Pausar Spotify al hacer swipe (cambiar de video)
+        if (hasSpotifySync) {
+          spotify.pauseForSwipe().catch(console.warn);
+        }
       }
-    }, [isActive, player, item.spotify, spotifyPremium]);
-
-    // Actualizar mute
-    useEffect(() => {
-      player.muted = isMuted;
-    }, [isMuted, player]);
+    }, [isActive, player, item.spotify, spotifyPremium, isPro, hasSpotifySync, isMuted]);
 
     const formatDate = (dateStr: string) => {
       const date = new Date(dateStr);
@@ -128,8 +194,51 @@ const FeedVideoItem = memo(
 
     return (
       <View style={{ width: SCREEN_WIDTH, height: VIDEO_HEIGHT }} className="bg-black">
-        {/* Video */}
-        <VideoView player={player} style={{ flex: 1 }} contentFit="cover" nativeControls={false} />
+        {/* Video - dimensiones absolutas para asegurar que se renderice */}
+        <VideoView
+          player={player}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: SCREEN_WIDTH,
+            height: VIDEO_HEIGHT,
+          }}
+          contentFit="cover"
+          nativeControls={false}
+        />
+
+        {/* Thumbnail como fondo mientras carga */}
+        {item.thumbnail_url && isVideoLoading && (
+          <Image
+            source={{ uri: item.thumbnail_url }}
+            style={{ position: 'absolute', width: '100%', height: '100%', zIndex: 1 }}
+            contentFit="cover"
+          />
+        )}
+
+        {/* Loading indicator mientras carga el video */}
+        {isVideoLoading && !videoError && (
+          <View
+            className="absolute inset-0 justify-center items-center bg-black/50"
+            style={{ zIndex: 2 }}
+          >
+            <ActivityIndicator size="large" color="#DC2626" />
+            <Text className="text-zinc-400 text-sm mt-2">Cargando video...</Text>
+          </View>
+        )}
+
+        {/* Error indicator */}
+        {videoError && (
+          <View
+            className="absolute inset-0 justify-center items-center bg-black/80"
+            style={{ zIndex: 2 }}
+          >
+            <Text className="text-red-500 text-lg font-bold">⚠️</Text>
+            <Text className="text-zinc-400 text-sm mt-2">{videoError}</Text>
+            <Text className="text-zinc-600 text-xs mt-1">URL: {videoUrl?.substring(0, 50)}...</Text>
+          </View>
+        )}
 
         {/* Overlay táctil para mute */}
         <TouchableOpacity activeOpacity={1} onPress={onToggleMute} className="absolute inset-0" />
@@ -187,9 +296,14 @@ const FeedVideoItem = memo(
           {item.spotify?.enabled && (
             <TouchableOpacity
               onPress={async () => {
-                if (spotifyPremium && item.spotify?.trackUri) {
-                  await spotify.play(item.spotify.trackUri);
+                // PRO + Premium: Puede reproducir desde posición exacta
+                if (isPro && spotifyPremium && item.spotify?.trackUri) {
+                  const positionMs = item.spotify.positionMs || 0;
+                  await spotify.syncWithVideo(item.spotify.trackUri, positionMs);
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                } else {
+                  // FREE: Mostrar mensaje de upgrade
+                  onSpotifyUpgrade();
                 }
               }}
               className="flex-row items-center bg-black/50 rounded-full px-3 py-1.5 self-start"
@@ -198,6 +312,8 @@ const FeedVideoItem = memo(
               <Text className="text-white text-xs ml-2" numberOfLines={1}>
                 {item.spotify.trackName} – {item.spotify.artist}
               </Text>
+              {/* Indicador de lock para FREE */}
+              {!isPro && <Lock size={12} color="#71717a" className="ml-2" />}
             </TouchableOpacity>
           )}
         </View>
@@ -294,7 +410,7 @@ const FeedVideoItem = memo(
 // MAIN COMPONENT
 // ============================================================================
 export default function FeedScreen() {
-  const { user, spotifyPremium } = useUserRoleContext();
+  const { user, spotifyPremium, isPro } = useUserRoleContext();
 
   const [videos, setVideos] = useState<FeedVideo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -303,6 +419,19 @@ export default function FeedScreen() {
   const [isMuted, setIsMuted] = useState(false);
 
   const flatListRef = useRef<FlatList>(null);
+
+  // -------------------------------------------------------------------------
+  // PAUSAR SPOTIFY AL SALIR DEL FEED
+  // -------------------------------------------------------------------------
+  useFocusEffect(
+    useCallback(() => {
+      // Al entrar al Feed, no hacer nada especial
+      return () => {
+        // Al salir del Feed, pausar Spotify
+        spotify.pauseForSwipe().catch(() => {});
+      };
+    }, [])
+  );
 
   // -------------------------------------------------------------------------
   // FETCH VIDEOS
@@ -537,6 +666,17 @@ export default function FeedScreen() {
   }, []);
 
   // -------------------------------------------------------------------------
+  // SPOTIFY UPGRADE HANDLER - FREE usuarios
+  // -------------------------------------------------------------------------
+  const handleSpotifyUpgrade = useCallback(() => {
+    Alert.alert(
+      '⭐ TRENS PRO',
+      'Desbloquea TRENS PRO para escuchar la música con la que se grabó este levantamiento.\n\nCon PRO puedes:\n• Auto-reproducir la canción exacta\n• Controlar Spotify\n• Grabar tus propios videos',
+      [{ text: 'ENTENDIDO', style: 'default' }]
+    );
+  }, []);
+
+  // -------------------------------------------------------------------------
   // RENDER KEY EXTRACTOR
   // -------------------------------------------------------------------------
   const keyExtractor = useCallback((item: FeedVideo) => item.id, []);
@@ -557,6 +697,8 @@ export default function FeedScreen() {
         onSave={handleSave}
         onUserPress={handleUserPress}
         spotifyPremium={spotifyPremium}
+        isPro={isPro}
+        onSpotifyUpgrade={handleSpotifyUpgrade}
       />
     ),
     [
@@ -569,6 +711,8 @@ export default function FeedScreen() {
       handleSave,
       handleUserPress,
       spotifyPremium,
+      isPro,
+      handleSpotifyUpgrade,
     ]
   );
 

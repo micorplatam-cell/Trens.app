@@ -8,6 +8,7 @@ import React, {
 } from 'react';
 import { supabase } from '../lib/supabase';
 import { User } from '@supabase/supabase-js';
+import spotify from '../services/spotify/spotify';
 
 // ============================================================================
 // TIPOS
@@ -62,13 +63,13 @@ export function UserRoleProvider({ children }: { children: ReactNode }) {
   const [spotifyPremium, setSpotifyPremium] = useState(false);
 
   // -------------------------------------------------------------------------
-  // FETCH USER ROLE
+  // FETCH USER ROLE + SPOTIFY STATUS
   // -------------------------------------------------------------------------
   const fetchRole = useCallback(async (userId: string) => {
     try {
       const { data: roleData, error: roleError } = await supabase
         .from('user_roles')
-        .select('role')
+        .select('role, spotify_connected, spotify_premium')
         .eq('user_id', userId)
         .single();
 
@@ -87,9 +88,13 @@ export function UserRoleProvider({ children }: { children: ReactNode }) {
         }
       } else if (roleData) {
         setRole(roleData.role as UserRole);
-        // Spotify ya no está en user_roles, se maneja por separado
-        setSpotifyConnected(false);
-        setSpotifyPremium(false);
+        // Cargar estado de Spotify desde la DB
+        setSpotifyConnected(roleData.spotify_connected ?? false);
+        setSpotifyPremium(roleData.spotify_premium ?? false);
+        console.log('🎵 Spotify status cargado:', {
+          connected: roleData.spotify_connected,
+          premium: roleData.spotify_premium,
+        });
       }
     } catch (err) {
       console.error('Error fetching user role:', err);
@@ -102,10 +107,12 @@ export function UserRoleProvider({ children }: { children: ReactNode }) {
   // -------------------------------------------------------------------------
   useEffect(() => {
     // Obtener sesión inicial
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       setUser(session?.user ?? null);
       if (session?.user) {
         fetchRole(session.user.id);
+        // 🎵 Cargar token de Spotify al inicio
+        await spotify.loadStoredTokens();
       }
       setLoading(false);
     });
@@ -113,10 +120,12 @@ export function UserRoleProvider({ children }: { children: ReactNode }) {
     // Escuchar cambios de autenticación
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
       setUser(session?.user ?? null);
       if (session?.user) {
         fetchRole(session.user.id);
+        // 🎵 Cargar token de Spotify en cambio de auth
+        await spotify.loadStoredTokens();
       } else {
         // Reset a FREE cuando se desloguea
         setRole('free');
@@ -143,11 +152,14 @@ export function UserRoleProvider({ children }: { children: ReactNode }) {
             spotify_premium: premium,
             updated_at: new Date().toISOString(),
           })
-          .eq('id', user.id);
+          .eq('user_id', user.id);
 
-        if (!updateError) {
+        if (updateError) {
+          console.error('Error updating Spotify status:', updateError);
+        } else {
           setSpotifyConnected(connected);
           setSpotifyPremium(premium);
+          console.log('🎵 Spotify status actualizado en DB:', { connected, premium });
         }
       } catch (err) {
         console.error('Error updating Spotify status:', err);

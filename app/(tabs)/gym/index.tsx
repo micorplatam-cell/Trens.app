@@ -40,6 +40,8 @@ import {
   EyeOff,
   Share2,
   RotateCcw,
+  Lock,
+  Volume2,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -57,8 +59,12 @@ import Animated, {
 import Slider from '@react-native-community/slider';
 import { useHank } from '../../../context/HankContext';
 import { LinearGradient } from 'expo-linear-gradient';
-import spotify, { SpotifyTrack, SpotifyPlaybackState } from '../../../services/spotify/spotify';
-import { useUserRole } from '../../../hooks/useUserRole';
+import spotify, {
+  SpotifyTrack,
+  SpotifyPlaybackState,
+  SpotifyVideoMetadata,
+} from '../../../services/spotify/spotify';
+import { useUserRoleContext } from '../../../context/UserRoleContext';
 import cloudflareR2 from '../../../services/cloudflare/r2';
 
 // ============================================================================
@@ -272,7 +278,12 @@ export default function GymScreen() {
   const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = useWindowDimensions();
   const CONTENT_HEIGHT = SCREEN_HEIGHT - TAB_BAR_HEIGHT;
   const { user } = useAuth();
-  const { isPro } = useUserRole(user?.id);
+  const {
+    isPro,
+    spotifyPremium,
+    spotifyConnected: contextSpotifyConnected,
+    updateSpotifyStatus,
+  } = useUserRoleContext();
   const { setTacticalContext } = useProContext();
   const isFocused = useIsFocused(); // Detecta si esta pantalla está activa
   const { setActiveAsset, setScreenContext, refreshTrigger } = useHank();
@@ -302,15 +313,28 @@ export default function GymScreen() {
   const [spotifyLoading, setSpotifyLoading] = useState(false);
   const [spotifyPlayback, setSpotifyPlayback] = useState<SpotifyPlaybackState | null>(null);
   const [currentTrack, setCurrentTrack] = useState<SpotifyTrack | null>(null);
+  const [capturedSpotifyMetadata, setCapturedSpotifyMetadata] =
+    useState<SpotifyVideoMetadata | null>(null);
+
+  // Helper: Arreglar URLs de Cloudflare Stream incompletas
+  const fixCloudflareUrl = (url: string): string => {
+    if (!url) return url;
+    if (url.includes('cloudflarestream.com') && !url.includes('/manifest/')) {
+      return `${url}/manifest/video.m3u8`;
+    }
+    return url;
+  };
 
   // Video State
   const [videoViewerVisible, setVideoViewerVisible] = useState(false);
   const [selectedVideo, setSelectedVideo] = useState<VideoRecord | null>(null);
 
   // Video Player para historial
-  const historialVideoSource = selectedVideo?.videoUrl || selectedVideo?.video_url || '';
+  const rawVideoSource = selectedVideo?.videoUrl || selectedVideo?.video_url || '';
+  const historialVideoSource = fixCloudflareUrl(rawVideoSource);
   const historialPlayer = useVideoPlayer(historialVideoSource, (player) => {
     player.loop = true;
+    // Volumen se controla dinámicamente en el useEffect según Spotify
   });
 
   // Video Player para preview de video capturado
@@ -329,11 +353,50 @@ export default function GymScreen() {
   // Controlar play/pause del video cuando abre/cierra el viewer
   useEffect(() => {
     if (videoViewerVisible && historialPlayer) {
+      // Determinar si hay Spotify para este video
+      const hasSpotify = !!(
+        isPro &&
+        spotifyPremium &&
+        selectedVideo?.spotify?.enabled &&
+        selectedVideo?.spotify?.trackUri
+      );
+
+      // MUTEAR el video si hay Spotify - solo se escuchará Spotify
+      historialPlayer.volume = hasSpotify ? 0 : 1;
       historialPlayer.play();
+
+      // Sincronizar Spotify si es PRO y tiene trackUri
+      console.log('🎬 VIDEO VIEWER ABIERTO - Spotify check:', {
+        isPro,
+        spotifyPremium,
+        hasSpotifyData: !!selectedVideo?.spotify,
+        spotifyEnabled: selectedVideo?.spotify?.enabled,
+        trackUri: selectedVideo?.spotify?.trackUri,
+        positionMs: selectedVideo?.spotify?.positionMs,
+        videoMuted: hasSpotify,
+      });
+
+      if (hasSpotify) {
+        console.log(
+          '🎵 SINCRONIZANDO SPOTIFY (video muted):',
+          selectedVideo?.spotify?.trackName,
+          'desde',
+          selectedVideo?.spotify?.positionMs,
+          'ms'
+        );
+        spotify.syncWithVideo(
+          selectedVideo!.spotify!.trackUri as string,
+          selectedVideo!.spotify!.positionMs || 0
+        );
+      } else {
+        console.log('🔊 Reproduciendo audio ambiente del video');
+      }
     } else if (historialPlayer) {
       historialPlayer.pause();
+      // Pausar Spotify al cerrar video viewer
+      spotify.pauseForSwipe();
     }
-  }, [videoViewerVisible, historialPlayer]);
+  }, [videoViewerVisible, historialPlayer, selectedVideo, isPro, spotifyPremium]);
 
   // Modal State
   const [historialModalVisible, setHistorialModalVisible] = useState(false);
@@ -410,20 +473,34 @@ export default function GymScreen() {
   const exerciseListRef = useRef<FlatList>(null);
 
   // -------------------------------------------------------------------------
-  // SPOTIFY: Cargar estado inicial
+  // SPOTIFY: Cargar estado inicial y sincronizar con contexto
   // -------------------------------------------------------------------------
   useEffect(() => {
     const initSpotify = async () => {
+      // Solo cargar si no está ya conectado en memoria
+      if (spotify.isTokenValid()) {
+        setSpotifyConnected(true);
+        const playback = await spotify.getPlaybackState();
+        setSpotifyPlayback(playback);
+        setCurrentTrack(playback?.track || null);
+        return;
+      }
+
+      // Intentar cargar desde storage
       const connected = await spotify.loadStoredTokens();
       setSpotifyConnected(connected);
       if (connected) {
         const playback = await spotify.getPlaybackState();
         setSpotifyPlayback(playback);
         setCurrentTrack(playback?.track || null);
+        // Sincronizar con DB si los tokens son válidos pero no está en DB
+        if (!contextSpotifyConnected) {
+          await updateSpotifyStatus(true, true);
+        }
       }
     };
     initSpotify();
-  }, []);
+  }, [contextSpotifyConnected, updateSpotifyStatus]);
 
   // SPOTIFY: Polling del estado de reproducción cuando está conectado
   useEffect(() => {
@@ -1461,6 +1538,25 @@ export default function GymScreen() {
       setIsRecording(true);
       setRecordingTime(0);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+
+      // 🎵 PRO: Capturar metadata de Spotify ANTES de grabar
+      // Guarda trackUri + positionMs para sincronizar al reproducir
+      // Spotify SIGUE sonando - el usuario escucha con audífonos mientras graba
+      if (isPro && spotifyPremium) {
+        const metadata = await spotify.captureMetadataForRecording();
+        setCapturedSpotifyMetadata(metadata);
+        if (metadata?.enabled) {
+          console.log(
+            '🎵 Spotify metadata capturado:',
+            metadata.trackName,
+            'en',
+            metadata.positionMs,
+            'ms'
+          );
+        }
+      } else {
+        setCapturedSpotifyMetadata(null);
+      }
 
       // Timer para mostrar tiempo de grabación (máximo 10 segundos)
       recordingTimerRef.current = setInterval(() => {
@@ -2692,7 +2788,10 @@ export default function GymScreen() {
         const playback = await spotify.getPlaybackState();
         setSpotifyPlayback(playback);
         setCurrentTrack(playback?.track || null);
-        // TODO: Guardar estado de conexión en Supabase cuando se implemente
+        // Guardar estado de conexión en Supabase Y en el contexto
+        // Premium = true porque solo Premium puede controlar reproducción
+        await updateSpotifyStatus(true, true);
+        console.log('🎵 Spotify conectado y guardado en DB');
       }
       setSpotifyLoading(false);
     };
@@ -2702,7 +2801,9 @@ export default function GymScreen() {
       setSpotifyConnected(false);
       setSpotifyPlayback(null);
       setCurrentTrack(null);
-      // TODO: Actualizar estado en Supabase cuando se implemente
+      // Actualizar estado en Supabase y contexto
+      await updateSpotifyStatus(false, false);
+      console.log('🎵 Spotify desconectado');
     };
 
     const handlePlayPause = async () => {
@@ -3334,15 +3435,38 @@ export default function GymScreen() {
 
                   {/* Spotify Track (si tiene) */}
                   {selectedVideo.spotify?.enabled && (
-                    <View className="flex-row items-center bg-black/50 rounded-full px-4 py-2 self-start mb-4">
-                      <Music color="#1DB954" size={16} />
+                    <TouchableOpacity
+                      className="flex-row items-center bg-black/50 rounded-full px-4 py-2 self-start mb-4"
+                      onPress={() => {
+                        if (isPro && spotifyPremium && selectedVideo.spotify?.trackUri) {
+                          // PRO: Sincronizar desde posición exacta
+                          spotify.syncWithVideo(
+                            selectedVideo.spotify.trackUri,
+                            selectedVideo.spotify.positionMs || 0
+                          );
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        } else {
+                          // FREE: Mostrar mensaje de upgrade
+                          Alert.alert(
+                            '🎵 Spotify Sync',
+                            'Activa PRO para reproducir la música exacta con la que se grabó este video.',
+                            [{ text: 'ENTENDIDO', style: 'default' }]
+                          );
+                        }
+                      }}
+                    >
+                      {isPro && spotifyPremium ? (
+                        <Volume2 color="#1DB954" size={16} />
+                      ) : (
+                        <Lock color="#71717A" size={16} />
+                      )}
                       <Text className="text-green-500 text-sm font-bold ml-2">
                         {selectedVideo.spotify.trackName}
                       </Text>
                       <Text className="text-zinc-500 text-sm ml-1">
                         – {selectedVideo.spotify.artist}
                       </Text>
-                    </View>
+                    </TouchableOpacity>
                   )}
 
                   {/* Fecha */}

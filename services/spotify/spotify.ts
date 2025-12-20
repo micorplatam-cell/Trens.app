@@ -92,6 +92,17 @@ class SpotifyService {
   private readonly ALERT_COOLDOWN = 5000; // 5 segundos entre alertas
 
   // --------------------------------------------------------------------------
+  // ESTADO
+  // --------------------------------------------------------------------------
+
+  /**
+   * Verificar si está conectado y con token válido (sin recargar)
+   */
+  isTokenValid(): boolean {
+    return this.isConnected && !!this.accessToken && this.expiresAt > Date.now();
+  }
+
+  // --------------------------------------------------------------------------
   // AUTENTICACIÓN
   // --------------------------------------------------------------------------
 
@@ -163,9 +174,15 @@ class SpotifyService {
 
   /**
    * Cargar tokens guardados
+   * Si ya está conectado y el token es válido, no recarga
    */
   async loadStoredTokens(): Promise<boolean> {
     try {
+      // Si ya está conectado y el token no ha expirado, no recargar
+      if (this.isConnected && this.accessToken && this.expiresAt > Date.now()) {
+        return true;
+      }
+
       const stored = await AsyncStorage.getItem(STORAGE_KEY);
       if (stored) {
         const tokens: StoredToken = JSON.parse(stored);
@@ -175,8 +192,11 @@ class SpotifyService {
           this.accessToken = tokens.accessToken;
           this.refreshToken = tokens.refreshToken;
           this.expiresAt = tokens.expiresAt;
+          // Solo loguear si no estaba conectado antes
+          if (!this.isConnected) {
+            console.log('🎵 Spotify: Token cargado');
+          }
           this.isConnected = true;
-          console.warn('🎵 Spotify: Token cargado desde almacenamiento');
           return true;
         } else if (tokens.refreshToken) {
           // Intentar refrescar el token
@@ -273,7 +293,7 @@ class SpotifyService {
     }
 
     if (!this.accessToken) {
-      console.error('🎵 Spotify: No hay token de acceso');
+      // No mostrar error - puede que aún no se haya cargado el token
       return null;
     }
 
@@ -331,6 +351,19 @@ class SpotifyService {
             }
             return null;
           }
+
+          // Silenciar errores comunes de "Restriction violated"
+          // (ocurre cuando no hay dispositivo activo o no hay reproducción)
+          if (reason === 'UNKNOWN' && data.error?.message?.includes('Restriction violated')) {
+            // No mostrar error - es esperado cuando Spotify no está activo
+            return null;
+          }
+
+          // Silenciar 404 "Not found" - ocurre cuando no hay dispositivo/reproducción activa
+          if (data.error?.status === 404 || data.error?.message === 'Not found.') {
+            return null;
+          }
+
           // Solo mostrar error para otros casos
           console.error('🎵 Spotify API Error:', data);
           return null;
@@ -338,8 +371,8 @@ class SpotifyService {
 
         return data;
       } catch (e) {
-        // Si no es JSON válido, retornar null
-        console.warn('🎵 Spotify: Respuesta no es JSON:', text.substring(0, 100));
+        // Si no es JSON válido, retornar null silenciosamente
+        // Esto es normal para algunas respuestas de Spotify
         return null;
       }
     } catch (error) {
@@ -499,6 +532,15 @@ class SpotifyService {
    * @param positionMs - Posición donde empezar (capturada durante grabación)
    */
   async syncWithVideo(trackUri: string, positionMs: number): Promise<boolean> {
+    // Verificar que tenemos token válido antes de intentar
+    if (!this.isTokenValid()) {
+      // Intentar cargar token desde storage
+      const loaded = await this.loadStoredTokens();
+      if (!loaded) {
+        return false;
+      }
+    }
+
     try {
       // Primero verificar si hay un dispositivo activo
       const devices = await this.getDevices();
@@ -524,10 +566,9 @@ class SpotifyService {
 
       // Iniciar reproducción en la canción y posición específica
       await this.play(trackUri, positionMs);
-      console.warn(`🎵 Spotify: Sincronizado a ${trackUri} en ${positionMs}ms`);
       return true;
     } catch (error) {
-      console.error('Error sincronizando Spotify:', error);
+      // Silenciar errores de sync - no es crítico
       return false;
     }
   }

@@ -25,12 +25,14 @@ import {
   Trash2,
   Share2,
   MoreVertical,
+  Volume2,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { supabase } from '../../../lib/supabase';
 import { useUserRoleContext } from '../../../context/UserRoleContext';
 import { useHank } from '../../../context/HankContext';
+import spotify from '../../../services/spotify/spotify';
 import TrensID from '../../../components/adn/TrensID';
 import RecordCard from '../../../components/adn/RecordCard';
 import AddRecordModal from '../../../components/adn/AddRecordModal';
@@ -91,8 +93,10 @@ interface Video {
   reps?: number;
   spotify?: {
     enabled: boolean;
+    trackUri?: string;
     trackName?: string;
     artist?: string;
+    positionMs?: number;
   };
 }
 
@@ -120,7 +124,7 @@ const VideoThumbnail = ({ videoUrl, size }: { videoUrl: string; size: number }) 
 // MAIN COMPONENT
 // ============================================================================
 export default function AdnScreen() {
-  const { user, isPro, isAuthenticated } = useUserRoleContext();
+  const { user, isPro, isAuthenticated, spotifyPremium } = useUserRoleContext();
   const { refreshTrigger } = useHank();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -142,17 +146,36 @@ export default function AdnScreen() {
   const videoSource = selectedVideo?.video_url || '';
   const videoPlayer = useVideoPlayer(videoSource, (player) => {
     player.loop = true;
-    player.muted = false;
+    // Volumen se controla dinámicamente en el useEffect según Spotify
   });
 
-  // Control de reproducción
+  // Control de reproducción + Spotify sync
   useEffect(() => {
     if (videoViewerVisible && videoPlayer) {
+      // Determinar si hay Spotify para este video
+      const hasSpotify = !!(selectedVideo?.spotify?.enabled && isPro && spotifyPremium);
+      const trackUri = hasSpotify ? (selectedVideo?.spotify as any)?.trackUri : null;
+
+      // MUTEAR el video si hay Spotify - solo se escuchará Spotify
+      videoPlayer.volume = hasSpotify && trackUri ? 0 : 1;
       videoPlayer.play();
+
+      // Si tiene Spotify y usuario es PRO + Premium, reproducir desde posición exacta
+      if (hasSpotify && trackUri) {
+        const positionMs = (selectedVideo?.spotify as any)?.positionMs || 0;
+        console.log('🎵 ADN: Sincronizando Spotify (video muted)', trackUri, positionMs);
+        spotify.syncWithVideo(trackUri, positionMs).catch(console.warn);
+      } else {
+        console.log('🔊 ADN: Reproduciendo audio ambiente del video');
+      }
     } else if (videoPlayer) {
       videoPlayer.pause();
+      // Pausar Spotify al cerrar el viewer
+      if (selectedVideo?.spotify?.enabled && isPro && spotifyPremium) {
+        spotify.pauseForSwipe().catch(console.warn);
+      }
     }
-  }, [videoViewerVisible, videoPlayer]);
+  }, [videoViewerVisible, videoPlayer, selectedVideo, isPro, spotifyPremium]);
 
   // Data states
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -899,6 +922,8 @@ export default function AdnScreen() {
         onRequestClose={() => {
           setVideoViewerVisible(false);
           setSelectedVideo(null);
+          // Pausar Spotify al cerrar el visor
+          spotify.pauseForSwipe().catch(() => {});
         }}
       >
         <View className="flex-1 bg-black">
@@ -910,6 +935,8 @@ export default function AdnScreen() {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                   setVideoViewerVisible(false);
                   setSelectedVideo(null);
+                  // Pausar Spotify al cerrar el visor
+                  spotify.pauseForSwipe().catch(() => {});
                 }}
                 className="w-10 h-10 rounded-full bg-zinc-900/80 items-center justify-center"
               >
@@ -944,7 +971,27 @@ export default function AdnScreen() {
           {/* Footer con info de Spotify */}
           {selectedVideo?.spotify?.enabled && (
             <View className="absolute bottom-0 left-0 right-0 pb-10 px-4 pt-4 bg-gradient-to-t from-black/80 to-transparent">
-              <View className="flex-row items-center gap-2 bg-zinc-900/80 rounded-lg px-3 py-2">
+              <TouchableOpacity
+                onPress={async () => {
+                  // PRO + Premium: Puede reproducir desde posición exacta
+                  if (isPro && spotifyPremium) {
+                    const trackUri = (selectedVideo.spotify as any).trackUri;
+                    const positionMs = (selectedVideo.spotify as any).positionMs || 0;
+                    if (trackUri) {
+                      await spotify.syncWithVideo(trackUri, positionMs);
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    }
+                  } else {
+                    // FREE: Mostrar mensaje de upgrade
+                    Alert.alert(
+                      '⭐ TRENS PRO',
+                      'Desbloquea TRENS PRO para escuchar la música con la que se grabó este levantamiento.\n\nCon PRO puedes:\n• Auto-reproducir la canción exacta\n• Controlar Spotify\n• Grabar tus propios videos',
+                      [{ text: 'ENTENDIDO', style: 'default' }]
+                    );
+                  }
+                }}
+                className="flex-row items-center gap-2 bg-zinc-900/80 rounded-lg px-3 py-2"
+              >
                 <Music size={16} color="#1DB954" />
                 <View className="flex-1">
                   <Text className="text-white text-xs font-bold" numberOfLines={1}>
@@ -954,7 +1001,13 @@ export default function AdnScreen() {
                     {selectedVideo.spotify.artist}
                   </Text>
                 </View>
-              </View>
+                {/* Indicador de play o lock */}
+                {isPro && spotifyPremium ? (
+                  <Volume2 size={16} color="#1DB954" />
+                ) : (
+                  <Lock size={14} color="#71717a" />
+                )}
+              </TouchableOpacity>
             </View>
           )}
         </View>
