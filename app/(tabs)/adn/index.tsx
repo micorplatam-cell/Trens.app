@@ -12,6 +12,7 @@ import {
   Alert,
   Share,
 } from 'react-native';
+import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   Grid,
@@ -512,8 +513,8 @@ export default function AdnScreen() {
           </Text>
           <TouchableOpacity
             onPress={() => {
-              // Navegar a login
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              router.push('/(auth)/login');
             }}
             className="bg-savage-red py-3 px-8 rounded-xl"
           >
