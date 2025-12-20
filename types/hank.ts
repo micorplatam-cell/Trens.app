@@ -177,6 +177,7 @@ export interface HankContextState {
 
   // Data refresh trigger (incrementa cuando HANK modifica datos)
   refreshTrigger: number;
+  triggerRefresh: () => void;
 
   // Macro cache invalidation (incrementa cuando se actualizan datos del perfil)
   macroCacheInvalidate: number;

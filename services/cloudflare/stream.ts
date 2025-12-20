@@ -3,7 +3,7 @@
 // Video upload, transcoding y delivery con adaptive bitrate
 // ============================================================================
 
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 
 // ============================================================================
 // CONFIGURACIÓN

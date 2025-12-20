@@ -6,9 +6,9 @@ import {
   TextInput,
   ActivityIndicator,
   ScrollView,
-  Share,
   Switch,
 } from 'react-native';
+import * as Sharing from 'expo-sharing';
 import {
   X,
   RotateCcw,
@@ -42,6 +42,7 @@ import Animated, {
 import { supabase } from '../../../lib/supabase';
 import { useUserRoleContext } from '../../../context/UserRoleContext';
 import { useProContext } from '../../../context/ProContext';
+import { useHank } from '../../../context/HankContext';
 import { ProUpgradeModal } from '../../../components/pro/ProUpgradeModal';
 import spotify from '../../../services/spotify/spotify';
 import cloudflareStream from '../../../services/cloudflare/stream';
@@ -88,6 +89,7 @@ export default function ProScreen() {
   const { user, isPro, isFree, permissions, spotifyPremium, spotifyConnected } =
     useUserRoleContext();
   const { context: proContext, clearContext } = useProContext();
+  const { triggerRefresh } = useHank();
 
   // Upgrade Modal (para usuarios FREE)
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
@@ -395,35 +397,44 @@ export default function ProScreen() {
       }
 
       // 4. COMPARTIR SI SE SOLICITA
-      // El video se guarda Y se comparte, respetando Público/Bóveda
-      if (share) {
-        // Generar mensaje con metadata quemada
-        const exerciseInfo =
-          proContext.type === 'tactical' && proContext.exerciseName
-            ? proContext.exerciseName
-            : 'Entrenamiento';
-        const weightInfo = weight ? `${weight}kg` : '';
-        const repsInfo = reps ? `x${reps}` : '';
-        const dateInfo = new Date().toLocaleDateString('es-ES', {
-          day: '2-digit',
-          month: 'short',
-          year: 'numeric',
-        });
-        const spotifyInfo =
-          attachSpotify && spotifyMetadata
-            ? `\n🎵 ${spotifyMetadata.trackName} – ${spotifyMetadata.artist}`
-            : '';
+      // Compartimos el VIDEO REAL usando expo-sharing
+      if (share && capturedVideo?.uri) {
+        // Verificar si compartir está disponible
+        const isSharingAvailable = await Sharing.isAvailableAsync();
+        if (isSharingAvailable) {
+          // Generar mensaje con metadata
+          const exerciseInfo =
+            proContext.type === 'tactical' && proContext.exerciseName
+              ? proContext.exerciseName
+              : 'Entrenamiento';
+          const weightInfo = weight ? `${weight}kg` : '';
+          const repsInfo = reps ? `x${reps}` : '';
+          const dateInfo = new Date().toLocaleDateString('es-ES', {
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric',
+          });
+          const spotifyInfo =
+            attachSpotify && spotifyMetadata
+              ? ` 🎵 ${spotifyMetadata.trackName}`
+              : '';
 
-        const shareMessage =
-          proContext.type === 'tactical'
-            ? `🏋️ ${exerciseInfo} ${weightInfo} ${repsInfo}\n📅 ${dateInfo}${spotifyInfo}\n\n#TRENS`
-            : `💪 ${freeText || 'Día de entreno'}\n📅 ${dateInfo}${spotifyInfo}\n\n#TRENS`;
+          const shareTitle =
+            proContext.type === 'tactical'
+              ? `🏋️ ${exerciseInfo} ${weightInfo} ${repsInfo} - ${dateInfo}${spotifyInfo} #TRENS`
+              : `💪 ${freeText || 'Día de entreno'} - ${dateInfo}${spotifyInfo} #TRENS`;
 
-        await Share.share({
-          message: shareMessage,
-          url: playbackUrls.hls,
-        });
+          await Sharing.shareAsync(capturedVideo.uri, {
+            mimeType: 'video/mp4',
+            dialogTitle: shareTitle,
+          });
+        } else {
+          console.warn('Sharing no disponible en este dispositivo');
+        }
       }
+
+      // 5. DISPARAR REFRESH PARA QUE ADN SE ACTUALICE
+      triggerRefresh();
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       discardVideo();

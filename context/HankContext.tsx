@@ -133,6 +133,12 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
   // Refresh Trigger - Se incrementa cuando HANK modifica datos para que las pantallas recarguen
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
+  // Método para disparar refresh desde otros módulos
+  const triggerRefresh = useCallback(() => {
+    console.log('🔄 triggerRefresh llamado externamente');
+    setRefreshTrigger((prev) => prev + 1);
+  }, []);
+
   // Macro Cache Invalidation - Se incrementa cuando se actualizan datos del perfil
   const [macroCacheInvalidate, setMacroCacheInvalidate] = useState(0);
 
@@ -973,6 +979,7 @@ IMPORTANTE: Puedes ejecutar múltiples herramientas si la solicitud lo requiere.
 
       // Data refresh trigger
       refreshTrigger,
+      triggerRefresh,
 
       // Macro cache invalidation
       macroCacheInvalidate,
@@ -1002,6 +1009,7 @@ IMPORTANTE: Puedes ejecutar múltiples herramientas si la solicitud lo requiere.
       clearConversation,
       saveMessageToSupabase,
       refreshTrigger,
+      triggerRefresh,
       macroCacheInvalidate,
       invalidateMacroCache,
       getToolDefinitions,
@@ -1037,6 +1045,7 @@ const defaultHankState: HankContextState = {
   clearConversation: async () => {},
   saveMessageToSupabase: async () => {},
   refreshTrigger: 0,
+  triggerRefresh: () => {},
   macroCacheInvalidate: 0,
   invalidateMacroCache: () => {},
   getToolDefinitions: () => [],
