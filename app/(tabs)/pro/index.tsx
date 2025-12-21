@@ -719,7 +719,7 @@ export default function ProScreen() {
                       thumbColor="#FFFFFF"
                     />
                   </View>
-                  
+
                   {/* Botón para cambiar canción */}
                   <TouchableOpacity
                     onPress={() => setShowSongPicker(true)}
@@ -728,9 +728,11 @@ export default function ProScreen() {
                     <Music color="#1DB954" size={16} />
                     <Text className="text-zinc-300 text-sm ml-2">Cambiar canción</Text>
                   </TouchableOpacity>
-                  
+
                   <Text className="text-zinc-500 text-xs mt-2 text-center">
-                    {attachSpotify ? '🎵 La canción se adjuntará al video' : '🔇 Sin música adjunta'}
+                    {attachSpotify
+                      ? '🎵 La canción se adjuntará al video'
+                      : '🔇 Sin música adjunta'}
                   </Text>
                 </>
               ) : (
@@ -742,16 +744,14 @@ export default function ProScreen() {
                         <Music color="#71717A" size={18} />
                       </View>
                       <View className="flex-1">
-                        <Text className="text-zinc-400 text-sm">
-                          No se detectó música
-                        </Text>
+                        <Text className="text-zinc-400 text-sm">No se detectó música</Text>
                         <Text className="text-zinc-500 text-xs">
                           Spotify estaba en pausa al grabar
                         </Text>
                       </View>
                     </View>
                   </View>
-                  
+
                   {/* Botón para añadir canción manualmente */}
                   <TouchableOpacity
                     onPress={() => setShowSongPicker(true)}
@@ -994,14 +994,18 @@ export default function ProScreen() {
             setWasAutoDetected(false);
             setShowSongPicker(false);
           }}
-          currentTrack={spotifyMetadata ? {
-            uri: spotifyMetadata.trackUri,
-            name: spotifyMetadata.trackName,
-            artist: spotifyMetadata.artist,
-            album: '',
-            albumArt: spotifyMetadata.albumArt || '',
-            durationMs: 0,
-          } : null}
+          currentTrack={
+            spotifyMetadata
+              ? {
+                  uri: spotifyMetadata.trackUri,
+                  name: spotifyMetadata.trackName,
+                  artist: spotifyMetadata.artist,
+                  album: '',
+                  albumArt: spotifyMetadata.albumArt || '',
+                  durationMs: 0,
+                }
+              : null
+          }
         />
       </View>
     </GestureHandlerRootView>
