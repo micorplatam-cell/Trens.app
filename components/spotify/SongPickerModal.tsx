@@ -398,7 +398,7 @@ export function SongPickerModal({
     currentPlaybackPosition: 0,
     startPosition: 0,
   });
-  
+
   // Keep refs updated
   useEffect(() => {
     currentValuesRef.current = {
@@ -442,7 +442,10 @@ export function SongPickerModal({
           }
         });
       },
-      onPanResponderRelease: async (evt: GestureResponderEvent, _gestureState: PanResponderGestureState) => {
+      onPanResponderRelease: async (
+        evt: GestureResponderEvent,
+        _gestureState: PanResponderGestureState
+      ) => {
         const { selectedTrack: track } = currentValuesRef.current;
         if (!track || !timelineRef.current) return;
 
@@ -491,7 +494,10 @@ export function SongPickerModal({
           }
         });
       },
-      onPanResponderRelease: async (evt: GestureResponderEvent, _gestureState: PanResponderGestureState) => {
+      onPanResponderRelease: async (
+        evt: GestureResponderEvent,
+        _gestureState: PanResponderGestureState
+      ) => {
         const { selectedTrack: track, startPosition: trimPos } = currentValuesRef.current;
         if (!track || !timelineRef.current) return;
 

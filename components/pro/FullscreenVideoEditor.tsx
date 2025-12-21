@@ -53,7 +53,9 @@ interface FullscreenVideoEditorProps {
   visible: boolean;
   videoData: VideoData | null;
   spotifyMetadata: SpotifyMetadata | null;
+  wasAutoDetected: boolean; // true si fue detectada automáticamente
   onClose: () => void;
+  onOpenSongPicker: () => void; // Para abrir el selector de canciones
   onSave: (data: {
     videoTrimStart: number;
     videoTrimEnd: number;
@@ -87,7 +89,9 @@ export function FullscreenVideoEditor({
   visible,
   videoData,
   spotifyMetadata,
+  wasAutoDetected,
   onClose,
+  onOpenSongPicker,
   onSave,
   saving,
 }: FullscreenVideoEditorProps) {
@@ -167,7 +171,17 @@ export function FullscreenVideoEditor({
     }, 100);
 
     return () => clearInterval(interval);
-  }, [visible, isPlaying, videoData, videoTrimStart, videoTrimEnd, spotifyEnabled, spotifyStartMs, spotifyDurationMs, spotifyMetadata]);
+  }, [
+    visible,
+    isPlaying,
+    videoData,
+    videoTrimStart,
+    videoTrimEnd,
+    spotifyEnabled,
+    spotifyStartMs,
+    spotifyDurationMs,
+    spotifyMetadata,
+  ]);
 
   // Reset on open
   useEffect(() => {
@@ -210,7 +224,10 @@ export function FullscreenVideoEditor({
         if (!videoTimelineRef.current) return;
         videoTimelineRef.current.measure((_x, _y, width, _h, pageX) => {
           const relativeX = evt.nativeEvent.pageX - pageX;
-          const percentage = Math.max(0, Math.min(currentValuesRef.current.videoTrimEnd - 10, (relativeX / width) * 100));
+          const percentage = Math.max(
+            0,
+            Math.min(currentValuesRef.current.videoTrimEnd - 10, (relativeX / width) * 100)
+          );
           setVideoTrimStart(percentage);
         });
       },
@@ -233,7 +250,10 @@ export function FullscreenVideoEditor({
         if (!videoTimelineRef.current) return;
         videoTimelineRef.current.measure((_x, _y, width, _h, pageX) => {
           const relativeX = evt.nativeEvent.pageX - pageX;
-          const percentage = Math.max(currentValuesRef.current.videoTrimStart + 10, Math.min(100, (relativeX / width) * 100));
+          const percentage = Math.max(
+            currentValuesRef.current.videoTrimStart + 10,
+            Math.min(100, (relativeX / width) * 100)
+          );
           setVideoTrimEnd(percentage);
         });
       },
@@ -293,7 +313,12 @@ export function FullscreenVideoEditor({
   const videoTrimEndMs = (videoTrimEnd / 100) * videoDurationMs;
 
   return (
-    <Modal visible={visible} animationType="fade" presentationStyle="fullScreen" statusBarTranslucent>
+    <Modal
+      visible={visible}
+      animationType="fade"
+      presentationStyle="fullScreen"
+      statusBarTranslucent
+    >
       <View className="flex-1 bg-black">
         {/* FULLSCREEN VIDEO */}
         <VideoView
@@ -421,91 +446,121 @@ export function FullscreenVideoEditor({
               </View>
             </View>
 
-            {/* SPOTIFY TIMELINE - Only if connected */}
-            {spotifyMetadata && (
-              <View className="mb-4">
-                <View className="flex-row items-center justify-between mb-2">
-                  <TouchableOpacity
-                    onPress={() => setSpotifyEnabled(!spotifyEnabled)}
-                    className="flex-row items-center"
-                  >
-                    {spotifyEnabled ? (
-                      <Music color="#1DB954" size={14} />
-                    ) : (
-                      <VolumeX color="#71717A" size={14} />
-                    )}
-                    <Text
-                      className={`text-xs font-bold ml-2 ${spotifyEnabled ? 'text-green-500' : 'text-zinc-500'}`}
+            {/* SPOTIFY SECTION */}
+            <View className="mb-4">
+              {spotifyMetadata ? (
+                // HAY CANCIÓN (auto-detectada o elegida manualmente)
+                <>
+                  <View className="flex-row items-center justify-between mb-2">
+                    <TouchableOpacity
+                      onPress={() => setSpotifyEnabled(!spotifyEnabled)}
+                      className="flex-row items-center"
                     >
-                      SPOTIFY
-                    </Text>
-                    <View
-                      className={`ml-2 w-8 h-4 rounded-full items-center ${spotifyEnabled ? 'bg-green-600' : 'bg-zinc-700'}`}
-                      style={{ justifyContent: spotifyEnabled ? 'flex-end' : 'flex-start', paddingHorizontal: 2 }}
-                    >
-                      <View className="w-3 h-3 bg-white rounded-full" />
-                    </View>
-                  </TouchableOpacity>
-                  {spotifyEnabled && (
-                    <Text className="text-zinc-400 text-xs font-mono">
-                      {formatTime(spotifyStartMs)}
-                    </Text>
-                  )}
-                </View>
-
-                {spotifyEnabled && (
-                  <>
-                    {/* Song info */}
-                    <Text className="text-white text-xs mb-2" numberOfLines={1}>
-                      {spotifyMetadata.trackName} • {spotifyMetadata.artist}
-                    </Text>
-
-                    <View
-                      ref={spotifyTimelineRef}
-                      className="relative h-10"
-                    >
-                      {/* Base track */}
-                      <View className="absolute left-0 right-0 top-4 h-2 bg-zinc-700 rounded-full" />
-
-                      {/* Played portion */}
+                      {spotifyEnabled ? (
+                        <Music color="#1DB954" size={14} />
+                      ) : (
+                        <VolumeX color="#71717A" size={14} />
+                      )}
+                      <Text
+                        className={`text-xs font-bold ml-2 ${spotifyEnabled ? 'text-green-500' : 'text-zinc-500'}`}
+                      >
+                        {wasAutoDetected ? 'SINCRONIZADA' : 'SPOTIFY'}
+                      </Text>
                       <View
-                        className="absolute top-4 h-2 bg-green-500 rounded-l-full"
+                        className={`ml-2 w-8 h-4 rounded-full items-center ${spotifyEnabled ? 'bg-green-600' : 'bg-zinc-700'}`}
                         style={{
-                          left: `${(spotifyStartMs / spotifyDurationMs) * 100}%`,
-                          width: `${((spotifyCurrentMs - spotifyStartMs) / spotifyDurationMs) * 100}%`,
-                        }}
-                      />
-
-                      {/* Trim marker with scissors */}
-                      <View
-                        {...spotifyTrimPanResponder.panHandlers}
-                        className="absolute items-center"
-                        style={{
-                          left: `${(spotifyStartMs / spotifyDurationMs) * 100}%`,
-                          marginLeft: -12,
-                          top: 0,
-                          width: 24,
-                          height: 24,
-                          zIndex: 20,
+                          justifyContent: spotifyEnabled ? 'flex-end' : 'flex-start',
+                          paddingHorizontal: 2,
                         }}
                       >
-                        <View className="w-6 h-6 rounded-full bg-green-500 items-center justify-center border border-green-300">
-                          <Scissors color="#FFFFFF" size={12} />
-                        </View>
+                        <View className="w-3 h-3 bg-white rounded-full" />
                       </View>
+                    </TouchableOpacity>
+                    {spotifyEnabled && !wasAutoDetected && (
+                      <Text className="text-zinc-400 text-xs font-mono">
+                        {formatTime(spotifyStartMs)}
+                      </Text>
+                    )}
+                  </View>
 
-                      {/* Current position */}
-                      <View
-                        className="absolute top-3 w-1 h-4 bg-white rounded-full"
-                        style={{
-                          left: `${(spotifyCurrentMs / spotifyDurationMs) * 100}%`,
-                        }}
-                      />
-                    </View>
-                  </>
-                )}
-              </View>
-            )}
+                  {spotifyEnabled && (
+                    <>
+                      {/* Song info */}
+                      <Text className="text-white text-xs mb-2" numberOfLines={1}>
+                        {spotifyMetadata.trackName} • {spotifyMetadata.artist}
+                      </Text>
+
+                      {/* Timeline SOLO si fue elegida manualmente (NO auto-detectada) */}
+                      {!wasAutoDetected && (
+                        <View ref={spotifyTimelineRef} className="relative h-10 mb-2">
+                          {/* Base track */}
+                          <View className="absolute left-0 right-0 top-4 h-2 bg-zinc-700 rounded-full" />
+
+                          {/* Played portion */}
+                          <View
+                            className="absolute top-4 h-2 bg-green-500 rounded-l-full"
+                            style={{
+                              left: `${(spotifyStartMs / spotifyDurationMs) * 100}%`,
+                              width: `${((spotifyCurrentMs - spotifyStartMs) / spotifyDurationMs) * 100}%`,
+                            }}
+                          />
+
+                          {/* Trim marker with scissors */}
+                          <View
+                            {...spotifyTrimPanResponder.panHandlers}
+                            className="absolute items-center"
+                            style={{
+                              left: `${(spotifyStartMs / spotifyDurationMs) * 100}%`,
+                              marginLeft: -12,
+                              top: 0,
+                              width: 24,
+                              height: 24,
+                              zIndex: 20,
+                            }}
+                          >
+                            <View className="w-6 h-6 rounded-full bg-green-500 items-center justify-center border border-green-300">
+                              <Scissors color="#FFFFFF" size={12} />
+                            </View>
+                          </View>
+
+                          {/* Current position */}
+                          <View
+                            className="absolute top-3 w-1 h-4 bg-white rounded-full"
+                            style={{
+                              left: `${(spotifyCurrentMs / spotifyDurationMs) * 100}%`,
+                            }}
+                          />
+                        </View>
+                      )}
+
+                      {/* Botón para cambiar canción */}
+                      <TouchableOpacity
+                        onPress={onOpenSongPicker}
+                        className="py-2 rounded-lg flex-row items-center justify-center"
+                        style={{ backgroundColor: 'rgba(29, 185, 84, 0.2)' }}
+                      >
+                        <Music color="#1DB954" size={14} />
+                        <Text className="text-green-500 text-xs font-bold ml-2">
+                          CAMBIAR CANCIÓN
+                        </Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
+                </>
+              ) : (
+                // NO HAY CANCIÓN - mostrar botón para agregar
+                <TouchableOpacity
+                  onPress={onOpenSongPicker}
+                  className="py-3 rounded-xl flex-row items-center justify-center"
+                  style={{ backgroundColor: 'rgba(29, 185, 84, 0.3)' }}
+                >
+                  <Music color="#1DB954" size={16} />
+                  <Text className="text-green-500 text-sm font-bold ml-2">
+                    AGREGAR CANCIÓN
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
 
             {/* ACTION BUTTONS */}
             <View className="flex-row gap-3">
