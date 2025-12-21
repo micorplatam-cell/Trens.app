@@ -36,21 +36,20 @@ export function generateShareUrl(videoId: string): string {
 // =============================================================================
 export function generateShareText(options: ShareVideoOptions): string {
   const { title, exerciseName, weightKg, reps } = options;
-  
+
   // Formatear stats
-  const stats = [
-    weightKg ? `${weightKg}kg` : null,
-    reps ? `x${reps}` : null,
-  ].filter(Boolean).join(' ');
-  
+  const stats = [weightKg ? `${weightKg}kg` : null, reps ? `x${reps}` : null]
+    .filter(Boolean)
+    .join(' ');
+
   if (exerciseName && stats) {
     return `🔥 ${exerciseName} ${stats}\n\n`;
   }
-  
+
   if (title) {
     return `🔥 ${title}\n\n`;
   }
-  
+
   return '🔥 Check out my lift on TRENS\n\n';
 }
 
@@ -60,7 +59,7 @@ export function generateShareText(options: ShareVideoOptions): string {
 export async function shareVideo(options: ShareVideoOptions): Promise<ShareResult> {
   const url = generateShareUrl(options.videoId);
   const text = generateShareText(options);
-  
+
   try {
     const result = await Share.share(
       Platform.OS === 'ios'
@@ -80,10 +79,10 @@ export async function shareVideo(options: ShareVideoOptions): Promise<ShareResul
     if (result.action === Share.sharedAction) {
       // Incrementar contador de shares
       await incrementShareCount(options.videoId);
-      
+
       return { success: true, url };
     }
-    
+
     return { success: false, error: 'cancelled' };
   } catch (error) {
     console.error('Error sharing video:', error);
@@ -96,13 +95,13 @@ export async function shareVideo(options: ShareVideoOptions): Promise<ShareResul
 // =============================================================================
 export async function copyVideoLink(videoId: string): Promise<ShareResult> {
   const url = generateShareUrl(videoId);
-  
+
   try {
     await Clipboard.setStringAsync(url);
-    
+
     // Incrementar contador de shares
     await incrementShareCount(videoId);
-    
+
     return { success: true, url };
   } catch (error) {
     console.error('Error copying link:', error);
@@ -123,7 +122,7 @@ export async function shareToInstagramStory(
   // Este es un flow más complejo que requiere:
   // 1. Descargar el video al dispositivo
   // 2. Usar expo-sharing o react-native-share con Instagram específico
-  
+
   // Por ahora, fallback al share general
   return shareVideo(options);
 }
@@ -133,11 +132,11 @@ export async function shareToWhatsApp(options: ShareVideoOptions): Promise<Share
   const url = generateShareUrl(options.videoId);
   const text = generateShareText(options);
   const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(`${text}${url}`)}`;
-  
+
   try {
     const { Linking } = require('react-native');
     const canOpen = await Linking.canOpenURL(whatsappUrl);
-    
+
     if (canOpen) {
       await Linking.openURL(whatsappUrl);
       await incrementShareCount(options.videoId);

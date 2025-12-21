@@ -9,10 +9,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.trens.app",
-      "associatedDomains": [
-        "applinks:share.trens.app",
-        "applinks:trens.app"
-      ]
+      "associatedDomains": ["applinks:share.trens.app", "applinks:trens.app"]
     },
     "android": {
       "adaptiveIcon": {

@@ -119,12 +119,9 @@ export function useDeepLinkHandler() {
 /**
  * Crea una URL de deep link para la app
  */
-export function createDeepLink(
-  type: 'video' | 'profile' | 'workout',
-  id: string
-): string {
+export function createDeepLink(type: 'video' | 'profile' | 'workout', id: string): string {
   const prefix = Linking.createURL('');
-  
+
   switch (type) {
     case 'video':
       return `${prefix}video/${id}`;

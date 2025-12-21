@@ -3,28 +3,9 @@
 // =============================================================================
 
 import React, { useCallback, useState } from 'react';
-import {
-  View,
-  Text,
-  Modal,
-  Pressable,
-  Image,
-  ActivityIndicator,
-} from 'react-native';
-import {
-  Link2,
-  Share2,
-  MessageCircle,
-  QrCode,
-  X,
-  Check,
-} from 'lucide-react-native';
-import Animated, {
-  FadeIn,
-  FadeOut,
-  SlideInDown,
-  SlideOutDown,
-} from 'react-native-reanimated';
+import { View, Text, Modal, Pressable, Image, ActivityIndicator } from 'react-native';
+import { Link2, Share2, MessageCircle, QrCode, X, Check } from 'lucide-react-native';
+import Animated, { FadeIn, FadeOut, SlideInDown, SlideOutDown } from 'react-native-reanimated';
 import {
   ShareVideoOptions,
   copyVideoLink,
@@ -170,16 +151,10 @@ export function ShareModal({
                 </View>
               )}
               <View className="flex-1 ml-4">
-                <Text
-                  className="text-white font-bold text-base"
-                  numberOfLines={2}
-                >
+                <Text className="text-white font-bold text-base" numberOfLines={2}>
                   {displayTitle}
                 </Text>
-                <Text
-                  className="text-zinc-400 text-sm mt-1 font-mono"
-                  numberOfLines={1}
-                >
+                <Text className="text-zinc-400 text-sm mt-1 font-mono" numberOfLines={1}>
                   {shareUrl.replace('https://', '')}
                 </Text>
               </View>
@@ -246,9 +221,7 @@ export function ShareModal({
                   <View className="bg-green-500/20 p-2 rounded-full">
                     <Check size={16} color="#22C55E" />
                   </View>
-                  <Text className="text-green-500 font-semibold">
-                    {successMessage}
-                  </Text>
+                  <Text className="text-green-500 font-semibold">{successMessage}</Text>
                 </Animated.View>
               )}
 
@@ -267,9 +240,7 @@ export function ShareModal({
                   ) : (
                     <>
                       <Link2 size={20} color="#FFFFFF" />
-                      <Text className="text-white font-bold text-base">
-                        Copiar enlace
-                      </Text>
+                      <Text className="text-white font-bold text-base">Copiar enlace</Text>
                     </>
                   )}
                 </Pressable>
@@ -311,11 +282,7 @@ function ShareButton({
         transform: [{ scale: pressed ? 0.95 : 1 }],
       })}
     >
-      <View
-        className={`w-14 h-14 rounded-2xl items-center justify-center ${iconBg}`}
-      >
-        {icon}
-      </View>
+      <View className={`w-14 h-14 rounded-2xl items-center justify-center ${iconBg}`}>{icon}</View>
       <Text className="text-zinc-400 text-xs mt-2 font-medium">{label}</Text>
     </Pressable>
   );

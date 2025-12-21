@@ -31,8 +31,8 @@ interface VideoData {
 // =============================================================================
 async function fetchVideoData(videoId: string, env: Env): Promise<VideoData | null> {
   try {
-    // Intentar primero en user_assets (videos de ejercicios)
-    const response = await fetch(
+    // Intentar primero en user_assets
+    const assetResponse = await fetch(
       `${env.SUPABASE_URL}/rest/v1/user_assets?id=eq.${videoId}&select=*,profiles!user_assets_user_id_fkey(display_name,avatar_url)`,
       {
         headers: {
@@ -42,33 +42,65 @@ async function fetchVideoData(videoId: string, env: Env): Promise<VideoData | nu
       }
     );
 
-    if (!response.ok) {
-      console.error('Supabase error:', await response.text());
-      return null;
+    if (assetResponse.ok) {
+      const assetData = await assetResponse.json();
+      if (assetData && assetData.length > 0) {
+        const asset = assetData[0];
+        return {
+          id: asset.id,
+          title: asset.exercise_name
+            ? `${asset.exercise_name} ${asset.weight_kg ? `${asset.weight_kg}kg` : ''} ${asset.reps ? `x${asset.reps}` : ''}`.trim()
+            : asset.name || 'Entrenamiento TRENS',
+          description: asset.notes || 'Video de entrenamiento en TRENS - High-Performance Fitness',
+          thumbnail_url: asset.thumbnail_url || 'https://media.trens.app/default-thumb.jpg',
+          video_url: asset.media_url || asset.video_url,
+          hls_url: asset.hls_url,
+          duration: asset.duration,
+          views: asset.views || 0,
+          user_name: asset.profiles?.display_name || 'Atleta TRENS',
+          user_avatar: asset.profiles?.avatar_url,
+          exercise_name: asset.exercise_name,
+          weight_kg: asset.weight_kg,
+          reps: asset.reps,
+          created_at: asset.created_at,
+        };
+      }
     }
 
-    const data = await response.json();
-    
-    if (data && data.length > 0) {
-      const asset = data[0];
-      return {
-        id: asset.id,
-        title: asset.exercise_name 
-          ? `${asset.exercise_name} ${asset.weight_kg ? `${asset.weight_kg}kg` : ''} ${asset.reps ? `x${asset.reps}` : ''}`.trim()
-          : 'Entrenamiento TRENS',
-        description: asset.notes || 'Video de entrenamiento en TRENS - High-Performance Fitness',
-        thumbnail_url: asset.thumbnail_url || 'https://media.trens.app/default-thumb.jpg',
-        video_url: asset.media_url || asset.video_url,
-        hls_url: asset.hls_url,
-        duration: asset.duration,
-        views: asset.views || 0,
-        user_name: asset.profiles?.display_name || 'Atleta TRENS',
-        user_avatar: asset.profiles?.avatar_url,
-        exercise_name: asset.exercise_name,
-        weight_kg: asset.weight_kg,
-        reps: asset.reps,
-        created_at: asset.created_at,
-      };
+    // Si no está en user_assets, buscar en pro_videos
+    const proResponse = await fetch(
+      `${env.SUPABASE_URL}/rest/v1/pro_videos?id=eq.${videoId}&select=*`,
+      {
+        headers: {
+          apikey: env.SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${env.SUPABASE_ANON_KEY}`,
+        },
+      }
+    );
+
+    if (proResponse.ok) {
+      const proData = await proResponse.json();
+      if (proData && proData.length > 0) {
+        const video = proData[0];
+        return {
+          id: video.id,
+          title: video.exercise_name
+            ? `${video.exercise_name} ${video.weight_kg ? `${video.weight_kg}kg` : ''} ${video.reps ? `x${video.reps}` : ''}`.trim()
+            : video.free_text || 'Entrenamiento TRENS',
+          description: video.notes || 'Video de entrenamiento en TRENS - High-Performance Fitness',
+          thumbnail_url: video.thumbnail_url || 'https://media.trens.app/default-thumb.jpg',
+          video_url: video.video_url,
+          hls_url: video.video_url, // pro_videos usa video_url para HLS
+          duration: video.duration_seconds,
+          views: video.views_count || 0,
+          user_name: 'Atleta TRENS',
+          user_avatar: undefined,
+          exercise_name: video.exercise_name,
+          weight_kg: video.weight_kg,
+          reps: video.reps,
+          created_at: video.created_at,
+        };
+      }
     }
 
     return null;
@@ -86,12 +118,14 @@ function generateVideoPage(video: VideoData, videoId: string): string {
   const playStoreUrl = 'https://play.google.com/store/apps/details?id=com.trens.app';
   const deepLink = `trensdev://video/${videoId}`;
   const webUrl = `https://share.trens.app/v/${videoId}`;
-  
+
   // Formatear stats
   const statsText = [
     video.weight_kg ? `${video.weight_kg}kg` : null,
     video.reps ? `${video.reps} reps` : null,
-  ].filter(Boolean).join(' × ');
+  ]
+    .filter(Boolean)
+    .join(' × ');
 
   return `<!DOCTYPE html>
 <html lang="es">
@@ -535,9 +569,10 @@ function generateVideoPage(video: VideoData, videoId: string): string {
       <!-- Video Info -->
       <div class="video-info">
         <div class="user-row">
-          ${video.user_avatar 
-            ? `<img src="${video.user_avatar}" alt="${video.user_name}" class="avatar">`
-            : `<div class="avatar-placeholder">${(video.user_name || 'A')[0].toUpperCase()}</div>`
+          ${
+            video.user_avatar
+              ? `<img src="${video.user_avatar}" alt="${video.user_name}" class="avatar">`
+              : `<div class="avatar-placeholder">${(video.user_name || 'A')[0].toUpperCase()}</div>`
           }
           <div class="user-info">
             <div class="user-name">${video.user_name}</div>
@@ -547,13 +582,19 @@ function generateVideoPage(video: VideoData, videoId: string): string {
         
         <h1 class="video-title">${video.title}</h1>
         
-        ${statsText ? `
+        ${
+          statsText
+            ? `
         <div class="exercise-badge">
           🏋️ ${statsText}
         </div>
-        ` : ''}
+        `
+            : ''
+        }
         
-        ${video.views ? `
+        ${
+          video.views
+            ? `
         <div class="video-stats">
           <div class="stat">
             <span>👁️</span>
@@ -561,7 +602,9 @@ function generateVideoPage(video: VideoData, videoId: string): string {
             <span>visualizaciones</span>
           </div>
         </div>
-        ` : ''}
+        `
+            : ''
+        }
       </div>
       
       <div class="footer-spacer"></div>
@@ -671,7 +714,7 @@ function formatDate(dateStr: string): string {
   const now = new Date();
   const diff = now.getTime() - date.getTime();
   const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-  
+
   if (days === 0) return 'Hoy';
   if (days === 1) return 'Ayer';
   if (days < 7) return `Hace ${days} días`;
@@ -749,23 +792,26 @@ export default {
 
     // Health check
     if (path === '/health' || path === '/') {
-      return new Response(JSON.stringify({ 
-        status: 'ok', 
-        service: 'TRENS Video Share',
-        timestamp: new Date().toISOString()
-      }), {
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return new Response(
+        JSON.stringify({
+          status: 'ok',
+          service: 'TRENS Video Share',
+          timestamp: new Date().toISOString(),
+        }),
+        {
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
     }
 
     // Video page: /v/:videoId
     const videoMatch = path.match(/^\/v\/([a-zA-Z0-9-]+)$/);
     if (videoMatch) {
       const videoId = videoMatch[1];
-      
+
       // Fetch video data
       const video = await fetchVideoData(videoId, env);
-      
+
       if (!video) {
         return new Response(generate404Page(), {
           status: 404,
@@ -776,7 +822,8 @@ export default {
       // Check if embed mode (for Twitter player)
       if (url.searchParams.get('embed') === '1') {
         // Return just the video for embedding
-        return new Response(`
+        return new Response(
+          `
           <!DOCTYPE html>
           <html>
           <head>
@@ -792,14 +839,16 @@ export default {
             </video>
           </body>
           </html>
-        `, {
-          headers: { 'Content-Type': 'text/html;charset=UTF-8' },
-        });
+        `,
+          {
+            headers: { 'Content-Type': 'text/html;charset=UTF-8' },
+          }
+        );
       }
 
       // Return full video page
       return new Response(generateVideoPage(video, videoId), {
-        headers: { 
+        headers: {
           'Content-Type': 'text/html;charset=UTF-8',
           'Cache-Control': 'public, max-age=300', // Cache 5 min
         },
