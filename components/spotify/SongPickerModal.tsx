@@ -188,7 +188,7 @@ export function SongPickerModal({
 
   // Trim slider state - track if was playing before drag
   const wasPlayingBeforeDrag = useRef(false);
-  
+
   // Timeline dimensions ref
   const timelineWidth = useRef(0);
   const timelineRef = useRef<View>(null);
@@ -391,53 +391,69 @@ export function SongPickerModal({
     }
   }, [selectedTrack, startPosition, isPreviewPlaying]);
 
-  // Helper to calculate position from gesture
-  const calculatePositionFromGesture = useCallback(
-    (pageX: number, containerX: number, maxMs: number, minMs: number = 0): number => {
-      const relativeX = pageX - containerX;
-      const percentage = Math.max(0, Math.min(1, relativeX / timelineWidth.current));
-      const positionMs = percentage * maxMs;
-      return Math.max(minMs, Math.min(maxMs, Math.floor(positionMs)));
-    },
-    []
-  );
+  // Refs to hold current values for PanResponders (they capture values at creation time)
+  const currentValuesRef = useRef({
+    isPreviewPlaying: false,
+    selectedTrack: null as SpotifyTrack | null,
+    currentPlaybackPosition: 0,
+    startPosition: 0,
+  });
+  
+  // Keep refs updated
+  useEffect(() => {
+    currentValuesRef.current = {
+      isPreviewPlaying,
+      selectedTrack,
+      currentPlaybackPosition,
+      startPosition,
+    };
+  }, [isPreviewPlaying, selectedTrack, currentPlaybackPosition, startPosition]);
 
-  // PanResponder for the TRIM marker (scissors)
+  // PanResponder for the TRIM marker (scissors) - HIGHEST PRIORITY
   const trimPanResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponderCapture: () => true,
+      onMoveShouldSetPanResponderCapture: () => true,
+      onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: async () => {
-        wasPlayingBeforeDrag.current = isPreviewPlaying;
-        if (isPreviewPlaying) {
+        const { isPreviewPlaying: playing } = currentValuesRef.current;
+        wasPlayingBeforeDrag.current = playing;
+        if (playing) {
           await spotify.pause();
           setIsPreviewPlaying(false);
         }
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       },
       onPanResponderMove: (evt: GestureResponderEvent, _gestureState: PanResponderGestureState) => {
-        if (!selectedTrack || !timelineRef.current) return;
-        
+        const { selectedTrack: track, currentPlaybackPosition: playPos } = currentValuesRef.current;
+        if (!track || !timelineRef.current) return;
+
         timelineRef.current.measure((_x, _y, _width, _height, pageX, _pageY) => {
-          if (selectedTrack) {
-            const newPos = calculatePositionFromGesture(evt.nativeEvent.pageX, pageX, selectedTrack.durationMs);
+          if (track && timelineWidth.current > 0) {
+            const relativeX = evt.nativeEvent.pageX - pageX;
+            const percentage = Math.max(0, Math.min(1, relativeX / timelineWidth.current));
+            const newPos = Math.floor(percentage * track.durationMs);
             setStartPosition(newPos);
-            // Also move playback position to match if it's less than new trim
-            if (currentPlaybackPosition < newPos) {
+            if (playPos < newPos) {
               setCurrentPlaybackPosition(newPos);
             }
           }
         });
       },
       onPanResponderRelease: async (evt: GestureResponderEvent, _gestureState: PanResponderGestureState) => {
-        if (!selectedTrack || !timelineRef.current) return;
-        
+        const { selectedTrack: track } = currentValuesRef.current;
+        if (!track || !timelineRef.current) return;
+
         timelineRef.current.measure(async (_x, _y, _width, _height, pageX, _pageY) => {
-          if (selectedTrack) {
-            const newPos = calculatePositionFromGesture(evt.nativeEvent.pageX, pageX, selectedTrack.durationMs);
+          if (track && timelineWidth.current > 0) {
+            const relativeX = evt.nativeEvent.pageX - pageX;
+            const percentage = Math.max(0, Math.min(1, relativeX / timelineWidth.current));
+            const newPos = Math.floor(percentage * track.durationMs);
             setStartPosition(newPos);
             setCurrentPlaybackPosition(newPos);
-            await spotify.play(selectedTrack.uri, newPos);
+            await spotify.play(track.uri, newPos);
             setIsPreviewPlaying(true);
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
           }
@@ -446,47 +462,47 @@ export function SongPickerModal({
     })
   ).current;
 
-  // PanResponder for the PLAYBACK position (ball)
+  // PanResponder for the PLAYBACK position (ball) - LOWER PRIORITY
   const playbackPanResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
+      onPanResponderTerminationRequest: () => true,
       onPanResponderGrant: async () => {
-        if (isPreviewPlaying) {
+        const { isPreviewPlaying: playing } = currentValuesRef.current;
+        if (playing) {
           await spotify.pause();
           setIsPreviewPlaying(false);
         }
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       },
       onPanResponderMove: (evt: GestureResponderEvent, _gestureState: PanResponderGestureState) => {
-        if (!selectedTrack || !timelineRef.current) return;
-        
+        const { selectedTrack: track, startPosition: trimPos } = currentValuesRef.current;
+        if (!track || !timelineRef.current) return;
+
         timelineRef.current.measure((_x, _y, _width, _height, pageX, _pageY) => {
-          if (selectedTrack) {
-            // Playback can only go from startPosition to end
-            const newPos = calculatePositionFromGesture(
-              evt.nativeEvent.pageX, 
-              pageX, 
-              selectedTrack.durationMs,
-              startPosition
-            );
+          if (track && timelineWidth.current > 0) {
+            const relativeX = evt.nativeEvent.pageX - pageX;
+            const percentage = Math.max(0, Math.min(1, relativeX / timelineWidth.current));
+            const rawPos = Math.floor(percentage * track.durationMs);
+            // Playback can only go from trimPos to end
+            const newPos = Math.max(trimPos, rawPos);
             setCurrentPlaybackPosition(newPos);
           }
         });
       },
       onPanResponderRelease: async (evt: GestureResponderEvent, _gestureState: PanResponderGestureState) => {
-        if (!selectedTrack || !timelineRef.current) return;
-        
+        const { selectedTrack: track, startPosition: trimPos } = currentValuesRef.current;
+        if (!track || !timelineRef.current) return;
+
         timelineRef.current.measure(async (_x, _y, _width, _height, pageX, _pageY) => {
-          if (selectedTrack) {
-            const newPos = calculatePositionFromGesture(
-              evt.nativeEvent.pageX, 
-              pageX, 
-              selectedTrack.durationMs,
-              startPosition
-            );
+          if (track && timelineWidth.current > 0) {
+            const relativeX = evt.nativeEvent.pageX - pageX;
+            const percentage = Math.max(0, Math.min(1, relativeX / timelineWidth.current));
+            const rawPos = Math.floor(percentage * track.durationMs);
+            const newPos = Math.max(trimPos, rawPos);
             setCurrentPlaybackPosition(newPos);
-            await spotify.play(selectedTrack.uri, newPos);
+            await spotify.play(track.uri, newPos);
             setIsPreviewPlaying(true);
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
           }
@@ -587,7 +603,7 @@ export function SongPickerModal({
         <View className="px-5 mb-4">
           <View className="bg-zinc-900 rounded-xl p-4">
             {/* Timeline Container */}
-            <View 
+            <View
               ref={timelineRef}
               className="relative h-20"
               onLayout={(e) => {
@@ -611,7 +627,7 @@ export function SongPickerModal({
                   right: 0,
                 }}
               />
-              
+
               {/* Progress played indicator (bright green from trim to current position) */}
               {currentPlaybackPosition > startPosition && (
                 <View
@@ -623,38 +639,43 @@ export function SongPickerModal({
                 />
               )}
 
-              {/* DRAGGABLE: Playback position indicator (white ball) */}
+              {/* DRAGGABLE: Playback position indicator (white ball) - z-index 10 */}
               <View
                 {...playbackPanResponder.panHandlers}
-                className="absolute items-center justify-center z-20"
+                className="absolute items-center justify-center"
                 style={{
                   left: `${(currentPlaybackPosition / selectedTrack.durationMs) * 100}%`,
-                  marginLeft: -16,
-                  top: 2,
+                  marginLeft: -20,
+                  top: 0,
+                  width: 40,
+                  height: 40,
+                  zIndex: 10,
                 }}
               >
-                <View className="w-8 h-8 rounded-full bg-white shadow-lg items-center justify-center border-2 border-green-500">
-                  <Play color="#1DB954" size={14} fill="#1DB954" />
+                <View className="w-10 h-10 rounded-full bg-white shadow-lg items-center justify-center border-2 border-green-500">
+                  <Play color="#1DB954" size={16} fill="#1DB954" />
                 </View>
               </View>
 
-              {/* DRAGGABLE: Trim/Cut marker (scissors line) */}
+              {/* DRAGGABLE: Trim/Cut marker (scissors line) - z-index 50 HIGHEST */}
               <View
                 {...trimPanResponder.panHandlers}
-                className="absolute items-center z-30"
+                className="absolute items-center"
                 style={{
                   left: `${(startPosition / selectedTrack.durationMs) * 100}%`,
-                  marginLeft: -16,
+                  marginLeft: -20,
                   top: 0,
                   bottom: 0,
+                  width: 40,
+                  zIndex: 50,
                 }}
               >
                 {/* Scissors icon at top */}
-                <View className="w-8 h-8 rounded-full bg-red-600 items-center justify-center shadow-lg">
-                  <Scissors color="#FFFFFF" size={16} />
+                <View className="w-10 h-10 rounded-full bg-red-600 items-center justify-center shadow-lg border-2 border-red-400">
+                  <Scissors color="#FFFFFF" size={18} />
                 </View>
                 {/* Vertical cut line */}
-                <View className="w-0.5 flex-1 bg-red-500" style={{ marginTop: 2 }} />
+                <View className="w-1 flex-1 bg-red-500 rounded-full" style={{ marginTop: 2 }} />
               </View>
             </View>
 
@@ -668,7 +689,7 @@ export function SongPickerModal({
                 {formatTime(selectedTrack.durationMs)}
               </Text>
             </View>
-            
+
             {/* Legend */}
             <View className="flex-row justify-center mt-3 gap-4">
               <View className="flex-row items-center">
