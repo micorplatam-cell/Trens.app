@@ -44,6 +44,7 @@ import { useUserRoleContext } from '../../../context/UserRoleContext';
 import { useProContext } from '../../../context/ProContext';
 import { useHank } from '../../../context/HankContext';
 import { ProUpgradeModal } from '../../../components/pro/ProUpgradeModal';
+import { SongPickerModal } from '../../../components/spotify/SongPickerModal';
 import spotify from '../../../services/spotify/spotify';
 import cloudflareStream from '../../../services/cloudflare/stream';
 
@@ -128,6 +129,9 @@ export default function ProScreen() {
   // Spotify State
   const [spotifyMetadata, setSpotifyMetadata] = useState<SpotifyMetadata | null>(null);
   const [attachSpotify, setAttachSpotify] = useState(true);
+  const [wasAutoDetected, setWasAutoDetected] = useState(false); // true si se detectó automáticamente
+  const [showSongPicker, setShowSongPicker] = useState(false); // Modal para elegir canción
+  const [customStartPosition, setCustomStartPosition] = useState(0); // Posición de inicio personalizada
 
   // Audio Mode: 'spotify' | 'ambient'
   const [audioMode, setAudioMode] = useState<'spotify' | 'ambient'>('spotify');
@@ -135,21 +139,27 @@ export default function ProScreen() {
   // Timer ref
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Capturar metadata de Spotify al montar (solo PRO)
+  // Capturar metadata de Spotify al montar (solo PRO y solo si está reproduciendo)
   useEffect(() => {
     const captureSpotifyMetadata = async () => {
       if (isPro && spotifyConnected && spotifyPremium) {
         try {
-          const currentTrack = await spotify.getCurrentTrack();
-          if (currentTrack) {
+          const playbackState = await spotify.getPlaybackState();
+          // Solo capturar si está REPRODUCIENDO activamente
+          if (playbackState?.isPlaying && playbackState.track) {
             setSpotifyMetadata({
               enabled: true,
-              trackUri: currentTrack.uri,
-              positionMs: currentTrack.positionMs,
-              trackName: currentTrack.name,
-              artist: currentTrack.artist,
-              albumArt: currentTrack.albumArt,
+              trackUri: playbackState.track.uri,
+              positionMs: playbackState.track.positionMs || 0,
+              trackName: playbackState.track.name,
+              artist: playbackState.track.artist,
+              albumArt: playbackState.track.albumArt,
             });
+            setWasAutoDetected(true);
+          } else {
+            // No hay música reproduciéndose - no auto-detectar
+            setSpotifyMetadata(null);
+            setWasAutoDetected(false);
           }
         } catch (error) {
           console.warn('No se pudo capturar metadata de Spotify:', error);
@@ -265,28 +275,36 @@ export default function ProScreen() {
     setRecordingTime(0);
 
     // 🎵 PRO: Capturar metadata de Spotify JUSTO ANTES de grabar
-    // Esto garantiza que positionMs sea exacto al momento de grabación
-    // Spotify SIGUE sonando - el usuario escucha su música con audífonos
+    // SOLO si está REPRODUCIENDO activamente (no en pausa)
     if (isPro && spotifyConnected && spotifyPremium) {
       try {
-        const currentTrack = await spotify.getCurrentTrack();
-        if (currentTrack) {
+        const playbackState = await spotify.getPlaybackState();
+        // Solo capturar si está REPRODUCIENDO activamente
+        if (playbackState?.isPlaying && playbackState.track) {
           const capturedMetadata = {
             enabled: true,
-            trackUri: currentTrack.uri,
-            positionMs: currentTrack.positionMs, // Posición EXACTA del momento épico
-            trackName: currentTrack.name,
-            artist: currentTrack.artist,
-            albumArt: currentTrack.albumArt,
+            trackUri: playbackState.track.uri,
+            positionMs: playbackState.track.positionMs || 0, // Posición EXACTA del momento épico
+            trackName: playbackState.track.name,
+            artist: playbackState.track.artist,
+            albumArt: playbackState.track.albumArt,
           };
           setSpotifyMetadata(capturedMetadata);
-          console.log(
-            '🎵 Spotify metadata capturado:',
+          setWasAutoDetected(true);
+          console.warn(
+            '🎵 Spotify metadata capturado (reproduciendo):',
             capturedMetadata.trackName,
             'en',
             capturedMetadata.positionMs,
             'ms'
           );
+        } else {
+          // Spotify está en pausa - NO auto-detectar
+          console.warn('🎵 Spotify en pausa - no se detectó canción automáticamente');
+          // Mantenemos cualquier metadata previo si el usuario ya eligió una canción
+          if (!spotifyMetadata) {
+            setWasAutoDetected(false);
+          }
         }
       } catch (error) {
         console.warn('No se pudo capturar metadata de Spotify:', error);
@@ -346,6 +364,9 @@ export default function ProScreen() {
     setShowTextInput(false);
     setSpotifyMetadata(null);
     setAttachSpotify(true);
+    setWasAutoDetected(false);
+    setShowSongPicker(false);
+    setCustomStartPosition(0);
     setIsPublic(true);
     clearContext();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -666,33 +687,81 @@ export default function ProScreen() {
 
         {/* FOOTER DE PUBLICACIÓN - Según MASTER */}
         <View className="bg-zinc-950 border-t border-zinc-800 px-4 py-4 pb-8">
-          {/* SPOTIFY TOGGLE (Si hay metadata) */}
-          {spotifyMetadata && (
+          {/* SPOTIFY SECTION - Detectado automáticamente o elegir manualmente */}
+          {isPro && spotifyConnected && spotifyPremium && (
             <View className="bg-black/50 rounded-xl p-3 mb-4 border border-zinc-800">
-              <View className="flex-row items-center justify-between">
-                <View className="flex-row items-center flex-1">
-                  <View className="w-10 h-10 bg-green-500 rounded-lg items-center justify-center mr-3">
-                    <Music color="#000" size={18} />
+              {spotifyMetadata ? (
+                <>
+                  {/* Canción detectada o seleccionada */}
+                  <View className="flex-row items-center justify-between">
+                    <View className="flex-row items-center flex-1">
+                      <View className="w-10 h-10 bg-green-500 rounded-lg items-center justify-center mr-3">
+                        <Music color="#000" size={18} />
+                      </View>
+                      <View className="flex-1">
+                        <Text className="text-white font-bold text-sm" numberOfLines={1}>
+                          {spotifyMetadata.trackName}
+                        </Text>
+                        <Text className="text-zinc-400 text-xs" numberOfLines={1}>
+                          {spotifyMetadata.artist}
+                        </Text>
+                        {wasAutoDetected && (
+                          <Text className="text-green-400 text-xs mt-0.5">
+                            ✓ Detectada automáticamente
+                          </Text>
+                        )}
+                      </View>
+                    </View>
+                    <Switch
+                      value={attachSpotify}
+                      onValueChange={setAttachSpotify}
+                      trackColor={{ false: '#3f3f46', true: '#1DB954' }}
+                      thumbColor="#FFFFFF"
+                    />
                   </View>
-                  <View className="flex-1">
-                    <Text className="text-white font-bold text-sm" numberOfLines={1}>
-                      {spotifyMetadata.trackName}
-                    </Text>
-                    <Text className="text-zinc-400 text-xs" numberOfLines={1}>
-                      {spotifyMetadata.artist}
-                    </Text>
+                  
+                  {/* Botón para cambiar canción */}
+                  <TouchableOpacity
+                    onPress={() => setShowSongPicker(true)}
+                    className="mt-3 bg-zinc-800 rounded-lg py-2 px-3 flex-row items-center justify-center"
+                  >
+                    <Music color="#1DB954" size={16} />
+                    <Text className="text-zinc-300 text-sm ml-2">Cambiar canción</Text>
+                  </TouchableOpacity>
+                  
+                  <Text className="text-zinc-500 text-xs mt-2 text-center">
+                    {attachSpotify ? '🎵 La canción se adjuntará al video' : '🔇 Sin música adjunta'}
+                  </Text>
+                </>
+              ) : (
+                <>
+                  {/* No hay canción - mostrar opción para añadir */}
+                  <View className="flex-row items-center justify-between">
+                    <View className="flex-row items-center flex-1">
+                      <View className="w-10 h-10 bg-zinc-700 rounded-lg items-center justify-center mr-3">
+                        <Music color="#71717A" size={18} />
+                      </View>
+                      <View className="flex-1">
+                        <Text className="text-zinc-400 text-sm">
+                          No se detectó música
+                        </Text>
+                        <Text className="text-zinc-500 text-xs">
+                          Spotify estaba en pausa al grabar
+                        </Text>
+                      </View>
+                    </View>
                   </View>
-                </View>
-                <Switch
-                  value={attachSpotify}
-                  onValueChange={setAttachSpotify}
-                  trackColor={{ false: '#3f3f46', true: '#1DB954' }}
-                  thumbColor="#FFFFFF"
-                />
-              </View>
-              <Text className="text-zinc-500 text-xs mt-2">
-                {attachSpotify ? '🎵 La canción se adjuntará al video' : '🔇 Sin música adjunta'}
-              </Text>
+                  
+                  {/* Botón para añadir canción manualmente */}
+                  <TouchableOpacity
+                    onPress={() => setShowSongPicker(true)}
+                    className="mt-3 bg-green-600 rounded-lg py-3 px-4 flex-row items-center justify-center"
+                  >
+                    <Music color="#FFFFFF" size={18} />
+                    <Text className="text-white font-bold text-sm ml-2">Añadir canción</Text>
+                  </TouchableOpacity>
+                </>
+              )}
             </View>
           )}
 
@@ -906,6 +975,33 @@ export default function ProScreen() {
           visible={showUpgradeModal}
           onClose={() => setShowUpgradeModal(false)}
           feature="camera"
+        />
+
+        {/* Song Picker Modal */}
+        <SongPickerModal
+          visible={showSongPicker}
+          onClose={() => setShowSongPicker(false)}
+          onSelectSong={(track, startPositionMs) => {
+            setSpotifyMetadata({
+              enabled: true,
+              trackUri: track.uri,
+              positionMs: startPositionMs,
+              trackName: track.name,
+              artist: track.artist,
+              albumArt: track.albumArt,
+            });
+            setAttachSpotify(true);
+            setWasAutoDetected(false);
+            setShowSongPicker(false);
+          }}
+          currentTrack={spotifyMetadata ? {
+            uri: spotifyMetadata.trackUri,
+            name: spotifyMetadata.trackName,
+            artist: spotifyMetadata.artist,
+            album: '',
+            albumArt: spotifyMetadata.albumArt || '',
+            durationMs: 0,
+          } : null}
         />
       </View>
     </GestureHandlerRootView>
