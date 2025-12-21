@@ -14,7 +14,17 @@ import {
   Image,
   ActivityIndicator,
 } from 'react-native';
-import { X, Search, Music, Play, Pause, Check, Clock, ChevronRight, Plus, Scissors } from 'lucide-react-native';
+import {
+  X,
+  Search,
+  Music,
+  Play,
+  Pause,
+  Check,
+  ChevronRight,
+  Plus,
+  Scissors,
+} from 'lucide-react-native';
 import Slider from '@react-native-community/slider';
 import Animated, { FadeIn, FadeOut, SlideInDown, SlideOutDown } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
@@ -77,7 +87,7 @@ const TrackItem = memo(
           {track.artist}
         </Text>
       </View>
-      
+
       {/* Preview Play/Pause Button */}
       <TouchableOpacity
         onPress={onTogglePlay}
@@ -85,13 +95,9 @@ const TrackItem = memo(
           isPlaying ? 'bg-green-600' : 'bg-zinc-700'
         }`}
       >
-        {isPlaying ? (
-          <Pause color="#FFFFFF" size={18} />
-        ) : (
-          <Play color="#1DB954" size={18} />
-        )}
+        {isPlaying ? <Pause color="#FFFFFF" size={18} /> : <Play color="#1DB954" size={18} />}
       </TouchableOpacity>
-      
+
       {/* Add Button */}
       <TouchableOpacity
         onPress={onAdd}
@@ -171,9 +177,13 @@ export function SongPickerModal({
   // Preview playback
   const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
   
+  // Current playback position (updates in real-time)
+  const [currentPlaybackPosition, setCurrentPlaybackPosition] = useState(0);
+  const playbackIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   // Track being previewed in list (before trim)
   const [previewingTrackUri, setPreviewingTrackUri] = useState<string | null>(null);
-  
+
   // Trim slider state - track if was playing before drag
   const wasPlayingBeforeDrag = useRef(false);
 
@@ -289,35 +299,71 @@ export function SongPickerModal({
     }
   }, [selectedPlaylist, loadPlaylistTracks]);
 
+  // Playback position tracking - update every 100ms when playing
+  useEffect(() => {
+    if (isPreviewPlaying && selectedTrack) {
+      // Start from the startPosition when we begin playing
+      setCurrentPlaybackPosition(startPosition);
+      
+      playbackIntervalRef.current = setInterval(() => {
+        setCurrentPlaybackPosition((prev) => {
+          const newPos = prev + 100;
+          // Loop back to start position if we reach the end
+          if (newPos >= selectedTrack.durationMs) {
+            return startPosition;
+          }
+          return newPos;
+        });
+      }, 100);
+    } else {
+      if (playbackIntervalRef.current) {
+        clearInterval(playbackIntervalRef.current);
+        playbackIntervalRef.current = null;
+      }
+    }
+
+    return () => {
+      if (playbackIntervalRef.current) {
+        clearInterval(playbackIntervalRef.current);
+      }
+    };
+  }, [isPreviewPlaying, selectedTrack, startPosition]);
+
   // -------------------------------------------------------------------------
   // HANDLERS
   // -------------------------------------------------------------------------
-  const handleSelectTrack = useCallback((track: SpotifyTrack) => {
-    // Stop any preview playing
-    if (previewingTrackUri) {
-      spotify.pause();
-      setPreviewingTrackUri(null);
-    }
-    setSelectedTrack(track);
-    setStartPosition(0);
-    setShowPositionPicker(true);
-    setIsPreviewPlaying(false);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  }, [previewingTrackUri]);
+  const handleSelectTrack = useCallback(
+    (track: SpotifyTrack) => {
+      // Stop any preview playing
+      if (previewingTrackUri) {
+        spotify.pause();
+        setPreviewingTrackUri(null);
+      }
+      setSelectedTrack(track);
+      setStartPosition(0);
+      setShowPositionPicker(true);
+      setIsPreviewPlaying(false);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    },
+    [previewingTrackUri]
+  );
 
   // Toggle preview for a track in the list (before selecting for trim)
-  const handleToggleListPreview = useCallback(async (track: SpotifyTrack) => {
-    if (previewingTrackUri === track.uri) {
-      // Same track - pause it
-      await spotify.pause();
-      setPreviewingTrackUri(null);
-    } else {
-      // Different track or none playing - play this one
-      await spotify.play(track.uri, 0);
-      setPreviewingTrackUri(track.uri);
-    }
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  }, [previewingTrackUri]);
+  const handleToggleListPreview = useCallback(
+    async (track: SpotifyTrack) => {
+      if (previewingTrackUri === track.uri) {
+        // Same track - pause it
+        await spotify.pause();
+        setPreviewingTrackUri(null);
+      } else {
+        // Different track or none playing - play this one
+        await spotify.play(track.uri, 0);
+        setPreviewingTrackUri(track.uri);
+      }
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    },
+    [previewingTrackUri]
+  );
 
   const handleConfirmSelection = useCallback(() => {
     if (selectedTrack) {
@@ -349,17 +395,20 @@ export function SongPickerModal({
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   }, [isPreviewPlaying]);
 
-  const handleSliderComplete = useCallback(async (value: number) => {
-    const newPosition = Math.floor(value);
-    setStartPosition(newPosition);
-    
-    // Always resume from the new position after dragging
-    if (selectedTrack) {
-      await spotify.play(selectedTrack.uri, newPosition);
-      setIsPreviewPlaying(true);
-    }
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-  }, [selectedTrack]);
+  const handleSliderComplete = useCallback(
+    async (value: number) => {
+      const newPosition = Math.floor(value);
+      setStartPosition(newPosition);
+
+      // Always resume from the new position after dragging
+      if (selectedTrack) {
+        await spotify.play(selectedTrack.uri, newPosition);
+        setIsPreviewPlaying(true);
+      }
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    },
+    [selectedTrack]
+  );
 
   const handleBackFromPlaylist = useCallback(() => {
     setSelectedPlaylist(null);
@@ -395,13 +444,15 @@ export function SongPickerModal({
       >
         {/* Header */}
         <View className="flex-row items-center justify-between px-5 pt-5 pb-4 border-b border-zinc-800">
-          <TouchableOpacity onPress={() => {
-            if (isPreviewPlaying) {
-              spotify.pause();
-              setIsPreviewPlaying(false);
-            }
-            setShowPositionPicker(false);
-          }}>
+          <TouchableOpacity
+            onPress={() => {
+              if (isPreviewPlaying) {
+                spotify.pause();
+                setIsPreviewPlaying(false);
+              }
+              setShowPositionPicker(false);
+            }}
+          >
             <Text className="text-zinc-400 text-base">Atrás</Text>
           </TouchableOpacity>
           <View className="flex-row items-center">
@@ -434,50 +485,90 @@ export function SongPickerModal({
         {/* Trim Info Card */}
         <View className="mx-5 mb-4 bg-zinc-900 rounded-xl p-4">
           <View className="flex-row items-center justify-between mb-1">
-            <Text className="text-zinc-400 text-sm">La canción empezará en:</Text>
+            <Text className="text-zinc-400 text-sm">Inicio de sincronización:</Text>
             <View className="flex-row items-center bg-green-600/20 px-3 py-1 rounded-full">
-              <Clock color="#1DB954" size={14} />
+              <Scissors color="#1DB954" size={14} />
               <Text className="text-green-500 font-mono font-bold ml-2 text-lg">
                 {formatTime(startPosition)}
               </Text>
             </View>
           </View>
           <Text className="text-zinc-600 text-xs">
-            Desliza para elegir el punto de inicio. Se cortará el audio anterior.
+            Arrastra ✂️ para marcar inicio. La bolita muestra el progreso actual.
           </Text>
         </View>
 
-        {/* Trim Slider */}
+        {/* Unified Timeline with Trim Marker and Playback Progress */}
         <View className="px-5 mb-4">
           <View className="bg-zinc-900 rounded-xl p-4">
-            <View className="flex-row items-center mb-3">
-              <View className="flex-1 h-2 bg-zinc-700 rounded-full overflow-hidden">
-                {/* Trimmed portion (red/crossed out) */}
-                <View 
-                  className="h-full bg-red-500/40"
+            {/* Timeline Container */}
+            <View className="relative h-16">
+              {/* Base track bar */}
+              <View className="absolute left-0 right-0 top-7 h-2 bg-zinc-700 rounded-full overflow-hidden">
+                {/* Trimmed/cut portion (before start position) - red with stripes */}
+                <View
+                  className="h-full bg-red-500/30"
                   style={{ width: `${(startPosition / selectedTrack.durationMs) * 100}%` }}
                 />
               </View>
-            </View>
-            
-            <Slider
-              style={{ width: '100%', height: 44 }}
-              minimumValue={0}
-              maximumValue={selectedTrack.durationMs}
-              value={startPosition}
-              onValueChange={(value) => setStartPosition(Math.floor(value))}
-              onSlidingStart={handleSliderStart}
-              onSlidingComplete={handleSliderComplete}
-              minimumTrackTintColor="#DC2626"
-              maximumTrackTintColor="#1DB954"
-              thumbTintColor="#FFFFFF"
-            />
-
-            <View className="flex-row justify-between mt-1">
-              <View className="flex-row items-center">
-                <Text className="text-red-500 text-xs font-mono line-through">0:00</Text>
-                <Text className="text-zinc-600 text-xs ml-1">cortado</Text>
+              
+              {/* Playable portion overlay (green) */}
+              <View 
+                className="absolute top-7 h-2 bg-green-600/50 rounded-r-full"
+                style={{ 
+                  left: `${(startPosition / selectedTrack.durationMs) * 100}%`,
+                  right: 0
+                }}
+              />
+              
+              {/* Playback progress indicator (small circle) */}
+              {isPreviewPlaying && (
+                <View 
+                  className="absolute top-5 w-4 h-4 bg-white rounded-full shadow-lg z-10"
+                  style={{ 
+                    left: `${(currentPlaybackPosition / selectedTrack.durationMs) * 100}%`,
+                    marginLeft: -8
+                  }}
+                />
+              )}
+              
+              {/* Trim/Cut marker (scissors line) - draggable */}
+              <View 
+                className="absolute top-0 bottom-0 items-center z-20"
+                style={{ 
+                  left: `${(startPosition / selectedTrack.durationMs) * 100}%`,
+                  marginLeft: -12
+                }}
+              >
+                {/* Scissors icon at top */}
+                <View className="bg-red-600 rounded-full p-1 mb-1">
+                  <Scissors color="#FFFFFF" size={14} />
+                </View>
+                {/* Vertical cut line */}
+                <View className="w-0.5 flex-1 bg-red-500" />
               </View>
+              
+              {/* Invisible slider for trim control */}
+              <Slider
+                style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, zIndex: 30 }}
+                minimumValue={0}
+                maximumValue={selectedTrack.durationMs}
+                value={startPosition}
+                onValueChange={(value) => setStartPosition(Math.floor(value))}
+                onSlidingStart={handleSliderStart}
+                onSlidingComplete={handleSliderComplete}
+                minimumTrackTintColor="transparent"
+                maximumTrackTintColor="transparent"
+                thumbTintColor="transparent"
+              />
+            </View>
+
+            {/* Time labels */}
+            <View className="flex-row justify-between mt-2">
+              <Text className="text-red-500/60 text-xs font-mono">0:00</Text>
+              <Text className="text-zinc-500 text-xs font-mono">
+                {isPreviewPlaying ? formatTime(currentPlaybackPosition) : '--:--'}
+              </Text>
               <Text className="text-green-500 text-xs font-mono">
                 {formatTime(selectedTrack.durationMs)}
               </Text>
@@ -501,7 +592,9 @@ export function SongPickerModal({
             ) : (
               <>
                 <Play color="#1DB954" size={22} />
-                <Text className="text-white font-bold ml-3">Escuchar desde {formatTime(startPosition)}</Text>
+                <Text className="text-white font-bold ml-3">
+                  Escuchar desde {formatTime(startPosition)}
+                </Text>
               </>
             )}
           </TouchableOpacity>
@@ -517,7 +610,7 @@ export function SongPickerModal({
             <Text className="text-white font-bold text-base ml-2">Usar esta canción</Text>
           </TouchableOpacity>
         </View>
-        
+
         {/* Duration indicator */}
         <View className="px-5 mt-4">
           <Text className="text-zinc-600 text-center text-xs">
