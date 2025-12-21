@@ -95,14 +95,26 @@ const HankWrapper = ({ children }: { children: React.ReactNode }) => {
     return <>{children}</>;
   }
 
+  return <HankProvider userId={user.id}>{children}</HankProvider>;
+};
+
+// ============================================================================
+// 5. OVERLAYS WRAPPER - Renderiza overlays dentro del contexto de navegación
+// Estos componentes usan usePathname() que requiere estar dentro del Slot
+// ============================================================================
+const OverlaysWrapper = () => {
+  const { user, loading } = useAuth();
+
+  // Solo mostrar overlays si hay usuario autenticado
+  if (loading || !user) {
+    return null;
+  }
+
   return (
-    <HankProvider userId={user.id}>
-      {children}
-      {/* HANK Overlay - Visible en todas partes excepto Feed */}
+    <>
       <HankOverlay />
-      {/* SPOTIFY Overlay - Visible en todas partes excepto Feed */}
       <SpotifyOverlay />
-    </HankProvider>
+    </>
   );
 };
 
@@ -116,6 +128,7 @@ export default function RootLayout() {
               <HankWrapper>
                 <View className="flex-1 bg-savage-black">
                   <Slot />
+                  <OverlaysWrapper />
                   <StatusBar style="light" />
                 </View>
               </HankWrapper>

@@ -759,7 +759,16 @@ const HankTakeover: React.FC<{ isActive: boolean; statusText: string }> = ({
 // MAIN COMPONENT: HANK OVERLAY
 // ============================================================================
 export const HankOverlay: React.FC = () => {
-  const pathname = usePathname();
+  // IMPORTANTE: usePathname debe llamarse primero
+  // Si el contexto de navegación no está disponible, no renderizar
+  let pathname: string | null = null;
+  try {
+    pathname = usePathname();
+  } catch {
+    // Si falla usePathname, el contexto de navegación no está disponible
+    return null;
+  }
+
   const [isOpen, setIsOpen] = useState(false);
   const [inputText, setInputText] = useState('');
   const [isListening, setIsListening] = useState(false);

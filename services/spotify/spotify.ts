@@ -226,12 +226,26 @@ class SpotifyService {
     try {
       // Si ya está conectado y el token no ha expirado, no recargar
       if (this.isConnected && this.accessToken && this.expiresAt > Date.now()) {
+        console.log('🎵 loadStoredTokens: Ya conectado con token válido');
         return true;
       }
 
       const stored = await AsyncStorage.getItem(STORAGE_KEY);
+      console.log('🎵 loadStoredTokens: stored=', stored ? 'EXISTS' : 'NULL');
+
       if (stored) {
         const tokens: StoredToken = JSON.parse(stored);
+        const now = Date.now();
+        const expiresIn = tokens.expiresAt - now;
+        console.log(
+          '🎵 loadStoredTokens: expiresAt=',
+          tokens.expiresAt,
+          'now=',
+          now,
+          'expiresIn=',
+          Math.floor(expiresIn / 1000),
+          'seg'
+        );
 
         // Verificar si el token aún es válido
         if (tokens.expiresAt > Date.now()) {
@@ -245,8 +259,12 @@ class SpotifyService {
           this.isConnected = true;
           return true;
         } else if (tokens.refreshToken) {
-          // Intentar refrescar el token
+          // Token expirado - asignar refresh token ANTES de refrescar
+          this.refreshToken = tokens.refreshToken;
+          console.log('🎵 loadStoredTokens: Token expirado, intentando refrescar...');
           return await this.refreshAccessToken();
+        } else {
+          console.log('🎵 loadStoredTokens: Token expirado y sin refresh token');
         }
       }
       return false;
@@ -279,10 +297,16 @@ class SpotifyService {
   private isRefreshing = false;
 
   async refreshAccessToken(): Promise<boolean> {
-    if (!this.refreshToken) return false;
+    console.log('🎵 refreshAccessToken: Iniciando...');
+
+    if (!this.refreshToken) {
+      console.log('🎵 refreshAccessToken: No hay refresh token');
+      return false;
+    }
 
     // Evitar múltiples refreshes concurrentes
     if (this.isRefreshing) {
+      console.log('🎵 refreshAccessToken: Ya hay un refresh en curso, esperando...');
       // Esperar a que termine el refresh en curso
       await new Promise((resolve) => setTimeout(resolve, 1000));
       return this.isConnected && !!this.accessToken;
@@ -291,6 +315,7 @@ class SpotifyService {
     this.isRefreshing = true;
 
     try {
+      console.log('🎵 refreshAccessToken: Llamando a AuthSession.refreshAsync...');
       const result = await AuthSession.refreshAsync(
         {
           clientId: SPOTIFY_CLIENT_ID,
@@ -299,6 +324,7 @@ class SpotifyService {
         discovery
       );
 
+      console.log('🎵 refreshAccessToken: ✅ Token refrescado exitosamente');
       this.accessToken = result.accessToken;
       this.refreshToken = result.refreshToken || this.refreshToken;
       this.expiresAt = Date.now() + (result.expiresIn || 3600) * 1000;
@@ -307,6 +333,7 @@ class SpotifyService {
       await this.saveTokens();
       return true;
     } catch (error: any) {
+      console.error('🎵 refreshAccessToken: ❌ Error:', error?.message || error);
       // Si el refresh token fue revocado, limpiar todo y forzar re-login
       const errorMessage = error?.message || '';
       if (errorMessage.includes('revoked') || errorMessage.includes('invalid')) {
@@ -590,11 +617,15 @@ class SpotifyService {
    * @param positionMs - Posición donde empezar (capturada durante grabación)
    */
   async syncWithVideo(trackUri: string, positionMs: number): Promise<boolean> {
+    console.log('🎵 syncWithVideo called:', { trackUri, positionMs });
+
     // Verificar que tenemos token válido antes de intentar
     if (!this.isTokenValid()) {
+      console.log('🎵 syncWithVideo: Token no válido, intentando cargar...');
       // Intentar cargar token desde storage
       const loaded = await this.loadStoredTokens();
       if (!loaded) {
+        console.log('🎵 syncWithVideo: No se pudo cargar token');
         return false;
       }
     }
@@ -602,9 +633,11 @@ class SpotifyService {
     try {
       // Primero verificar si hay un dispositivo activo
       const devices = await this.getDevices();
+      console.log('🎵 syncWithVideo: Dispositivos encontrados:', devices.length);
       const activeDevice = devices.find((d) => d.is_active) || devices[0];
 
       if (!activeDevice) {
+        console.log('🎵 syncWithVideo: No hay dispositivo activo');
         const now = Date.now();
         if (now - this.lastAlertTime > this.ALERT_COOLDOWN) {
           this.lastAlertTime = now;
@@ -619,13 +652,17 @@ class SpotifyService {
 
       // Transferir a dispositivo si no está activo
       if (!devices.find((d) => d.is_active)) {
+        console.log('🎵 syncWithVideo: Transfiriendo playback a:', activeDevice.name);
         await this.transferPlayback(activeDevice.id, false);
       }
 
       // Iniciar reproducción en la canción y posición específica
+      console.log('🎵 syncWithVideo: Iniciando reproducción...');
       await this.play(trackUri, positionMs);
+      console.log('🎵 syncWithVideo: ✅ Reproducción iniciada');
       return true;
     } catch (error) {
+      console.error('🎵 syncWithVideo error:', error);
       // Silenciar errores de sync - no es crítico
       return false;
     }

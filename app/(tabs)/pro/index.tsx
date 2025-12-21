@@ -21,7 +21,6 @@ import { useProContext } from '../../../context/ProContext';
 import { useHank } from '../../../context/HankContext';
 import { ProUpgradeModal } from '../../../components/pro/ProUpgradeModal';
 import { FullscreenVideoEditor } from '../../../components/pro/FullscreenVideoEditor';
-import { SongPickerModal } from '../../../components/spotify/SongPickerModal';
 import spotify from '../../../services/spotify/spotify';
 import cloudflareStream from '../../../services/cloudflare/stream';
 
@@ -42,6 +41,7 @@ interface SpotifyMetadata {
   trackName: string;
   artist: string;
   albumArt?: string;
+  durationMs?: number;
 }
 
 // ============================================================================
@@ -69,11 +69,9 @@ export default function ProScreen() {
   // Editor Modal State
   const [editorVisible, setEditorVisible] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [showSongPicker, setShowSongPicker] = useState(false);
 
-  // Spotify State
+  // Spotify State - solo para auto-detección inicial
   const [spotifyMetadata, setSpotifyMetadata] = useState<SpotifyMetadata | null>(null);
-  const [wasAutoDetected, setWasAutoDetected] = useState(false);
 
   // Timer ref
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -93,12 +91,11 @@ export default function ProScreen() {
               trackName: playbackState.track.name,
               artist: playbackState.track.artist,
               albumArt: playbackState.track.albumArt,
+              durationMs: playbackState.track.durationMs || 240000,
             });
-            setWasAutoDetected(true);
           } else {
             // No hay música reproduciéndose - no auto-detectar
             setSpotifyMetadata(null);
-            setWasAutoDetected(false);
           }
         } catch (error) {
           console.warn('No se pudo capturar metadata de Spotify:', error);
@@ -222,9 +219,9 @@ export default function ProScreen() {
             trackName: playbackState.track.name,
             artist: playbackState.track.artist,
             albumArt: playbackState.track.albumArt,
+            durationMs: playbackState.track.durationMs || 240000,
           };
           setSpotifyMetadata(capturedMetadata);
-          setWasAutoDetected(true);
           console.warn(
             '🎵 Spotify metadata capturado (reproduciendo):',
             capturedMetadata.trackName,
@@ -266,7 +263,6 @@ export default function ProScreen() {
       console.error('Error recording:', error);
       setIsRecording(false);
       setSpotifyMetadata(null);
-      setWasAutoDetected(false);
       if (timerRef.current) {
         clearInterval(timerRef.current);
       }
@@ -287,29 +283,8 @@ export default function ProScreen() {
     setCapturedVideo(null);
     setEditorVisible(false);
     setSpotifyMetadata(null);
-    setWasAutoDetected(false);
-    setShowSongPicker(false);
     clearContext();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  };
-
-  // Handler para selección de canción desde el SongPicker
-  const handleSongSelected = (track: {
-    uri: string;
-    name: string;
-    artist: string;
-    albumArt?: string;
-  }, startPositionMs: number) => {
-    setSpotifyMetadata({
-      enabled: true,
-      trackUri: track.uri,
-      positionMs: startPositionMs,
-      trackName: track.name,
-      artist: track.artist,
-      albumArt: track.albumArt,
-    });
-    setWasAutoDetected(false); // El usuario eligió manualmente
-    setShowSongPicker(false);
   };
 
   // -------------------------------------------------------------------------
@@ -318,8 +293,7 @@ export default function ProScreen() {
   const handleEditorSave = async (data: {
     videoTrimStart: number;
     videoTrimEnd: number;
-    spotifyEnabled: boolean;
-    spotifyStartMs: number;
+    spotifyTrack: SpotifyMetadata | null;
     isPublic: boolean;
   }) => {
     if (!isPro) {
@@ -361,16 +335,15 @@ export default function ProScreen() {
           context_type: proContext.type,
           exercise_id: proContext.type === 'tactical' ? proContext.exerciseId : null,
           exercise_name: proContext.type === 'tactical' ? proContext.exerciseName : null,
-          spotify:
-            data.spotifyEnabled && spotifyMetadata
-              ? {
-                  enabled: true,
-                  trackUri: spotifyMetadata.trackUri,
-                  positionMs: data.spotifyStartMs,
-                  trackName: spotifyMetadata.trackName,
-                  artist: spotifyMetadata.artist,
-                }
-              : { enabled: false },
+          spotify: data.spotifyTrack
+            ? {
+                enabled: true,
+                trackUri: data.spotifyTrack.trackUri,
+                positionMs: data.spotifyTrack.positionMs,
+                trackName: data.spotifyTrack.trackName,
+                artist: data.spotifyTrack.artist,
+              }
+            : { enabled: false },
           ambient_audio: true,
           is_public: data.isPublic,
           trim_start_percent: Math.round(data.videoTrimStart),
@@ -392,8 +365,7 @@ export default function ProScreen() {
             proContext.type === 'tactical' && proContext.exerciseName
               ? proContext.exerciseName
               : 'Entrenamiento';
-          const spotifyInfo =
-            data.spotifyEnabled && spotifyMetadata ? ` 🎵 ${spotifyMetadata.trackName}` : '';
+          const spotifyInfo = data.spotifyTrack ? ` 🎵 ${data.spotifyTrack.trackName}` : '';
 
           await Sharing.shareAsync(capturedVideo.uri, {
             mimeType: 'video/mp4',
@@ -578,30 +550,10 @@ export default function ProScreen() {
           visible={editorVisible}
           videoData={capturedVideo}
           spotifyMetadata={spotifyMetadata}
-          wasAutoDetected={wasAutoDetected}
+          spotifyConnected={spotifyConnected}
           onClose={discardVideo}
-          onOpenSongPicker={() => setShowSongPicker(true)}
           onSave={handleEditorSave}
           saving={saving}
-        />
-
-        {/* Song Picker Modal */}
-        <SongPickerModal
-          visible={showSongPicker}
-          onClose={() => setShowSongPicker(false)}
-          onSelectSong={handleSongSelected}
-          currentTrack={
-            spotifyMetadata
-              ? {
-                  uri: spotifyMetadata.trackUri,
-                  name: spotifyMetadata.trackName,
-                  artist: spotifyMetadata.artist,
-                  album: '',
-                  albumArt: spotifyMetadata.albumArt || '',
-                  durationMs: 0,
-                }
-              : null
-          }
         />
 
         {/* PRO Upgrade Modal para usuarios FREE */}

@@ -116,6 +116,19 @@ const FeedVideoItem = memo(
       spotifyPremium &&
       isPro
     );
+
+    // Debug log
+    if (item.spotify?.enabled) {
+      console.log('🎵 Feed hasSpotifySync check:', {
+        videoId: item.id,
+        spotifyEnabled: item.spotify?.enabled,
+        trackUri: item.spotify?.trackUri,
+        spotifyPremium,
+        isPro,
+        hasSpotifySync,
+      });
+    }
+
     const [isVideoLoading, setIsVideoLoading] = useState(true);
     const [videoError, setVideoError] = useState<string | null>(null);
     const hasBeenReady = useRef(false); // Una vez listo, no volver a loading
@@ -168,6 +181,7 @@ const FeedVideoItem = memo(
         // Si tiene Spotify, usuario es PRO y Premium, sincronizar desde posición exacta
         if (hasSpotifySync) {
           const positionMs = item.spotify!.positionMs || 0;
+          console.log('🎵 Feed: Iniciando sync para video', item.id, 'en', positionMs, 'ms');
           spotify.syncWithVideo(item.spotify!.trackUri!, positionMs).catch(console.warn);
         }
       } else {

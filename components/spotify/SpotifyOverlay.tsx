@@ -26,16 +26,25 @@ import { useUserRoleContext } from '../../context/UserRoleContext';
 // COMPONENTE PRINCIPAL
 // ============================================================================
 export function SpotifyOverlay() {
-  const pathname = usePathname();
+  // IMPORTANTE: usePathname debe llamarse antes de cualquier early return
+  // para mantener el orden de hooks consistente
+  let pathname: string | null = null;
+  try {
+    pathname = usePathname();
+  } catch {
+    // Si falla usePathname, el contexto de navegación no está disponible
+    return null;
+  }
+
   const {
     isPro,
     spotifyConnected: contextSpotifyConnected,
     updateSpotifyStatus,
   } = useUserRoleContext();
 
-  // Estados
+  // Estados - inicializar con valor del contexto
   const [modalVisible, setModalVisible] = useState(false);
-  const [spotifyConnected, setSpotifyConnected] = useState(false);
+  const [spotifyConnected, setSpotifyConnected] = useState(contextSpotifyConnected);
   const [spotifyLoading, setSpotifyLoading] = useState(false);
   const [currentTrack, setCurrentTrack] = useState<SpotifyTrack | null>(null);
   const [playbackState, setPlaybackState] = useState<SpotifyPlaybackState | null>(null);
@@ -52,7 +61,8 @@ export function SpotifyOverlay() {
   // -------------------------------------------------------------------------
   useEffect(() => {
     const checkSpotifyStatus = async () => {
-      const connected = await spotify.isTokenValid();
+      // Usar el estado del contexto que ya validó los tokens
+      const connected = contextSpotifyConnected ?? (await spotify.isTokenValid());
       setSpotifyConnected(connected);
 
       if (connected) {
@@ -63,11 +73,6 @@ export function SpotifyOverlay() {
     };
 
     checkSpotifyStatus();
-
-    // Sincronizar con contexto
-    if (contextSpotifyConnected !== undefined) {
-      setSpotifyConnected(contextSpotifyConnected);
-    }
   }, [contextSpotifyConnected]);
 
   // -------------------------------------------------------------------------
@@ -301,22 +306,24 @@ export function SpotifyOverlay() {
         )}
       </View>
 
-      {/* MODAL DE SPOTIFY */}
-      <SpotifyModal
-        visible={modalVisible}
-        onClose={() => setModalVisible(false)}
-        isPro={isPro}
-        onSpotifyConnect={handleSpotifyConnect}
-        onSpotifyDisconnect={handleSpotifyDisconnect}
-        spotifyConnected={spotifyConnected}
-        spotifyLoading={spotifyLoading}
-        currentTrack={currentTrack}
-        playbackState={playbackState}
-        onPlayPause={handlePlayPause}
-        onNext={handleNext}
-        onPrevious={handlePrevious}
-        onTrackChange={handleTrackChange}
-      />
+      {/* MODAL DE SPOTIFY - Solo renderizar cuando es visible */}
+      {modalVisible && (
+        <SpotifyModal
+          visible={modalVisible}
+          onClose={() => setModalVisible(false)}
+          isPro={isPro}
+          onSpotifyConnect={handleSpotifyConnect}
+          onSpotifyDisconnect={handleSpotifyDisconnect}
+          spotifyConnected={spotifyConnected}
+          spotifyLoading={spotifyLoading}
+          currentTrack={currentTrack}
+          playbackState={playbackState}
+          onPlayPause={handlePlayPause}
+          onNext={handleNext}
+          onPrevious={handlePrevious}
+          onTrackChange={handleTrackChange}
+        />
+      )}
     </>
   );
 }
