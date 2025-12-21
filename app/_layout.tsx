@@ -10,6 +10,7 @@ import { HankOverlay } from '../components/hank/HankOverlay';
 import { SpotifyOverlay } from '../components/spotify/SpotifyOverlay';
 import { ProContextProvider, useProContext } from '../context/ProContext';
 import { UserRoleProvider, useUserRoleContext } from '../context/UserRoleContext';
+import { useDeepLinkHandler } from '../services/share/deepLinkHandler';
 import '../global.css';
 
 // ============================================================================
@@ -85,6 +86,9 @@ export { useProContext } from '../context/ProContext';
 // ============================================================================
 const HankWrapper = ({ children }: { children: React.ReactNode }) => {
   const { user, loading } = useAuth();
+
+  // Manejar deep links entrantes
+  useDeepLinkHandler();
 
   // Si está cargando o no hay usuario, no montar HankProvider
   if (loading || !user) {

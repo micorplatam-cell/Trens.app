@@ -38,6 +38,7 @@ import TrensID from '../../../components/adn/TrensID';
 import RecordCard from '../../../components/adn/RecordCard';
 import AddRecordModal from '../../../components/adn/AddRecordModal';
 import { ProUpgradeModal } from '../../../components/pro/ProUpgradeModal';
+import { ShareModal } from '../../../components/share/ShareModal';
 
 // ============================================================================
 // TIPOS
@@ -142,6 +143,9 @@ export default function AdnScreen() {
   // Video options modal
   const [videoOptionsVisible, setVideoOptionsVisible] = useState(false);
   const [selectedVideoForEdit, setSelectedVideoForEdit] = useState<Video | null>(null);
+
+  // Share modal state
+  const [shareModalVisible, setShareModalVisible] = useState(false);
 
   // Video player para el viewer
   const videoSource = selectedVideo?.video_url || '';
@@ -1059,18 +1063,15 @@ export default function AdnScreen() {
 
             {/* Compartir */}
             <TouchableOpacity
-              onPress={async () => {
-                if (selectedVideoForEdit?.video_url) {
-                  await Share.share({
-                    url: selectedVideoForEdit.video_url,
-                    message: `🏋️ ${selectedVideoForEdit.title}\n#TRENS`,
-                  });
-                }
+              onPress={() => {
+                setVideoOptionsVisible(false);
+                setTimeout(() => setShareModalVisible(true), 300);
               }}
               className="flex-row items-center p-4 bg-zinc-900 rounded-xl mb-3"
             >
               <Share2 size={20} color="#DC2626" />
               <Text className="text-white ml-3 flex-1">Compartir</Text>
+              <Text className="text-zinc-500 text-xs">🔗 Link</Text>
             </TouchableOpacity>
 
             {/* Eliminar */}
@@ -1090,6 +1091,18 @@ export default function AdnScreen() {
         visible={showUpgradeModal}
         onClose={() => setShowUpgradeModal(false)}
         feature="vault"
+      />
+
+      {/* Share Modal */}
+      <ShareModal
+        visible={shareModalVisible}
+        onClose={() => setShareModalVisible(false)}
+        videoId={selectedVideoForEdit?.id || ''}
+        title={selectedVideoForEdit?.title}
+        exerciseName={selectedVideoForEdit?.exercise_name}
+        weightKg={selectedVideoForEdit?.weight_kg}
+        reps={selectedVideoForEdit?.reps}
+        thumbnailUrl={selectedVideoForEdit?.thumbnail_url}
       />
     </View>
   );

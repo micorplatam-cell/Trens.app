@@ -1,0 +1,22 @@
+# =============================================================================
+# TRENS VIDEO SHARE WORKER
+# Sirve páginas de video con Open Graph meta tags para compartir en redes
+# =============================================================================
+
+name = "trens-video-share"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+
+# Rutas que maneja este worker
+# Ejemplo: share.trens.app/v/abc123 o trens.app/v/abc123
+# [routes]
+# routes = [
+#   { pattern = "share.trens.app/*", zone_name = "trens.app" }
+# ]
+
+[vars]
+ENVIRONMENT = "production"
+
+# Bindings a Supabase (se configuran en dashboard o con secrets)
+# SUPABASE_URL = ""
+# SUPABASE_ANON_KEY = ""
