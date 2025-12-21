@@ -2,33 +2,20 @@ import {
   View,
   Text,
   TouchableOpacity,
-  Modal,
-  TextInput,
   ActivityIndicator,
-  ScrollView,
-  Switch,
 } from 'react-native';
 import * as Sharing from 'expo-sharing';
 import {
-  X,
   RotateCcw,
   Zap,
   ZapOff,
-  Scissors,
-  Palette,
-  Type,
-  Eye,
-  Share2,
-  Crosshair,
   Music,
-  Volume2,
   Lock,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { CameraView, useCameraPermissions, FlashMode } from 'expo-camera';
 import { Audio } from 'expo-av';
-import { VideoView, useVideoPlayer } from 'expo-video';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
@@ -44,24 +31,18 @@ import { useUserRoleContext } from '../../../context/UserRoleContext';
 import { useProContext } from '../../../context/ProContext';
 import { useHank } from '../../../context/HankContext';
 import { ProUpgradeModal } from '../../../components/pro/ProUpgradeModal';
-import { SongPickerModal } from '../../../components/spotify/SongPickerModal';
+import { FullscreenVideoEditor } from '../../../components/pro/FullscreenVideoEditor';
 import spotify from '../../../services/spotify/spotify';
 import cloudflareStream from '../../../services/cloudflare/stream';
 
 // ============================================================================
 // TIPOS
 // ============================================================================
-type FilterType = 'RAW' | 'CONTRAST' | 'SAVAGE' | 'CHROME';
 
 interface VideoData {
   uri: string;
   duration: number;
   timestamp: Date;
-}
-
-interface TrimRange {
-  start: number;
-  end: number;
 }
 
 interface SpotifyMetadata {
@@ -74,20 +55,10 @@ interface SpotifyMetadata {
 }
 
 // ============================================================================
-// CONSTANTES
-// ============================================================================
-const FILTERS: { id: FilterType; name: string; style: object }[] = [
-  { id: 'RAW', name: 'RAW', style: {} },
-  { id: 'CONTRAST', name: 'B&N', style: { filter: 'grayscale(1) contrast(1.3)' } },
-  { id: 'SAVAGE', name: 'SAVAGE', style: { filter: 'saturate(0.7) hue-rotate(-10deg)' } },
-  { id: 'CHROME', name: 'CHROME', style: { filter: 'saturate(1.2) hue-rotate(180deg)' } },
-];
-
-// ============================================================================
 // MAIN COMPONENT
 // ============================================================================
 export default function ProScreen() {
-  const { user, isPro, isFree, permissions, spotifyPremium, spotifyConnected } =
+  const { user, isPro, spotifyPremium, spotifyConnected } =
     useUserRoleContext();
   const { context: proContext, clearContext } = useProContext();
   const { triggerRefresh } = useHank();
@@ -106,35 +77,12 @@ export default function ProScreen() {
   // Video Data
   const [capturedVideo, setCapturedVideo] = useState<VideoData | null>(null);
 
-  // Post-Recording Overlay State
-  const [overlayVisible, setOverlayVisible] = useState(false);
-  const [selectedFilter, setSelectedFilter] = useState<FilterType>('RAW');
-  const [trimRange, setTrimRange] = useState<TrimRange>({ start: 0, end: 100 });
-  const [showTrimTool, setShowTrimTool] = useState(false);
-
-  // Data Overlay Inputs (Contexto Táctico)
-  const [weight, setWeight] = useState('');
-  const [reps, setReps] = useState('');
-
-  // Texto libre (Contexto Libre)
-  const [freeText, setFreeText] = useState('');
-  const [showTextInput, setShowTextInput] = useState(false);
-
-  // Publicación - Switch principal según MASTER
-  // true = Publicar en TRENS (Público)
-  // false = Guardar en la Bóveda (Privado)
-  const [isPublic, setIsPublic] = useState(true);
+  // Editor Modal State
+  const [editorVisible, setEditorVisible] = useState(false);
   const [saving, setSaving] = useState(false);
 
   // Spotify State
   const [spotifyMetadata, setSpotifyMetadata] = useState<SpotifyMetadata | null>(null);
-  const [attachSpotify, setAttachSpotify] = useState(true);
-  const [wasAutoDetected, setWasAutoDetected] = useState(false); // true si se detectó automáticamente
-  const [showSongPicker, setShowSongPicker] = useState(false); // Modal para elegir canción
-  const [customStartPosition, setCustomStartPosition] = useState(0); // Posición de inicio personalizada
-
-  // Audio Mode: 'spotify' | 'ambient'
-  const [audioMode, setAudioMode] = useState<'spotify' | 'ambient'>('spotify');
 
   // Timer ref
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -155,11 +103,9 @@ export default function ProScreen() {
               artist: playbackState.track.artist,
               albumArt: playbackState.track.albumArt,
             });
-            setWasAutoDetected(true);
           } else {
             // No hay música reproduciéndose - no auto-detectar
             setSpotifyMetadata(null);
-            setWasAutoDetected(false);
           }
         } catch (error) {
           console.warn('No se pudo capturar metadata de Spotify:', error);
@@ -173,11 +119,6 @@ export default function ProScreen() {
   // Animation - Breathing effect para el shutter
   const shutterScale = useSharedValue(1);
   const pulseOpacity = useSharedValue(0.5);
-
-  // Video Player
-  const videoPlayer = useVideoPlayer(capturedVideo?.uri || '', (player) => {
-    player.loop = true;
-  });
 
   // -------------------------------------------------------------------------
   // ANIMATIONS
@@ -290,7 +231,6 @@ export default function ProScreen() {
             albumArt: playbackState.track.albumArt,
           };
           setSpotifyMetadata(capturedMetadata);
-          setWasAutoDetected(true);
           console.warn(
             '🎵 Spotify metadata capturado (reproduciendo):',
             capturedMetadata.trackName,
@@ -301,10 +241,6 @@ export default function ProScreen() {
         } else {
           // Spotify está en pausa - NO auto-detectar
           console.warn('🎵 Spotify en pausa - no se detectó canción automáticamente');
-          // Mantenemos cualquier metadata previo si el usuario ya eligió una canción
-          if (!spotifyMetadata) {
-            setWasAutoDetected(false);
-          }
         }
       } catch (error) {
         console.warn('No se pudo capturar metadata de Spotify:', error);
@@ -330,7 +266,7 @@ export default function ProScreen() {
         duration: recordingTime,
         timestamp: new Date(),
       });
-      setOverlayVisible(true); // Mostrar overlay post-grabación
+      setEditorVisible(true); // Mostrar editor fullscreen
       setIsRecording(false);
     } catch (error) {
       console.error('Error recording:', error);
@@ -350,37 +286,27 @@ export default function ProScreen() {
   };
 
   // -------------------------------------------------------------------------
-  // OVERLAY HANDLERS
+  // EDITOR HANDLERS
   // -------------------------------------------------------------------------
   const discardVideo = () => {
     setCapturedVideo(null);
-    setOverlayVisible(false);
-    setSelectedFilter('RAW');
-    setTrimRange({ start: 0, end: 100 });
-    setWeight('');
-    setReps('');
-    setFreeText('');
-    setShowTrimTool(false);
-    setShowTextInput(false);
+    setEditorVisible(false);
     setSpotifyMetadata(null);
-    setAttachSpotify(true);
-    setWasAutoDetected(false);
-    setShowSongPicker(false);
-    setCustomStartPosition(0);
-    setIsPublic(true);
     clearContext();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
   // -------------------------------------------------------------------------
-  // SAVE/SHARE HANDLERS - Según MASTER
-  // Al compartir: El video se guarda + respeta Público/Bóveda
-  // FREE puede grabar pero NO guardar/compartir
-  // USA CLOUDFLARE STREAM para transcoding y adaptive bitrate
+  // SAVE/SHARE HANDLERS - Usa Cloudflare Stream
   // -------------------------------------------------------------------------
-  const saveVideo = async (share: boolean = false) => {
-    // Si es FREE, mostrar modal de upgrade
-    if (isFree || !permissions.canPublish) {
+  const handleEditorSave = async (data: {
+    videoTrimStart: number;
+    videoTrimEnd: number;
+    spotifyEnabled: boolean;
+    spotifyStartMs: number;
+    isPublic: boolean;
+  }) => {
+    if (!isPro) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
       setShowUpgradeModal(true);
       return;
@@ -397,7 +323,7 @@ export default function ProScreen() {
         name: `TRENS_${user.id}_${Date.now()}`,
         exerciseName: proContext.type === 'tactical' ? proContext.exerciseName : undefined,
         userId: user.id,
-        isPublic: isPublic,
+        isPublic: data.isPublic,
       });
 
       if (!uploadResult.success || !uploadResult.videoId) {
@@ -412,31 +338,27 @@ export default function ProScreen() {
         .from('pro_videos')
         .insert({
           user_id: user.id,
-          video_url: playbackUrls.hls, // URL HLS para adaptive bitrate
-          thumbnail_url: playbackUrls.thumbnail, // Thumbnail automático
-          cloudflare_video_id: uploadResult.videoId, // ID de Cloudflare Stream
+          video_url: playbackUrls.hls,
+          thumbnail_url: playbackUrls.thumbnail,
+          cloudflare_video_id: uploadResult.videoId,
           duration_seconds: Math.round(capturedVideo.duration),
           context_type: proContext.type,
           exercise_id: proContext.type === 'tactical' ? proContext.exerciseId : null,
           exercise_name: proContext.type === 'tactical' ? proContext.exerciseName : null,
-          weight_kg: weight ? parseFloat(weight) : null,
-          reps: reps ? parseInt(reps) : null,
-          free_text: proContext.type === 'free' ? freeText : null,
-          filter: selectedFilter,
           spotify:
-            attachSpotify && spotifyMetadata
+            data.spotifyEnabled && spotifyMetadata
               ? {
                   enabled: true,
                   trackUri: spotifyMetadata.trackUri,
-                  positionMs: spotifyMetadata.positionMs,
+                  positionMs: data.spotifyStartMs,
                   trackName: spotifyMetadata.trackName,
                   artist: spotifyMetadata.artist,
                 }
               : { enabled: false },
           ambient_audio: true,
-          is_public: isPublic, // Según switch: Público o Bóveda
-          trim_start_percent: Math.round(trimRange.start),
-          trim_end_percent: Math.round(trimRange.end),
+          is_public: data.isPublic,
+          trim_start_percent: Math.round(data.videoTrimStart),
+          trim_end_percent: Math.round(data.videoTrimEnd),
         })
         .select()
         .single();
@@ -446,44 +368,25 @@ export default function ProScreen() {
         throw insertError;
       }
 
-      // 4. COMPARTIR SI SE SOLICITA
-      // Compartimos el VIDEO REAL usando expo-sharing
-      if (share && capturedVideo?.uri) {
-        // Verificar si compartir está disponible
+      // 4. COMPARTIR SI ES PÚBLICO
+      if (data.isPublic && capturedVideo?.uri) {
         const isSharingAvailable = await Sharing.isAvailableAsync();
         if (isSharingAvailable) {
-          // Generar mensaje con metadata
-          const exerciseInfo =
-            proContext.type === 'tactical' && proContext.exerciseName
-              ? proContext.exerciseName
-              : 'Entrenamiento';
-          const weightInfo = weight ? `${weight}kg` : '';
-          const repsInfo = reps ? `x${reps}` : '';
-          const dateInfo = new Date().toLocaleDateString('es-ES', {
-            day: '2-digit',
-            month: 'short',
-            year: 'numeric',
-          });
-          const spotifyInfo =
-            attachSpotify && spotifyMetadata ? ` 🎵 ${spotifyMetadata.trackName}` : '';
-
-          const shareTitle =
-            proContext.type === 'tactical'
-              ? `🏋️ ${exerciseInfo} ${weightInfo} ${repsInfo} - ${dateInfo}${spotifyInfo} #TRENS`
-              : `💪 ${freeText || 'Día de entreno'} - ${dateInfo}${spotifyInfo} #TRENS`;
+          const exerciseInfo = proContext.type === 'tactical' && proContext.exerciseName
+            ? proContext.exerciseName
+            : 'Entrenamiento';
+          const spotifyInfo = data.spotifyEnabled && spotifyMetadata
+            ? ` 🎵 ${spotifyMetadata.trackName}`
+            : '';
 
           await Sharing.shareAsync(capturedVideo.uri, {
             mimeType: 'video/mp4',
-            dialogTitle: shareTitle,
+            dialogTitle: `🏋️ ${exerciseInfo}${spotifyInfo} #TRENS`,
           });
-        } else {
-          console.warn('Sharing no disponible en este dispositivo');
         }
       }
 
-      // 5. DISPARAR REFRESH PARA QUE ADN SE ACTUALICE
       triggerRefresh();
-
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       discardVideo();
     } catch (error) {
@@ -515,319 +418,6 @@ export default function ProScreen() {
     }
     return 'REC: CÁMARA LIBRE';
   };
-
-  const getCurrentDate = (): string => {
-    const now = new Date();
-    return now
-      .toLocaleDateString('es-ES', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric',
-      })
-      .toUpperCase();
-  };
-
-  // -------------------------------------------------------------------------
-  // RENDER: CAMERA (VIEWFINDER)
-  // -------------------------------------------------------------------------
-  // -------------------------------------------------------------------------
-  // RENDER: POST-RECORDING OVERLAY (No pantalla nueva, es OVERLAY)
-  // -------------------------------------------------------------------------
-  const renderOverlay = () => (
-    <Modal visible={overlayVisible} animationType="fade" presentationStyle="fullScreen">
-      <View className="flex-1 bg-black">
-        {/* VIDEO PREVIEW */}
-        <View className="flex-1">
-          {capturedVideo && (
-            <VideoView
-              player={videoPlayer}
-              style={{ flex: 1 }}
-              contentFit="contain"
-              nativeControls={false}
-            />
-          )}
-
-          {/* DATA OVERLAY - Metadata quemada sobre el video */}
-          <View className="absolute inset-0 pointer-events-box-none">
-            {/* Logo TRENS + Fecha (Esquina superior izquierda) */}
-            <View className="absolute top-14 left-4">
-              <Text className="text-white font-bold text-xs tracking-widest opacity-80">
-                [ TRENS ]
-              </Text>
-              <Text className="text-zinc-400 text-xs font-mono mt-1">{getCurrentDate()}</Text>
-            </View>
-
-            {/* INPUTS CONTEXTUALES */}
-            {proContext.type === 'tactical' ? (
-              <View className="absolute bottom-48 left-0 right-0 flex-row justify-center gap-6 pointer-events-auto">
-                {/* PESO */}
-                <View className="bg-black/70 border-2 border-savage-red rounded-xl px-6 py-4 items-center min-w-[120px]">
-                  <Text className="text-zinc-500 text-xs mb-1">PESO</Text>
-                  <TextInput
-                    value={weight}
-                    onChangeText={setWeight}
-                    placeholder="0"
-                    placeholderTextColor="#DC2626"
-                    keyboardType="numeric"
-                    className="text-savage-red text-3xl font-bold font-mono text-center"
-                    style={{ minWidth: 60 }}
-                  />
-                  <Text className="text-zinc-500 text-xs mt-1">kg</Text>
-                </View>
-
-                {/* REPS */}
-                <View className="bg-black/70 border-2 border-savage-red rounded-xl px-6 py-4 items-center min-w-[120px]">
-                  <Text className="text-zinc-500 text-xs mb-1">REPS</Text>
-                  <TextInput
-                    value={reps}
-                    onChangeText={setReps}
-                    placeholder="0"
-                    placeholderTextColor="#DC2626"
-                    keyboardType="numeric"
-                    className="text-savage-red text-3xl font-bold font-mono text-center"
-                    style={{ minWidth: 60 }}
-                  />
-                </View>
-              </View>
-            ) : (
-              showTextInput && (
-                <View className="absolute bottom-48 left-4 right-4 pointer-events-auto">
-                  <TextInput
-                    value={freeText}
-                    onChangeText={setFreeText}
-                    placeholder="Escribe una nota..."
-                    placeholderTextColor="#71717A"
-                    multiline
-                    className="bg-black/70 border border-zinc-700 rounded-xl p-4 text-white text-lg"
-                    style={{ maxHeight: 120 }}
-                  />
-                </View>
-              )
-            )}
-          </View>
-
-          {/* BOTÓN DESCARTAR */}
-          <TouchableOpacity
-            onPress={discardVideo}
-            className="absolute top-14 right-4 bg-black/60 p-3 rounded-full"
-          >
-            <X color="#EF4444" size={24} />
-          </TouchableOpacity>
-        </View>
-
-        {/* BARRA DE HERRAMIENTAS */}
-        <View className="bg-zinc-950 border-t border-zinc-800 px-4 py-3">
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-4">
-            <View className="flex-row gap-4">
-              {/* TRIM */}
-              <TouchableOpacity
-                onPress={() => setShowTrimTool(!showTrimTool)}
-                className={`items-center px-4 py-2 rounded-lg ${showTrimTool ? 'bg-savage-red' : 'bg-zinc-800'}`}
-              >
-                <Scissors color="#FFFFFF" size={20} />
-                <Text className="text-white text-xs mt-1">TRIM</Text>
-              </TouchableOpacity>
-
-              {/* FILTROS */}
-              {FILTERS.map((filter) => (
-                <TouchableOpacity
-                  key={filter.id}
-                  onPress={() => {
-                    setSelectedFilter(filter.id);
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  }}
-                  className={`items-center px-4 py-2 rounded-lg ${
-                    selectedFilter === filter.id ? 'bg-savage-red' : 'bg-zinc-800'
-                  }`}
-                >
-                  <Palette color="#FFFFFF" size={20} />
-                  <Text className="text-white text-xs mt-1">{filter.name}</Text>
-                </TouchableOpacity>
-              ))}
-
-              {/* TEXTO (Solo contexto libre) */}
-              {proContext.type === 'free' && (
-                <TouchableOpacity
-                  onPress={() => setShowTextInput(!showTextInput)}
-                  className={`items-center px-4 py-2 rounded-lg ${showTextInput ? 'bg-savage-red' : 'bg-zinc-800'}`}
-                >
-                  <Type color="#FFFFFF" size={20} />
-                  <Text className="text-white text-xs mt-1">TEXTO</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          </ScrollView>
-
-          {/* TRIM TIMELINE */}
-          {showTrimTool && (
-            <View className="mb-4">
-              <View className="h-12 bg-zinc-800 rounded-lg overflow-hidden relative">
-                <View
-                  className="absolute top-0 bottom-0 bg-savage-red/30"
-                  style={{
-                    left: `${trimRange.start}%`,
-                    right: `${100 - trimRange.end}%`,
-                  }}
-                />
-                <View
-                  className="absolute top-0 bottom-0 w-1 bg-savage-red"
-                  style={{ left: `${trimRange.start}%` }}
-                />
-                <View
-                  className="absolute top-0 bottom-0 w-1 bg-savage-red"
-                  style={{ left: `${trimRange.end}%` }}
-                />
-              </View>
-              <Text className="text-zinc-500 text-xs text-center mt-2">
-                Arrastra las manijas para recortar
-              </Text>
-            </View>
-          )}
-        </View>
-
-        {/* FOOTER DE PUBLICACIÓN - Según MASTER */}
-        <View className="bg-zinc-950 border-t border-zinc-800 px-4 py-4 pb-8">
-          {/* SPOTIFY SECTION - Detectado automáticamente o elegir manualmente */}
-          {isPro && spotifyConnected && spotifyPremium && (
-            <View className="bg-black/50 rounded-xl p-3 mb-4 border border-zinc-800">
-              {spotifyMetadata ? (
-                <>
-                  {/* Canción detectada o seleccionada */}
-                  <View className="flex-row items-center justify-between">
-                    <View className="flex-row items-center flex-1">
-                      <View className="w-10 h-10 bg-green-500 rounded-lg items-center justify-center mr-3">
-                        <Music color="#000" size={18} />
-                      </View>
-                      <View className="flex-1">
-                        <Text className="text-white font-bold text-sm" numberOfLines={1}>
-                          {spotifyMetadata.trackName}
-                        </Text>
-                        <Text className="text-zinc-400 text-xs" numberOfLines={1}>
-                          {spotifyMetadata.artist}
-                        </Text>
-                        {wasAutoDetected && (
-                          <Text className="text-green-400 text-xs mt-0.5">
-                            ✓ Detectada automáticamente
-                          </Text>
-                        )}
-                      </View>
-                    </View>
-                    <Switch
-                      value={attachSpotify}
-                      onValueChange={setAttachSpotify}
-                      trackColor={{ false: '#3f3f46', true: '#1DB954' }}
-                      thumbColor="#FFFFFF"
-                    />
-                  </View>
-
-                  {/* Botón para cambiar canción */}
-                  <TouchableOpacity
-                    onPress={() => setShowSongPicker(true)}
-                    className="mt-3 bg-zinc-800 rounded-lg py-2 px-3 flex-row items-center justify-center"
-                  >
-                    <Music color="#1DB954" size={16} />
-                    <Text className="text-zinc-300 text-sm ml-2">Cambiar canción</Text>
-                  </TouchableOpacity>
-
-                  <Text className="text-zinc-500 text-xs mt-2 text-center">
-                    {attachSpotify
-                      ? '🎵 La canción se adjuntará al video'
-                      : '🔇 Sin música adjunta'}
-                  </Text>
-                </>
-              ) : (
-                <>
-                  {/* No hay canción - mostrar opción para añadir */}
-                  <View className="flex-row items-center justify-between">
-                    <View className="flex-row items-center flex-1">
-                      <View className="w-10 h-10 bg-zinc-700 rounded-lg items-center justify-center mr-3">
-                        <Music color="#71717A" size={18} />
-                      </View>
-                      <View className="flex-1">
-                        <Text className="text-zinc-400 text-sm">No se detectó música</Text>
-                        <Text className="text-zinc-500 text-xs">
-                          Spotify estaba en pausa al grabar
-                        </Text>
-                      </View>
-                    </View>
-                  </View>
-
-                  {/* Botón para añadir canción manualmente */}
-                  <TouchableOpacity
-                    onPress={() => setShowSongPicker(true)}
-                    className="mt-3 bg-green-600 rounded-lg py-3 px-4 flex-row items-center justify-center"
-                  >
-                    <Music color="#FFFFFF" size={18} />
-                    <Text className="text-white font-bold text-sm ml-2">Añadir canción</Text>
-                  </TouchableOpacity>
-                </>
-              )}
-            </View>
-          )}
-
-          {/* SWITCH PRINCIPAL: Público / Bóveda */}
-          <View className="bg-zinc-900 rounded-xl p-4 mb-4">
-            <View className="flex-row items-center justify-between">
-              <View className="flex-row items-center flex-1">
-                {isPublic ? <Eye color="#DC2626" size={24} /> : <Lock color="#71717A" size={24} />}
-                <View className="ml-3 flex-1">
-                  <Text className={`font-bold ${isPublic ? 'text-white' : 'text-zinc-500'}`}>
-                    {isPublic ? 'PUBLICAR EN TRENS' : 'GUARDAR EN LA BÓVEDA'}
-                  </Text>
-                  <Text className="text-zinc-500 text-xs mt-1">
-                    {isPublic ? 'Visible en el feed público' : 'Solo tú puedes verlo'}
-                  </Text>
-                </View>
-              </View>
-              <Switch
-                value={isPublic}
-                onValueChange={setIsPublic}
-                trackColor={{ false: '#3f3f46', true: '#DC2626' }}
-                thumbColor="#FFFFFF"
-              />
-            </View>
-          </View>
-
-          {/* BOTÓN COMPARTIR - Según MASTER */}
-          <TouchableOpacity
-            onPress={() => saveVideo(true)}
-            disabled={saving}
-            className="bg-savage-red p-4 rounded-xl flex-row items-center justify-center mb-3"
-            style={{
-              shadowColor: '#DC2626',
-              shadowOffset: { width: 0, height: 4 },
-              shadowOpacity: 0.5,
-              shadowRadius: 8,
-            }}
-          >
-            {saving ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <>
-                <Share2 color="#FFFFFF" size={20} />
-                <Text className="text-white font-bold text-lg ml-2 tracking-wider">COMPARTIR</Text>
-              </>
-            )}
-          </TouchableOpacity>
-
-          {/* Botón secundario: Solo guardar */}
-          <TouchableOpacity
-            onPress={() => saveVideo(false)}
-            disabled={saving}
-            className="bg-zinc-800 border border-zinc-700 p-3 rounded-xl items-center"
-          >
-            {saving ? (
-              <ActivityIndicator color="#DC2626" size="small" />
-            ) : (
-              <Text className="text-zinc-400 font-bold text-sm">
-                {isPublic ? 'PUBLICAR SIN COMPARTIR' : 'GUARDAR EN BÓVEDA'}
-              </Text>
-            )}
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
-  );
 
   // -------------------------------------------------------------------------
   // RENDER: MAIN SCREEN - CÁMARA EN VIVO PERMANENTE
@@ -968,44 +558,20 @@ export default function ProScreen() {
         </View>
 
         {/* Overlay post-grabación */}
-        {renderOverlay()}
+        <FullscreenVideoEditor
+          visible={editorVisible}
+          videoData={capturedVideo}
+          spotifyMetadata={spotifyMetadata}
+          onClose={discardVideo}
+          onSave={handleEditorSave}
+          saving={saving}
+        />
 
         {/* PRO Upgrade Modal para usuarios FREE */}
         <ProUpgradeModal
           visible={showUpgradeModal}
           onClose={() => setShowUpgradeModal(false)}
           feature="camera"
-        />
-
-        {/* Song Picker Modal */}
-        <SongPickerModal
-          visible={showSongPicker}
-          onClose={() => setShowSongPicker(false)}
-          onSelectSong={(track, startPositionMs) => {
-            setSpotifyMetadata({
-              enabled: true,
-              trackUri: track.uri,
-              positionMs: startPositionMs,
-              trackName: track.name,
-              artist: track.artist,
-              albumArt: track.albumArt,
-            });
-            setAttachSpotify(true);
-            setWasAutoDetected(false);
-            setShowSongPicker(false);
-          }}
-          currentTrack={
-            spotifyMetadata
-              ? {
-                  uri: spotifyMetadata.trackUri,
-                  name: spotifyMetadata.trackName,
-                  artist: spotifyMetadata.artist,
-                  album: '',
-                  albumArt: spotifyMetadata.albumArt || '',
-                  durationMs: 0,
-                }
-              : null
-          }
         />
       </View>
     </GestureHandlerRootView>
