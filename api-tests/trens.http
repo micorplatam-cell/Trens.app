@@ -1,0 +1,95 @@
+### Test Supabase API
+# @name supabase-health
+GET {{$dotenv EXPO_PUBLIC_SUPABASE_URL}}/rest/v1/
+apikey: {{$dotenv EXPO_PUBLIC_SUPABASE_ANON_KEY}}
+Authorization: Bearer {{$dotenv EXPO_PUBLIC_SUPABASE_ANON_KEY}}
+
+###
+
+### Get Exercises
+# @name get-exercises
+GET {{$dotenv EXPO_PUBLIC_SUPABASE_URL}}/rest/v1/exercises?select=id,name,muscle_group&limit=10
+apikey: {{$dotenv EXPO_PUBLIC_SUPABASE_ANON_KEY}}
+Authorization: Bearer {{$dotenv EXPO_PUBLIC_SUPABASE_ANON_KEY}}
+
+###
+
+### Get Profiles
+# @name get-profiles
+GET {{$dotenv EXPO_PUBLIC_SUPABASE_URL}}/rest/v1/profiles?select=*
+apikey: {{$dotenv EXPO_PUBLIC_SUPABASE_ANON_KEY}}
+Authorization: Bearer {{$dotenv EXPO_PUBLIC_SUPABASE_ANON_KEY}}
+
+###
+
+### Insert Exercise (ejemplo)
+# @name insert-exercise
+POST {{$dotenv EXPO_PUBLIC_SUPABASE_URL}}/rest/v1/exercises
+apikey: {{$dotenv EXPO_PUBLIC_SUPABASE_ANON_KEY}}
+Authorization: Bearer {{$dotenv EXPO_PUBLIC_SUPABASE_ANON_KEY}}
+Content-Type: application/json
+Prefer: return=representation
+
+{
+  "name": "Test Exercise",
+  "muscle_group": "PECHO"
+}
+
+###
+
+### Spotify - Get Current Track (requiere token)
+# @name spotify-current
+GET https://api.spotify.com/v1/me/player/currently-playing
+Authorization: Bearer {{$dotenv SPOTIFY_ACCESS_TOKEN}}
+
+###
+
+### Discord Webhook Test
+# @name discord-test
+POST {{$dotenv DISCORD_WEBHOOK_URL}}
+Content-Type: application/json
+
+{
+  "content": "🔥 Test desde TRENS Codespace",
+  "embeds": [{
+    "title": "REST Client Test",
+    "description": "Funciona correctamente!",
+    "color": 14423100
+  }]
+}
+
+###
+
+### GitHub API - Repo Info
+# @name github-repo
+GET https://api.github.com/repos/micorplatam-cell/Trens.app
+Authorization: token {{$dotenv GITHUB_TOKEN}}
+
+###
+
+### GitHub API - Recent Commits
+# @name github-commits
+GET https://api.github.com/repos/micorplatam-cell/Trens.app/commits?per_page=5
+Authorization: token {{$dotenv GITHUB_TOKEN}}
+
+###
+
+### GitHub API - Open Issues
+# @name github-issues
+GET https://api.github.com/repos/micorplatam-cell/Trens.app/issues?state=open
+Authorization: token {{$dotenv GITHUB_TOKEN}}
+
+###
+
+### Cloudflare R2 - Check bucket (si tienes configurado)
+# @name cloudflare-r2
+GET https://api.cloudflare.com/client/v4/accounts/{{$dotenv CF_ACCOUNT_ID}}/r2/buckets
+Authorization: Bearer {{$dotenv CF_API_TOKEN}}
+
+###
+
+### Test Any URL
+# @name test-url
+GET https://httpbin.org/get
+
+###
