@@ -261,14 +261,20 @@ export function SongPickerModal({
   }, []);
 
   // -------------------------------------------------------------------------
-  // SEARCH
+  // SEARCH - Búsqueda en tiempo real con debounce
   // -------------------------------------------------------------------------
-  const handleSearch = useCallback(async () => {
-    if (!searchQuery.trim()) return;
+  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const performSearch = useCallback(async (query: string) => {
+    if (!query.trim()) {
+      setSearchResults([]);
+      setSearching(false);
+      return;
+    }
 
     setSearching(true);
     try {
-      const data = await spotify.searchTracks(searchQuery, 20);
+      const data = await spotify.searchTracks(query, 20);
       if (data && data.length > 0) {
         setSearchResults(
           data.map((track) => ({
@@ -287,7 +293,45 @@ export function SongPickerModal({
       console.warn('Error searching:', error);
     }
     setSearching(false);
-  }, [searchQuery]);
+  }, []);
+
+  // Debounced search - se ejecuta 300ms después de que el usuario deje de escribir
+  useEffect(() => {
+    // Limpiar timeout anterior
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+
+    // Si no hay query, limpiar resultados inmediatamente
+    if (!searchQuery.trim()) {
+      setSearchResults([]);
+      setSearching(false);
+      return;
+    }
+
+    // Mostrar indicador de carga inmediatamente
+    setSearching(true);
+
+    // Ejecutar búsqueda después de 300ms de inactividad
+    searchTimeoutRef.current = setTimeout(() => {
+      performSearch(searchQuery);
+    }, 300);
+
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
+  }, [searchQuery, performSearch]);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // -------------------------------------------------------------------------
   // EFFECTS
@@ -797,19 +841,19 @@ export function SongPickerModal({
       case 'search':
         return (
           <>
-            {/* Search Input */}
+            {/* Search Input - Búsqueda en tiempo real */}
             <View className="px-5 pb-4">
               <View className="flex-row items-center bg-zinc-800 rounded-xl px-4 py-3">
                 <Search color="#71717A" size={20} />
                 <TextInput
                   value={searchQuery}
                   onChangeText={setSearchQuery}
-                  onSubmitEditing={handleSearch}
                   placeholder="Buscar canciones..."
                   placeholderTextColor="#71717A"
                   className="flex-1 text-white ml-3"
                   returnKeyType="search"
                   autoCapitalize="none"
+                  autoCorrect={false}
                 />
                 {searching && <ActivityIndicator color="#1DB954" size="small" />}
               </View>

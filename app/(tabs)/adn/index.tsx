@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -137,6 +137,7 @@ export default function AdnScreen() {
   // Video viewer state
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
   const [videoViewerVisible, setVideoViewerVisible] = useState(false);
+  const [isVideoManuallyPaused, setIsVideoManuallyPaused] = useState(false);
   const { width: screenWidth } = Dimensions.get('window');
   const videoTileSize = screenWidth / 3;
 
@@ -154,7 +155,10 @@ export default function AdnScreen() {
     // Volumen se controla dinámicamente en el useEffect según Spotify
   });
 
-  // Control de reproducción + Spotify sync
+  // Ref para rastrear si Spotify ya se sincronizó (evita re-sync al reanudar de pausa)
+  const spotifySyncedRef = useRef(false);
+
+  // Control de reproducción + Spotify sync (solo al ABRIR el modal)
   useEffect(() => {
     if (videoViewerVisible && videoPlayer) {
       // Determinar si hay Spotify para este video
@@ -163,24 +167,45 @@ export default function AdnScreen() {
 
       // MUTEAR el video si hay Spotify - solo se escuchará Spotify
       videoPlayer.volume = hasSpotify && trackUri ? 0 : 1;
-      videoPlayer.play();
 
-      // Si tiene Spotify y usuario es PRO + Premium, reproducir desde posición exacta
-      if (hasSpotify && trackUri) {
+      // Reproducir video si no está pausado manualmente
+      if (!isVideoManuallyPaused) {
+        videoPlayer.play();
+      }
+
+      // Solo sincronizar Spotify la PRIMERA vez que se abre el modal
+      if (!spotifySyncedRef.current && hasSpotify && trackUri) {
+        spotifySyncedRef.current = true;
         const positionMs = (selectedVideo?.spotify as any)?.positionMs || 0;
         console.log('🎵 ADN: Sincronizando Spotify (video muted)', trackUri, positionMs);
         spotify.syncWithVideo(trackUri, positionMs).catch(console.warn);
-      } else {
+      } else if (!hasSpotify) {
         console.log('🔊 ADN: Reproduciendo audio ambiente del video');
       }
-    } else if (videoPlayer) {
+    } else if (videoPlayer && !videoViewerVisible) {
       videoPlayer.pause();
+      setIsVideoManuallyPaused(false); // Reset al cerrar
+      spotifySyncedRef.current = false; // Reset para próxima apertura
       // Pausar Spotify al cerrar el viewer
       if (selectedVideo?.spotify?.enabled && isPro && spotifyPremium) {
         spotify.pauseForSwipe().catch(console.warn);
       }
     }
   }, [videoViewerVisible, videoPlayer, selectedVideo, isPro, spotifyPremium]);
+
+  // Handler para tap en el video (pausar/reanudar solo video, NO Spotify)
+  const handleVideoTap = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setIsVideoManuallyPaused((prev) => {
+      const newPaused = !prev;
+      if (newPaused) {
+        videoPlayer.pause();
+      } else {
+        videoPlayer.play();
+      }
+      return newPaused;
+    });
+  }, [videoPlayer]);
 
   // Data states
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -962,16 +987,28 @@ export default function AdnScreen() {
           </View>
 
           {/* Video Player */}
-          <View className="flex-1 items-center justify-center">
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={handleVideoTap}
+            className="flex-1 items-center justify-center"
+          >
             {selectedVideo?.video_url && (
               <VideoView
                 player={videoPlayer}
                 style={{ width: screenWidth, height: screenWidth * (16 / 9) }}
                 contentFit="contain"
-                nativeControls={true}
+                nativeControls={false}
               />
             )}
-          </View>
+            {/* Icono de Play cuando está pausado manualmente */}
+            {isVideoManuallyPaused && (
+              <View className="absolute inset-0 items-center justify-center">
+                <View className="w-20 h-20 rounded-full bg-black/50 items-center justify-center">
+                  <Play size={40} color="#FFFFFF" fill="#FFFFFF" />
+                </View>
+              </View>
+            )}
+          </TouchableOpacity>
 
           {/* Footer con info de Spotify */}
           {selectedVideo?.spotify?.enabled && (

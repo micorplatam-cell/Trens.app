@@ -5,6 +5,7 @@
 
 import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
+import * as Crypto from 'expo-crypto';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert } from 'react-native';
 
@@ -24,6 +25,7 @@ const SPOTIFY_SCOPES = [
   'playlist-read-private',
   'playlist-read-collaborative',
   'user-library-read',
+  'user-library-modify',
 ].join(' ');
 
 const STORAGE_KEY = '@trens_spotify_token';
@@ -154,6 +156,14 @@ class SpotifyService {
   // --------------------------------------------------------------------------
 
   /**
+   * Convertir bytes a base64url (sin padding)
+   */
+  private base64URLEncode(bytes: Uint8Array): string {
+    const base64 = btoa(String.fromCharCode(...bytes));
+    return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  /**
    * Obtener la URL de redirección para la autenticación
    */
   getRedirectUri(): string {
@@ -167,6 +177,7 @@ class SpotifyService {
 
   /**
    * Iniciar el flujo de autenticación OAuth
+   * Usa WebBrowser.openAuthSessionAsync para evitar problemas con NavigationContext
    */
   async authenticate(): Promise<boolean> {
     try {
@@ -174,41 +185,70 @@ class SpotifyService {
 
       console.warn('🎵 Spotify: Usando Redirect URI:', redirectUri);
 
-      const request = new AuthSession.AuthRequest({
-        clientId: SPOTIFY_CLIENT_ID,
-        scopes: SPOTIFY_SCOPES.split(' '),
-        redirectUri,
-        usePKCE: true,
-        responseType: AuthSession.ResponseType.Code,
-      });
+      // Generar code verifier (string aleatorio de 43-128 caracteres)
+      const randomBytes = await Crypto.getRandomBytesAsync(32);
+      const codeVerifier = this.base64URLEncode(randomBytes);
 
-      // Ejecutar prompt de autenticación
-      const result = await request.promptAsync(discovery);
+      // Generar code challenge (SHA256 hash del verifier, base64url encoded)
+      const digest = await Crypto.digestStringAsync(
+        Crypto.CryptoDigestAlgorithm.SHA256,
+        codeVerifier,
+        { encoding: Crypto.CryptoEncoding.BASE64 }
+      );
+      const codeChallenge = digest.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
-      if (result.type === 'success' && result.params.code) {
-        // Intercambiar código por tokens
-        const tokenResult = await AuthSession.exchangeCodeAsync(
-          {
-            clientId: SPOTIFY_CLIENT_ID,
-            code: result.params.code,
-            redirectUri,
-            extraParams: {
-              code_verifier: request.codeVerifier!,
+      // Construir URL de autorización manualmente
+      const authUrl = new URL(discovery.authorizationEndpoint);
+      authUrl.searchParams.set('client_id', SPOTIFY_CLIENT_ID);
+      authUrl.searchParams.set('response_type', 'code');
+      authUrl.searchParams.set('redirect_uri', redirectUri);
+      authUrl.searchParams.set('scope', SPOTIFY_SCOPES);
+      authUrl.searchParams.set('code_challenge_method', 'S256');
+      authUrl.searchParams.set('code_challenge', codeChallenge);
+
+      // Usar WebBrowser directamente (no requiere NavigationContext)
+      const result = await WebBrowser.openAuthSessionAsync(authUrl.toString(), redirectUri);
+
+      if (result.type === 'success' && result.url) {
+        // Parsear el código de la URL de respuesta
+        const responseUrl = new URL(result.url);
+        const code = responseUrl.searchParams.get('code');
+
+        if (code) {
+          // Intercambiar código por tokens usando fetch (sin AuthSession)
+          const tokenResponse = await fetch(discovery.tokenEndpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
             },
-          },
-          discovery
-        );
+            body: new URLSearchParams({
+              client_id: SPOTIFY_CLIENT_ID,
+              grant_type: 'authorization_code',
+              code,
+              redirect_uri: redirectUri,
+              code_verifier: codeVerifier,
+            }).toString(),
+          });
 
-        this.accessToken = tokenResult.accessToken;
-        this.refreshToken = tokenResult.refreshToken || null;
-        this.expiresAt = Date.now() + (tokenResult.expiresIn || 3600) * 1000;
-        this.isConnected = true;
+          if (!tokenResponse.ok) {
+            const errorData = await tokenResponse.text();
+            console.error('🎵 Spotify: Token exchange failed:', errorData);
+            return false;
+          }
 
-        // Guardar tokens
-        await this.saveTokens();
+          const tokenData = await tokenResponse.json();
 
-        console.warn('🎵 Spotify: Conectado exitosamente');
-        return true;
+          this.accessToken = tokenData.access_token;
+          this.refreshToken = tokenData.refresh_token || null;
+          this.expiresAt = Date.now() + (tokenData.expires_in || 3600) * 1000;
+          this.isConnected = true;
+
+          // Guardar tokens
+          await this.saveTokens();
+
+          console.warn('🎵 Spotify: Conectado exitosamente');
+          return true;
+        }
       }
 
       console.warn('🎵 Spotify: Autenticación cancelada o fallida');
@@ -1180,6 +1220,72 @@ class SpotifyService {
    */
   clearArtistImageCache(): void {
     this.artistImageCache.clear();
+  }
+
+  // =========================================================================
+  // BIBLIOTECA - Gestión de canciones guardadas (Me gusta)
+  // =========================================================================
+
+  /**
+   * Verificar si un track está guardado en la biblioteca del usuario
+   * @param trackId - ID del track (sin el prefijo spotify:track:)
+   * @returns true si está guardado, false si no
+   */
+  async isTrackSaved(trackId: string): Promise<boolean> {
+    if (!trackId) return false;
+
+    try {
+      const data = await this.apiCall<boolean[]>(`/me/tracks/contains?ids=${trackId}`);
+      return data?.[0] ?? false;
+    } catch (error) {
+      console.warn('Error checking if track is saved:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Guardar un track en la biblioteca del usuario (Me gusta)
+   * @param trackId - ID del track (sin el prefijo spotify:track:)
+   * @returns true si se guardó correctamente
+   */
+  async saveTrack(trackId: string): Promise<boolean> {
+    if (!trackId) return false;
+
+    try {
+      await this.apiCall(`/me/tracks?ids=${trackId}`, 'PUT');
+      return true;
+    } catch (error) {
+      console.warn('Error saving track:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Quitar un track de la biblioteca del usuario (Me gusta)
+   * @param trackId - ID del track (sin el prefijo spotify:track:)
+   * @returns true si se quitó correctamente
+   */
+  async removeTrack(trackId: string): Promise<boolean> {
+    if (!trackId) return false;
+
+    try {
+      await this.apiCall(`/me/tracks?ids=${trackId}`, 'DELETE');
+      return true;
+    } catch (error) {
+      console.warn('Error removing track:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Extraer el ID del track desde el URI
+   * @param uri - URI de Spotify (spotify:track:XXXX)
+   * @returns ID del track
+   */
+  getTrackIdFromUri(uri: string): string {
+    if (!uri) return '';
+    const parts = uri.split(':');
+    return parts[parts.length - 1] || '';
   }
 }
 

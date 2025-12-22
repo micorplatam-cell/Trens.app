@@ -316,6 +316,7 @@ export default function GymScreen() {
   // Video State
   const [videoViewerVisible, setVideoViewerVisible] = useState(false);
   const [selectedVideo, setSelectedVideo] = useState<VideoRecord | null>(null);
+  const [isVideoManuallyPaused, setIsVideoManuallyPaused] = useState(false);
 
   // Video Player para historial
   const rawVideoSource = selectedVideo?.videoUrl || selectedVideo?.video_url || '';
@@ -338,6 +339,9 @@ export default function GymScreen() {
     }
   }, [capturedVideoUri, videoPlayer]);
 
+  // Ref para rastrear si Spotify ya se sincronizó (evita re-sync al reanudar de pausa)
+  const spotifySyncedRef = useRef(false);
+
   // Controlar play/pause del video cuando abre/cierra el viewer
   useEffect(() => {
     if (videoViewerVisible && historialPlayer) {
@@ -351,40 +355,63 @@ export default function GymScreen() {
 
       // MUTEAR el video si hay Spotify - solo se escuchará Spotify
       historialPlayer.volume = hasSpotify ? 0 : 1;
-      historialPlayer.play();
-
-      // Sincronizar Spotify si es PRO y tiene trackUri
-      console.log('🎬 VIDEO VIEWER ABIERTO - Spotify check:', {
-        isPro,
-        spotifyPremium,
-        hasSpotifyData: !!selectedVideo?.spotify,
-        spotifyEnabled: selectedVideo?.spotify?.enabled,
-        trackUri: selectedVideo?.spotify?.trackUri,
-        positionMs: selectedVideo?.spotify?.positionMs,
-        videoMuted: hasSpotify,
-      });
-
-      if (hasSpotify) {
-        console.log(
-          '🎵 SINCRONIZANDO SPOTIFY (video muted):',
-          selectedVideo?.spotify?.trackName,
-          'desde',
-          selectedVideo?.spotify?.positionMs,
-          'ms'
-        );
-        spotify.syncWithVideo(
-          selectedVideo!.spotify!.trackUri as string,
-          selectedVideo!.spotify!.positionMs || 0
-        );
-      } else {
-        console.log('🔊 Reproduciendo audio ambiente del video');
+      
+      // Reproducir video si no está pausado manualmente
+      if (!isVideoManuallyPaused) {
+        historialPlayer.play();
       }
-    } else if (historialPlayer) {
+
+      // Solo sincronizar Spotify la PRIMERA vez que se abre el modal
+      if (!spotifySyncedRef.current) {
+        console.log('🎬 VIDEO VIEWER ABIERTO - Spotify check:', {
+          isPro,
+          spotifyPremium,
+          hasSpotifyData: !!selectedVideo?.spotify,
+          spotifyEnabled: selectedVideo?.spotify?.enabled,
+          trackUri: selectedVideo?.spotify?.trackUri,
+          positionMs: selectedVideo?.spotify?.positionMs,
+          videoMuted: hasSpotify,
+        });
+
+        if (hasSpotify) {
+          spotifySyncedRef.current = true;
+          console.log(
+            '🎵 SINCRONIZANDO SPOTIFY (video muted):',
+            selectedVideo?.spotify?.trackName,
+            'desde',
+            selectedVideo?.spotify?.positionMs,
+            'ms'
+          );
+          spotify.syncWithVideo(
+            selectedVideo!.spotify!.trackUri as string,
+            selectedVideo!.spotify!.positionMs || 0
+          );
+        } else {
+          console.log('🔊 Reproduciendo audio ambiente del video');
+        }
+      }
+    } else if (historialPlayer && !videoViewerVisible) {
       historialPlayer.pause();
+      setIsVideoManuallyPaused(false); // Reset al cerrar
+      spotifySyncedRef.current = false; // Reset para próxima apertura
       // Pausar Spotify al cerrar video viewer
       spotify.pauseForSwipe();
     }
   }, [videoViewerVisible, historialPlayer, selectedVideo, isPro, spotifyPremium]);
+
+  // Handler para tap en el video (pausar/reanudar solo video, NO Spotify)
+  const handleHistorialVideoTap = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setIsVideoManuallyPaused((prev) => {
+      const newPaused = !prev;
+      if (newPaused) {
+        historialPlayer.pause();
+      } else {
+        historialPlayer.play();
+      }
+      return newPaused;
+    });
+  }, [historialPlayer]);
 
   // Modal State
   const [historialModalVisible, setHistorialModalVisible] = useState(false);
@@ -3098,14 +3125,28 @@ export default function GymScreen() {
           {/* VIDEO FULLSCREEN CON OVERLAYS */}
           {selectedVideo && (
             <View className="flex-1">
-              {/* VIDEO */}
+              {/* VIDEO con TAP para pausar/reanudar */}
               {historialVideoSource ? (
-                <VideoView
-                  player={historialPlayer}
-                  style={{ flex: 1, width: '100%', height: '100%' }}
-                  contentFit="cover"
-                  nativeControls={false}
-                />
+                <TouchableOpacity 
+                  activeOpacity={1} 
+                  onPress={handleHistorialVideoTap}
+                  style={{ flex: 1 }}
+                >
+                  <VideoView
+                    player={historialPlayer}
+                    style={{ flex: 1, width: '100%', height: '100%' }}
+                    contentFit="cover"
+                    nativeControls={false}
+                  />
+                  {/* Icono de Play cuando está pausado */}
+                  {isVideoManuallyPaused && (
+                    <View className="absolute inset-0 justify-center items-center">
+                      <View className="bg-black/60 rounded-full p-6">
+                        <Play color="#DC2626" size={64} fill="#DC2626" />
+                      </View>
+                    </View>
+                  )}
+                </TouchableOpacity>
               ) : (
                 <View className="flex-1 bg-zinc-900 justify-center items-center">
                   <Text className="text-zinc-500">Video no disponible</Text>

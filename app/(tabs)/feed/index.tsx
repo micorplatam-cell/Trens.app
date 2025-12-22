@@ -136,7 +136,9 @@ const FeedVideoItem = memo(
 
     const [isVideoLoading, setIsVideoLoading] = useState(true);
     const [videoError, setVideoError] = useState<string | null>(null);
+    const [isManuallyPaused, setIsManuallyPaused] = useState(false);
     const hasBeenReady = useRef(false); // Una vez listo, no volver a loading
+    const spotifySyncedRef = useRef(false); // Evita re-sync al reanudar de pausa manual
 
     const player = useVideoPlayer(videoUrl, (p) => {
       p.loop = true;
@@ -181,28 +183,43 @@ const FeedVideoItem = memo(
       // Video mute si Spotify conectado, con audio si no
       player.muted = shouldMuteVideo;
 
-      if (isActive) {
+      if (isActive && !isManuallyPaused) {
         player.play();
 
-        if (spotifyConnected) {
-          if (canSyncTrack) {
-            // ESTADO 1: SYNC ON → Reproducir canción del video
-            const positionMs = item.spotify!.positionMs || 0;
-            console.log('🎵 Estado 1: Sync canción del video', item.id.substring(0, 8));
-            spotify.syncWithVideo(item.spotify!.trackUri!, positionMs).catch(console.warn);
-          }
-          // ESTADO 2: SYNC OFF → No tocamos Spotify, usuario sigue con su música
-          // (No hacemos nada, dejamos que Spotify siga reproduciendo lo que tenía)
+        // Solo sincronizar Spotify la PRIMERA vez que el video se activa
+        if (spotifyConnected && canSyncTrack && !spotifySyncedRef.current) {
+          // ESTADO 1: SYNC ON → Reproducir canción del video (solo primera vez)
+          spotifySyncedRef.current = true;
+          const positionMs = item.spotify!.positionMs || 0;
+          console.log('🎵 Estado 1: Sync canción del video', item.id.substring(0, 8));
+          spotify.syncWithVideo(item.spotify!.trackUri!, positionMs).catch(console.warn);
         }
+        // ESTADO 2: SYNC OFF → No tocamos Spotify, usuario sigue con su música
         // ESTADO 3: Sin Spotify → Video suena con audio ambiente (ya configurado arriba)
-      } else {
+      } else if (!isActive) {
         player.pause();
+        setIsManuallyPaused(false); // Reset manual pause cuando cambia de video
+        spotifySyncedRef.current = false; // Reset para próxima activación
         // Solo pausar Spotify si estábamos sincronizando canción del video
         if (canSyncTrack) {
           spotify.pauseForSwipe().catch(console.warn);
         }
       }
     }, [isActive, player, item.spotify, canSyncTrack, shouldMuteVideo, spotifyConnected]);
+
+    // Handler para tap en el video (pausar/reanudar solo video, NO Spotify)
+    const handleVideoTap = useCallback(() => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setIsManuallyPaused((prev) => {
+        const newPaused = !prev;
+        if (newPaused) {
+          player.pause();
+        } else {
+          player.play();
+        }
+        return newPaused;
+      });
+    }, [player]);
 
     const formatDate = (dateStr: string) => {
       const date = new Date(dateStr);
@@ -232,6 +249,29 @@ const FeedVideoItem = memo(
           contentFit="cover"
           nativeControls={false}
         />
+
+        {/* Tap zone para pausar/reanudar video */}
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={handleVideoTap}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: SCREEN_WIDTH,
+            height: VIDEO_HEIGHT,
+            zIndex: 1,
+          }}
+        >
+          {/* Icono de Play cuando está pausado manualmente */}
+          {isManuallyPaused && (
+            <View className="absolute inset-0 items-center justify-center">
+              <View className="w-20 h-20 rounded-full bg-black/50 items-center justify-center">
+                <Play size={40} color="#FFFFFF" fill="#FFFFFF" />
+              </View>
+            </View>
+          )}
+        </TouchableOpacity>
 
         {/* Thumbnail como fondo mientras carga */}
         {item.thumbnail_url && isVideoLoading && (
@@ -429,6 +469,8 @@ export default function FeedScreen() {
   const [activeIndex, setActiveIndex] = useState(0);
   // Toggle para sincronizar Spotify con videos - por defecto ON si está conectado
   const [spotifySyncEnabled, setSpotifySyncEnabled] = useState(true);
+  // Estado para rastrear si el Feed está enfocado
+  const [isFeedFocused, setIsFeedFocused] = useState(true);
 
   const flatListRef = useRef<FlatList>(null);
 
@@ -451,12 +493,17 @@ export default function FeedScreen() {
   }, []);
 
   // -------------------------------------------------------------------------
-  // PAUSAR AL SALIR DEL FEED (Solo si estaba sincronizando)
+  // PAUSAR AL SALIR DEL FEED (Videos + Spotify si sincronizando)
   // -------------------------------------------------------------------------
   useFocusEffect(
     useCallback(() => {
-      // Al entrar al Feed, no hacer nada especial
+      // Al entrar al Feed, marcar como enfocado
+      setIsFeedFocused(true);
+
       return () => {
+        // Al salir del Feed, marcar como no enfocado (pausará videos)
+        setIsFeedFocused(false);
+
         // Solo pausar Spotify si estaba en modo SYNC
         // Si el usuario escucha su propia música (SYNC OFF), no interrumpimos
         if (spotifyConnected && spotifySyncEnabled) {
@@ -717,7 +764,7 @@ export default function FeedScreen() {
     ({ item, index }: { item: FeedVideo; index: number }) => (
       <FeedVideoItem
         item={item}
-        isActive={index === activeIndex}
+        isActive={index === activeIndex && isFeedFocused}
         onLike={handleLike}
         onComment={handleComment}
         onShare={handleShare}
@@ -732,6 +779,7 @@ export default function FeedScreen() {
     ),
     [
       activeIndex,
+      isFeedFocused,
       handleLike,
       handleComment,
       handleShare,

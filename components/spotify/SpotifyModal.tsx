@@ -26,6 +26,8 @@ import {
   Disc3,
   Library,
   X,
+  PlusCircle,
+  CheckCircle,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import Animated, {
@@ -451,6 +453,72 @@ export default function SpotifyModal({
     null
   );
 
+  // Estado para saber si el track actual está en favoritos
+  const [isTrackLiked, setIsTrackLiked] = useState(false);
+  const [checkingLikeStatus, setCheckingLikeStatus] = useState(false);
+  const [togglingLike, setTogglingLike] = useState(false);
+
+  // -------------------------------------------------------------------------
+  // VERIFICAR SI EL TRACK ACTUAL ESTÁ EN FAVORITOS
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    const checkIfTrackIsLiked = async () => {
+      if (!currentTrack?.uri || !spotifyConnected) {
+        setIsTrackLiked(false);
+        return;
+      }
+
+      setCheckingLikeStatus(true);
+      try {
+        const trackId = spotify.getTrackIdFromUri(currentTrack.uri);
+        const isSaved = await spotify.isTrackSaved(trackId);
+        setIsTrackLiked(isSaved);
+      } catch (error) {
+        console.warn('Error checking like status:', error);
+        setIsTrackLiked(false);
+      } finally {
+        setCheckingLikeStatus(false);
+      }
+    };
+
+    checkIfTrackIsLiked();
+  }, [currentTrack?.uri, spotifyConnected]);
+
+  // -------------------------------------------------------------------------
+  // TOGGLE LIKE/UNLIKE TRACK
+  // -------------------------------------------------------------------------
+  const handleToggleLike = useCallback(async () => {
+    if (!currentTrack?.uri || togglingLike) return;
+
+    setTogglingLike(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    try {
+      const trackId = spotify.getTrackIdFromUri(currentTrack.uri);
+
+      if (isTrackLiked) {
+        // Quitar de favoritos
+        const success = await spotify.removeTrack(trackId);
+        if (success) {
+          setIsTrackLiked(false);
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        }
+      } else {
+        // Agregar a favoritos
+        const success = await spotify.saveTrack(trackId);
+        if (success) {
+          setIsTrackLiked(true);
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        }
+      }
+    } catch (error) {
+      console.warn('Error toggling like:', error);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setTogglingLike(false);
+    }
+  }, [currentTrack?.uri, isTrackLiked, togglingLike]);
+
   // -------------------------------------------------------------------------
   // POLLING DE POSICIÓN DE REPRODUCCIÓN
   // -------------------------------------------------------------------------
@@ -631,20 +699,68 @@ export default function SpotifyModal({
   }, [hasMoreTracks, selectedPlaylist]);
 
   // -------------------------------------------------------------------------
-  // BUSCAR
+  // BUSCAR - Búsqueda en tiempo real con debounce
   // -------------------------------------------------------------------------
-  const handleSearch = useCallback(async () => {
-    if (!searchQuery.trim()) return;
+  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const performSearch = useCallback(async (query: string) => {
+    if (!query.trim()) {
+      setSearchResults([]);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     try {
-      const results = await spotify.searchTracks(searchQuery, 30);
+      const results = await spotify.searchTracks(query, 30);
       setSearchResults(results);
     } catch (error) {
       console.error('Error searching:', error);
     } finally {
       setLoading(false);
     }
-  }, [searchQuery]);
+  }, []);
+
+  // Debounced search - se ejecuta 300ms después de que el usuario deje de escribir
+  useEffect(() => {
+    // Solo ejecutar cuando estamos en la tab de búsqueda
+    if (activeTab !== 'search') return;
+
+    // Limpiar timeout anterior
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+
+    // Si no hay query, limpiar resultados inmediatamente
+    if (!searchQuery.trim()) {
+      setSearchResults([]);
+      setLoading(false);
+      return;
+    }
+
+    // Mostrar indicador de carga inmediatamente
+    setLoading(true);
+
+    // Ejecutar búsqueda después de 300ms de inactividad
+    searchTimeoutRef.current = setTimeout(() => {
+      performSearch(searchQuery);
+    }, 300);
+
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
+  }, [searchQuery, activeTab, performSearch]);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // -------------------------------------------------------------------------
   // REPRODUCIR TRACK (con contexto de playlist)
@@ -666,26 +782,38 @@ export default function SpotifyModal({
           await spotify.playTrack(track.uri);
         }
 
-        // Convertir a SpotifyTrack para actualizar el reproductor
-        const spotifyTrack: SpotifyTrack = {
-          uri: track.uri,
-          name: track.name,
-          artist: track.artist,
-          artistId: '', // No disponible en SpotifyPlaylistTrack, se obtiene del playback
-          album: track.album,
-          albumArt: track.albumArt || '',
-          durationMs: track.durationMs,
-          positionMs: 0,
-        };
-        onTrackChange(spotifyTrack);
-        setCurrentPosition(0);
-
         // Guardar contexto de playlist para next/prev
         if (trackList && index !== undefined && context) {
           setCurrentPlaylistTracks(trackList);
           setCurrentTrackIndex(index);
           setPlaylistContext(context);
         }
+
+        // Esperar un momento y obtener el estado real de reproducción
+        // para tener la imagen de alta calidad del álbum
+        setTimeout(async () => {
+          try {
+            const playbackState = await spotify.getPlaybackState();
+            if (playbackState?.track) {
+              onTrackChange(playbackState.track);
+              setCurrentPosition(playbackState.track.positionMs || 0);
+            }
+          } catch (error) {
+            // Fallback: usar la info de la lista si falla
+            const spotifyTrack: SpotifyTrack = {
+              uri: track.uri,
+              name: track.name,
+              artist: track.artist,
+              artistId: '',
+              album: track.album,
+              albumArt: track.albumArt || '',
+              durationMs: track.durationMs,
+              positionMs: 0,
+            };
+            onTrackChange(spotifyTrack);
+            setCurrentPosition(0);
+          }
+        }, 300);
       } catch (error) {
         console.error('Error playing track:', error);
       }
@@ -892,11 +1020,30 @@ export default function SpotifyModal({
                   )}
                 </View>
 
-                {/* Track Info */}
+                {/* Track Info with Like Button */}
                 <View className="w-full items-center mb-4">
-                  <Text className="text-white font-bold text-2xl text-center" numberOfLines={2}>
-                    {currentTrack.name}
-                  </Text>
+                  <View className="flex-row items-center justify-center w-full px-4">
+                    <Text
+                      className="text-white font-bold text-2xl text-center flex-1"
+                      numberOfLines={2}
+                    >
+                      {currentTrack.name}
+                    </Text>
+                    {/* Like/Unlike Button */}
+                    <TouchableOpacity
+                      onPress={handleToggleLike}
+                      disabled={checkingLikeStatus || togglingLike}
+                      className="ml-3"
+                    >
+                      {checkingLikeStatus || togglingLike ? (
+                        <ActivityIndicator size="small" color="#1DB954" />
+                      ) : isTrackLiked ? (
+                        <CheckCircle size={28} color="#1DB954" fill="#1DB954" />
+                      ) : (
+                        <PlusCircle size={28} color="#71717A" />
+                      )}
+                    </TouchableOpacity>
+                  </View>
                   <Text className="text-zinc-400 text-lg mt-2">{currentTrack.artist}</Text>
                   <Text className="text-zinc-600 text-sm mt-1">{currentTrack.album}</Text>
                 </View>
@@ -1170,21 +1317,25 @@ export default function SpotifyModal({
       {/* SEARCH TAB */}
       {activeTab === 'search' && (
         <Animated.View entering={FadeIn.duration(200)} className="flex-1">
-          {/* Search Bar */}
+          {/* Search Bar - Búsqueda en tiempo real */}
           <View className="px-4 pt-4 pb-2">
             <View className="flex-row items-center bg-zinc-900 rounded-xl px-4 py-3 border border-zinc-800">
               <Search size={20} color="#71717A" />
               <TextInput
                 value={searchQuery}
                 onChangeText={setSearchQuery}
-                onSubmitEditing={handleSearch}
                 placeholder="¿Qué quieres escuchar?"
                 placeholderTextColor="#71717A"
                 className="flex-1 ml-3 text-white text-base"
                 returnKeyType="search"
                 autoFocus
+                autoCorrect={false}
+                autoCapitalize="none"
               />
-              {searchQuery.length > 0 && (
+              {loading && (
+                <ActivityIndicator size="small" color="#1DB954" style={{ marginRight: 8 }} />
+              )}
+              {searchQuery.length > 0 && !loading && (
                 <TouchableOpacity onPress={() => setSearchQuery('')}>
                   <X size={18} color="#71717A" />
                 </TouchableOpacity>
@@ -1192,11 +1343,7 @@ export default function SpotifyModal({
             </View>
           </View>
 
-          {loading ? (
-            <View className="flex-1 items-center justify-center">
-              <ActivityIndicator size="large" color="#1DB954" />
-            </View>
-          ) : searchResults.length > 0 ? (
+          {searchResults.length > 0 ? (
             <FlatList
               data={searchResults}
               keyExtractor={(item, index) => `${item.id}_${index}`}
