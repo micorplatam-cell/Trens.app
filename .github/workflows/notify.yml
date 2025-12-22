@@ -51,13 +51,29 @@ jobs:
               "text": "🚀 *Nuevo Deploy en TRENS*\n📝 ${{ steps.commit.outputs.message }}\n👤 ${{ steps.commit.outputs.author }}"
             }'
 
-      - name: 📱 Telegram Notification  
+      - name: 📱 Telegram Notification
         if: ${{ secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != '' }}
         run: |
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
             -d "text=🚀 *Nuevo Deploy en TRENS*%0A📝 ${{ steps.commit.outputs.message }}%0A👤 ${{ steps.commit.outputs.author }}" \
             -d "parse_mode=Markdown"
+
+      - name: 📱 WhatsApp Notification (CallMeBot)
+        if: ${{ secrets.CALLMEBOT_PHONE != '' && secrets.CALLMEBOT_APIKEY != '' }}
+        run: |
+          MESSAGE="🚀 Nuevo Deploy en TRENS - ${{ steps.commit.outputs.message }}"
+          ENCODED=$(echo "$MESSAGE" | sed 's/ /%20/g')
+          curl -s "https://api.callmebot.com/whatsapp.php?phone=${{ secrets.CALLMEBOT_PHONE }}&text=${ENCODED}&apikey=${{ secrets.CALLMEBOT_APIKEY }}"
+
+      - name: 📱 WhatsApp Notification (Twilio)
+        if: ${{ secrets.TWILIO_ACCOUNT_SID != '' && secrets.TWILIO_AUTH_TOKEN != '' }}
+        run: |
+          curl -s -X POST "https://api.twilio.com/2010-04-01/Accounts/${{ secrets.TWILIO_ACCOUNT_SID }}/Messages.json" \
+            -u "${{ secrets.TWILIO_ACCOUNT_SID }}:${{ secrets.TWILIO_AUTH_TOKEN }}" \
+            --data-urlencode "From=whatsapp:${{ secrets.TWILIO_WHATSAPP_FROM }}" \
+            --data-urlencode "To=whatsapp:${{ secrets.TWILIO_WHATSAPP_TO }}" \
+            --data-urlencode "Body=🚀 Nuevo Deploy en TRENS - ${{ steps.commit.outputs.message }}"
 
       - name: ✅ Done
         run: echo "✅ Notifications sent!"

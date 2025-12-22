@@ -100,7 +100,78 @@ telegram() {
 }
 
 # =============================================================================
-# 📧 EMAIL (via Resend API)
+# � WHATSAPP (via CallMeBot - GRATIS)
+# =============================================================================
+# Configuración:
+# 1. Agrega +34 644 71 89 88 a tus contactos de WhatsApp
+# 2. Envía "I allow callmebot to send me messages" al número
+# 3. Recibirás tu API key
+# 4. Configura: export CALLMEBOT_APIKEY="tu-apikey"
+#              export CALLMEBOT_PHONE="tu-numero-con-codigo-pais"
+
+CALLMEBOT_APIKEY="${CALLMEBOT_APIKEY:-}"
+CALLMEBOT_PHONE="${CALLMEBOT_PHONE:-}"
+
+# Enviar mensaje a WhatsApp (gratis via CallMeBot)
+whatsapp() {
+  local message="$1"
+  
+  if [ -z "$CALLMEBOT_APIKEY" ] || [ -z "$CALLMEBOT_PHONE" ]; then
+    echo -e "${YELLOW}⚠️ CallMeBot no configurado${NC}"
+    echo "1. Agrega +34 644 71 89 88 a WhatsApp"
+    echo "2. Envía: I allow callmebot to send me messages"
+    echo "3. Configura CALLMEBOT_APIKEY y CALLMEBOT_PHONE"
+    return 1
+  fi
+  
+  # URL encode del mensaje
+  local encoded=$(echo "$message" | sed 's/ /%20/g' | sed 's/!/%21/g' | sed 's/#/%23/g')
+  
+  curl -s "https://api.callmebot.com/whatsapp.php?phone=${CALLMEBOT_PHONE}&text=${encoded}&apikey=${CALLMEBOT_APIKEY}" > /dev/null
+  
+  echo -e "${GREEN}✅ Mensaje enviado a WhatsApp${NC}"
+}
+
+# Alias corto
+wa() {
+  whatsapp "$1"
+}
+
+# =============================================================================
+# 📱 WHATSAPP BUSINESS (via Twilio - Profesional)
+# =============================================================================
+# Configuración en twilio.com:
+# 1. Crea cuenta en Twilio
+# 2. Activa WhatsApp Sandbox
+# 3. Configura las variables
+
+TWILIO_SID="${TWILIO_ACCOUNT_SID:-}"
+TWILIO_TOKEN="${TWILIO_AUTH_TOKEN:-}"
+TWILIO_WHATSAPP_FROM="${TWILIO_WHATSAPP_FROM:-}"
+TWILIO_WHATSAPP_TO="${TWILIO_WHATSAPP_TO:-}"
+
+# Enviar mensaje a WhatsApp via Twilio (profesional)
+whatsapp-pro() {
+  local message="$1"
+  
+  if [ -z "$TWILIO_SID" ] || [ -z "$TWILIO_TOKEN" ]; then
+    echo -e "${YELLOW}⚠️ Twilio no configurado${NC}"
+    echo "Configura: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN"
+    echo "          TWILIO_WHATSAPP_FROM, TWILIO_WHATSAPP_TO"
+    return 1
+  fi
+  
+  curl -s -X POST "https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json" \
+    -u "${TWILIO_SID}:${TWILIO_TOKEN}" \
+    --data-urlencode "From=whatsapp:${TWILIO_WHATSAPP_FROM}" \
+    --data-urlencode "To=whatsapp:${TWILIO_WHATSAPP_TO}" \
+    --data-urlencode "Body=🔥 TRENS: $message" > /dev/null
+  
+  echo -e "${GREEN}✅ Mensaje enviado a WhatsApp (Twilio)${NC}"
+}
+
+# =============================================================================
+# �📧 EMAIL (via Resend API)
 # =============================================================================
 
 RESEND_API_KEY="${RESEND_API_KEY:-}"
@@ -142,6 +213,8 @@ notify-all() {
   [ -n "$DISCORD_WEBHOOK" ] && discord "$message"
   [ -n "$SLACK_WEBHOOK" ] && slack "$message"
   [ -n "$TELEGRAM_BOT_TOKEN" ] && telegram "$message"
+  [ -n "$CALLMEBOT_APIKEY" ] && whatsapp "$message"
+  [ -n "$TWILIO_SID" ] && whatsapp-pro "$message"
   [ -n "$RESEND_API_KEY" ] && send-email "TRENS Notification" "$message"
   
   echo -e "${GREEN}✅ Notificaciones enviadas${NC}"
