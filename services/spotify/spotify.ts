@@ -413,15 +413,8 @@ class SpotifyService {
           const now = Date.now();
 
           if (reason === 'NO_ACTIVE_DEVICE') {
-            // No hay dispositivo activo - mostrar alerta (con cooldown)
-            if (now - this.lastAlertTime > this.ALERT_COOLDOWN) {
-              this.lastAlertTime = now;
-              Alert.alert(
-                '🎧 SPOTIFY',
-                'No hay dispositivo activo.\n\nAbre Spotify en tu teléfono y reproduce algo para poder controlarlo desde TRENS.',
-                [{ text: 'ENTENDIDO', style: 'default' }]
-              );
-            }
+            // No hay dispositivo activo - solo log, play() intentará activar uno
+            console.log('🎵 Spotify: No hay dispositivo activo');
             return null;
           }
           if (reason === 'PREMIUM_REQUIRED') {
@@ -518,20 +511,121 @@ class SpotifyService {
 
   /**
    * Reproducir una canción específica
+   * @param trackUri - URI del track a reproducir
+   * @param positionMs - Posición en ms donde empezar
+   * @param contextUri - URI del contexto (playlist, album) para habilitar next/prev
+   * @param trackUris - Array de URIs para reproducir en secuencia (para Liked Songs)
    */
-  async play(trackUri?: string, positionMs?: number): Promise<boolean> {
-    const body: any = {};
+  async play(
+    trackUri?: string,
+    positionMs?: number,
+    contextUri?: string,
+    trackUris?: string[]
+  ): Promise<boolean> {
+    try {
+      console.log('🎵 Spotify play() called:', {
+        trackUri,
+        positionMs,
+        contextUri,
+        trackUrisCount: trackUris?.length,
+      });
 
-    if (trackUri) {
-      body.uris = [trackUri];
+      // Verificar si hay dispositivo activo
+      const state = await this.getPlaybackState();
+      let deviceId = state?.deviceId;
+
+      console.log('🎵 Spotify play() - deviceId inicial:', deviceId);
+
+      if (!deviceId) {
+        // Buscar un dispositivo disponible
+        const devices = await this.getDevices();
+        console.log(
+          '🎵 Spotify play() - dispositivos encontrados:',
+          devices.length,
+          devices.map((d) => d.name)
+        );
+
+        const availableDevice = devices.find((d) => !d.is_restricted) || devices[0];
+
+        if (!availableDevice) {
+          console.warn('🎵 Spotify play(): No hay dispositivos disponibles');
+          return false;
+        }
+
+        deviceId = availableDevice.id as string;
+        console.log('🎵 Spotify play() - usando dispositivo:', availableDevice.name);
+
+        // Transferir reproducción al dispositivo
+        await this.transferPlayback(deviceId);
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+
+      const body: any = {};
+
+      if (contextUri) {
+        // Reproducir dentro de un contexto (playlist/album)
+        body.context_uri = contextUri;
+        if (trackUri) {
+          body.offset = { uri: trackUri };
+        }
+      } else if (trackUris && trackUris.length > 0) {
+        // Limitar a máximo 50 tracks para evitar límites de API
+        // Centrado en la canción seleccionada
+        const currentIndex = trackUri ? trackUris.indexOf(trackUri) : 0;
+        const startIndex = Math.max(0, currentIndex - 25);
+        const endIndex = Math.min(trackUris.length, startIndex + 50);
+        const limitedUris = trackUris.slice(startIndex, endIndex);
+        const newOffset = currentIndex - startIndex;
+
+        body.uris = limitedUris;
+        body.offset = { position: newOffset };
+        console.log(
+          '🎵 Spotify play() - tracks limitados:',
+          limitedUris.length,
+          'offset:',
+          newOffset
+        );
+      } else if (trackUri) {
+        // Reproducir solo un track (sin contexto - next/prev no funcionará)
+        body.uris = [trackUri];
+      }
+
+      if (positionMs !== undefined) {
+        body.position_ms = positionMs;
+      }
+
+      const endpoint = `/me/player/play?device_id=${deviceId}`;
+      console.log(
+        '🎵 Spotify play() - enviando request:',
+        endpoint,
+        JSON.stringify(body).substring(0, 200)
+      );
+
+      await this.apiCall(endpoint, 'PUT', Object.keys(body).length > 0 ? body : undefined);
+      console.log('🎵 Spotify play() - SUCCESS');
+      return true;
+    } catch (error) {
+      console.error('🎵 Spotify play() - ERROR:', error);
+      return false;
     }
+  }
 
-    if (positionMs !== undefined) {
-      body.position_ms = positionMs;
-    }
-
-    await this.apiCall('/me/player/play', 'PUT', Object.keys(body).length > 0 ? body : undefined);
-    return true;
+  /**
+   * Reproducir con contexto de playlist/liked songs
+   * Esto habilita next/prev correctamente
+   * Desactiva shuffle y repeat para reproducir en orden sin loop
+   */
+  async playWithContext(
+    trackUri: string,
+    trackUris: string[],
+    positionMs?: number
+  ): Promise<boolean> {
+    // Primero reproducir
+    const result = await this.play(trackUri, positionMs, undefined, trackUris);
+    // Desactivar shuffle y repeat después de iniciar reproducción (no bloquear si falla)
+    this.setShuffle(false).catch(() => {});
+    this.setRepeat('off').catch(() => {});
+    return result;
   }
 
   /**
@@ -558,16 +652,79 @@ class SpotifyService {
    * Siguiente canción
    */
   async next(): Promise<boolean> {
-    await this.apiCall('/me/player/next', 'POST');
-    return true;
+    try {
+      const state = await this.getPlaybackState();
+
+      if (!state?.hasActiveDevice) {
+        console.log('🎵 Spotify next(): No hay dispositivo activo');
+        return false;
+      }
+
+      // Si está en repeat one, cambiar a repeat context
+      if (state.repeatState === 'track') {
+        await this.apiCall('/me/player/repeat?state=context', 'PUT');
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+
+      const endpoint = state.deviceId
+        ? `/me/player/next?device_id=${state.deviceId}`
+        : '/me/player/next';
+
+      await this.apiCall(endpoint, 'POST');
+      return true;
+    } catch (error) {
+      console.error('🎵 Spotify next() error:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Obtener la cola de reproducción
+   */
+  async getQueue(): Promise<SpotifyTrack[] | null> {
+    try {
+      const data = await this.apiCall<{ queue: any[] }>('/me/player/queue');
+      if (!data?.queue) return null;
+
+      return data.queue.map((item: any) => ({
+        uri: item.uri,
+        name: item.name,
+        artist: item.artists?.map((a: any) => a.name).join(', ') || '',
+        album: item.album?.name || '',
+        albumArt: item.album?.images?.[0]?.url || '',
+        durationMs: item.duration_ms,
+        positionMs: 0,
+      }));
+    } catch (error) {
+      console.warn('🎵 Spotify getQueue() error:', error);
+      return null;
+    }
   }
 
   /**
    * Canción anterior
    */
   async previous(): Promise<boolean> {
-    await this.apiCall('/me/player/previous', 'POST');
-    return true;
+    try {
+      console.log('🎵 Spotify previous(): Obteniendo estado actual...');
+      const state = await this.getPlaybackState();
+
+      if (!state?.hasActiveDevice) {
+        console.log('🎵 Spotify previous(): No hay dispositivo activo');
+        return false;
+      }
+
+      const endpoint = state.deviceId
+        ? `/me/player/previous?device_id=${state.deviceId}`
+        : '/me/player/previous';
+
+      await this.apiCall(endpoint, 'POST');
+      console.log('🎵 Spotify previous(): Comando enviado');
+      return true;
+    } catch (error) {
+      console.error('🎵 Spotify previous() error:', error);
+      return false;
+    }
   }
 
   /**
@@ -586,6 +743,33 @@ class SpotifyService {
     const volume = Math.max(0, Math.min(100, Math.round(volumePercent)));
     await this.apiCall(`/me/player/volume?volume_percent=${volume}`, 'PUT');
     return true;
+  }
+
+  /**
+   * Activar/desactivar shuffle
+   */
+  async setShuffle(state: boolean): Promise<boolean> {
+    try {
+      await this.apiCall(`/me/player/shuffle?state=${state}`, 'PUT');
+      return true;
+    } catch (error) {
+      console.warn('🎵 Spotify setShuffle error:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Establecer modo de repetición
+   * @param state - 'off' | 'track' | 'context'
+   */
+  async setRepeat(state: 'off' | 'track' | 'context'): Promise<boolean> {
+    try {
+      await this.apiCall(`/me/player/repeat?state=${state}`, 'PUT');
+      return true;
+    } catch (error) {
+      console.warn('🎵 Spotify setRepeat error:', error);
+      return false;
+    }
   }
 
   /**
@@ -638,15 +822,7 @@ class SpotifyService {
 
       if (!activeDevice) {
         console.log('🎵 syncWithVideo: No hay dispositivo activo');
-        const now = Date.now();
-        if (now - this.lastAlertTime > this.ALERT_COOLDOWN) {
-          this.lastAlertTime = now;
-          Alert.alert(
-            '🎧 SPOTIFY',
-            'Este video tiene música de Spotify.\n\nAbre Spotify en tu teléfono y reproduce algo para sincronizar la música.',
-            [{ text: 'ENTENDIDO', style: 'default' }]
-          );
-        }
+        // No mostrar alerta - play() intentará activar un dispositivo automáticamente
         return false;
       }
 

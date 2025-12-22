@@ -242,6 +242,9 @@ export default function SpotifyModal({
   const [hasMoreTracks, setHasMoreTracks] = useState(true);
   const [hasMoreLiked, setHasMoreLiked] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  const isLoadingMoreRef = useRef(false); // Ref para evitar llamadas dobles
+  const likedOffsetRef = useRef(0); // Ref para offset sincronizado
+  const tracksOffsetRef = useRef(0); // Ref para offset sincronizado
 
   // Progreso de reproducción
   const [currentPosition, setCurrentPosition] = useState(0);
@@ -310,16 +313,17 @@ export default function SpotifyModal({
     async (reset = false) => {
       if (!reset && likedSongs.length > 0) return; // Ya cargadas
 
-      const offset = reset ? 0 : 0;
       setLoading(true);
       setLikedOffset(0);
+      likedOffsetRef.current = 0;
       setHasMoreLiked(true);
 
       try {
-        const data = await spotify.getLikedSongs(50, offset);
+        const data = await spotify.getLikedSongs(50, 0);
         setLikedSongs(data);
         setHasMoreLiked(data.length === 50);
         setLikedOffset(50);
+        likedOffsetRef.current = 50;
       } catch (error) {
         console.error('Error loading liked songs:', error);
       } finally {
@@ -330,14 +334,26 @@ export default function SpotifyModal({
   );
 
   const loadMoreLikedSongs = useCallback(async () => {
-    if (loadingMore || !hasMoreLiked) return;
-
+    if (isLoadingMoreRef.current || !hasMoreLiked) return;
+    isLoadingMoreRef.current = true;
     setLoadingMore(true);
+
+    const currentOffset = likedOffsetRef.current;
     try {
-      const data = await spotify.getLikedSongs(50, likedOffset);
+      console.log('🎵 loadMoreLikedSongs - offset:', currentOffset);
+      const data = await spotify.getLikedSongs(50, currentOffset);
+      console.log('🎵 loadMoreLikedSongs - received:', data.length, 'tracks');
       if (data.length > 0) {
-        setLikedSongs((prev) => [...prev, ...data]);
-        setLikedOffset((prev) => prev + 50);
+        // Filtrar duplicados por URI
+        setLikedSongs((prev) => {
+          const existingUris = new Set(prev.map((t) => t.uri));
+          const newTracks = data.filter((t) => !existingUris.has(t.uri));
+          console.log('🎵 loadMoreLikedSongs - new unique:', newTracks.length);
+          return [...prev, ...newTracks];
+        });
+        const newOffset = currentOffset + 50;
+        setLikedOffset(newOffset);
+        likedOffsetRef.current = newOffset;
         setHasMoreLiked(data.length === 50);
       } else {
         setHasMoreLiked(false);
@@ -346,8 +362,9 @@ export default function SpotifyModal({
       console.error('Error loading more liked songs:', error);
     } finally {
       setLoadingMore(false);
+      isLoadingMoreRef.current = false;
     }
-  }, [loadingMore, hasMoreLiked, likedOffset]);
+  }, [hasMoreLiked]);
 
   // -------------------------------------------------------------------------
   // CARGAR TRACKS DE PLAYLIST (con paginación)
@@ -357,12 +374,15 @@ export default function SpotifyModal({
     setSelectedPlaylist(playlist);
     setShowPlaylistTracks(true);
     setTracksOffset(0);
+    tracksOffsetRef.current = 0;
     setHasMoreTracks(true);
 
     try {
       const data = await spotify.getPlaylistTracks(playlist.id, 50, 0);
       setTracks(data);
       setHasMoreTracks(data.length === 50);
+      setTracksOffset(50);
+      tracksOffsetRef.current = 50;
       setTracksOffset(50);
     } catch (error) {
       console.error('Error loading playlist tracks:', error);
@@ -372,14 +392,26 @@ export default function SpotifyModal({
   }, []);
 
   const loadMorePlaylistTracks = useCallback(async () => {
-    if (loadingMore || !hasMoreTracks || !selectedPlaylist) return;
-
+    if (isLoadingMoreRef.current || !hasMoreTracks || !selectedPlaylist) return;
+    isLoadingMoreRef.current = true;
     setLoadingMore(true);
+
+    const currentOffset = tracksOffsetRef.current;
     try {
-      const data = await spotify.getPlaylistTracks(selectedPlaylist.id, 50, tracksOffset);
+      console.log('🎵 loadMorePlaylistTracks - offset:', currentOffset);
+      const data = await spotify.getPlaylistTracks(selectedPlaylist.id, 50, currentOffset);
+      console.log('🎵 loadMorePlaylistTracks - received:', data.length, 'tracks');
       if (data.length > 0) {
-        setTracks((prev) => [...prev, ...data]);
-        setTracksOffset((prev) => prev + 50);
+        // Filtrar duplicados por URI
+        setTracks((prev) => {
+          const existingUris = new Set(prev.map((t) => t.uri));
+          const newTracks = data.filter((t) => !existingUris.has(t.uri));
+          console.log('🎵 loadMorePlaylistTracks - new unique:', newTracks.length);
+          return [...prev, ...newTracks];
+        });
+        const newOffset = currentOffset + 50;
+        setTracksOffset(newOffset);
+        tracksOffsetRef.current = newOffset;
         setHasMoreTracks(data.length === 50);
       } else {
         setHasMoreTracks(false);
@@ -388,8 +420,9 @@ export default function SpotifyModal({
       console.error('Error loading more playlist tracks:', error);
     } finally {
       setLoadingMore(false);
+      isLoadingMoreRef.current = false;
     }
-  }, [loadingMore, hasMoreTracks, tracksOffset, selectedPlaylist]);
+  }, [hasMoreTracks, selectedPlaylist]);
 
   // -------------------------------------------------------------------------
   // BUSCAR
@@ -419,7 +452,14 @@ export default function SpotifyModal({
     ) => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       try {
-        await spotify.playTrack(track.uri);
+        // Si tenemos lista de tracks, reproducir con contexto para que next/prev funcione
+        if (trackList && trackList.length > 0) {
+          const allUris = trackList.map((t) => t.uri);
+          await spotify.playWithContext(track.uri, allUris, 0);
+        } else {
+          await spotify.playTrack(track.uri);
+        }
+
         // Convertir a SpotifyTrack para actualizar el reproductor
         const spotifyTrack: SpotifyTrack = {
           uri: track.uri,
@@ -792,7 +832,7 @@ export default function SpotifyModal({
               ) : (
                 <FlatList
                   data={tracks}
-                  keyExtractor={(item) => item.id}
+                  keyExtractor={(item, index) => `${item.id}_${index}`}
                   renderItem={({ item, index }) =>
                     renderTrackItemWithContext(item, index, tracks, 'playlist')
                   }
@@ -827,7 +867,7 @@ export default function SpotifyModal({
               ) : (
                 <FlatList
                   data={playlists}
-                  keyExtractor={(item) => item.id}
+                  keyExtractor={(item, index) => `${item.id}_${index}`}
                   renderItem={renderPlaylistItem}
                   showsVerticalScrollIndicator={false}
                   contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
@@ -876,7 +916,7 @@ export default function SpotifyModal({
           ) : (
             <FlatList
               data={likedSongs}
-              keyExtractor={(item) => item.id}
+              keyExtractor={(item, index) => `${item.id}_${index}`}
               renderItem={({ item, index }) =>
                 renderTrackItemWithContext(item, index, likedSongs, 'liked')
               }
@@ -939,7 +979,7 @@ export default function SpotifyModal({
           ) : searchResults.length > 0 ? (
             <FlatList
               data={searchResults}
-              keyExtractor={(item) => item.id}
+              keyExtractor={(item, index) => `${item.id}_${index}`}
               renderItem={({ item, index }) =>
                 renderTrackItemWithContext(item, index, searchResults, 'search')
               }
