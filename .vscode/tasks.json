@@ -1,0 +1,67 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "🚀 Expo Start (Tunnel)",
+      "type": "shell",
+      "command": "npx expo start --tunnel",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "🔍 Lint Fix",
+      "type": "shell",
+      "command": "npm run lint -- --fix",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "🧹 Clean & Reinstall",
+      "type": "shell",
+      "command": "rm -rf node_modules .expo && npm install",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "📱 Build Preview (Android)",
+      "type": "shell",
+      "command": "eas build --platform android --profile preview --non-interactive",
+      "group": "build"
+    },
+    {
+      "label": "📡 OTA Update",
+      "type": "shell",
+      "command": "eas update --auto",
+      "group": "build"
+    },
+    {
+      "label": "🔄 Git Sync",
+      "type": "shell",
+      "command": "git fetch --all && git pull --rebase && git push",
+      "group": "build"
+    },
+    {
+      "label": "💣 YOLO Deploy",
+      "type": "shell",
+      "command": "git add -A && git commit -m \"$(date +%Y-%m-%d_%H:%M) - YOLO\" && git push",
+      "group": "build"
+    },
+    {
+      "label": "🗄️ DB: List Tables",
+      "type": "shell",
+      "command": "source .github/scripts/mega-power.sh && db-tables",
+      "group": "test"
+    }
+  ]
+}

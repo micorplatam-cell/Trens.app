@@ -13,16 +13,7 @@ import {
 import { useFocusEffect } from 'expo-router';
 import { Lock } from 'lucide-react-native';
 import { Image } from 'expo-image';
-import {
-  Heart,
-  MessageCircle,
-  Share2,
-  Music,
-  Volume2,
-  VolumeX,
-  Bookmark,
-  Play,
-} from 'lucide-react-native';
+import { Heart, MessageCircle, Share2, Music, Bookmark, Play, Unlink } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -73,29 +64,29 @@ const FeedVideoItem = memo(
   ({
     item,
     isActive,
-    isMuted,
-    onToggleMute,
     onLike,
     onComment,
     onShare,
     onSave,
     onUserPress,
     spotifyPremium,
+    spotifyConnected,
     isPro,
     onSpotifyUpgrade,
+    spotifySyncEnabled,
   }: {
     item: FeedVideo;
     isActive: boolean;
-    isMuted: boolean;
-    onToggleMute: () => void;
     onLike: (videoId: string) => void;
     onComment: (videoId: string) => void;
     onShare: (video: FeedVideo) => void;
     onSave: (videoId: string) => void;
     onUserPress: (userId: string) => void;
     spotifyPremium: boolean;
+    spotifyConnected: boolean;
     isPro: boolean;
     onSpotifyUpgrade: () => void;
+    spotifySyncEnabled: boolean;
   }) => {
     // Helper: Arreglar URLs de Cloudflare Stream incompletas
     const fixCloudflareUrl = (url: string): string => {
@@ -109,25 +100,39 @@ const FeedVideoItem = memo(
 
     const videoUrl = fixCloudflareUrl(item.video_url);
 
-    // Determinar si este video tiene Spotify sync disponible
-    const hasSpotifySync = !!(
+    // =====================================================================
+    // 3 ESTADOS DE AUDIO (NUNCA SE MEZCLAN):
+    // Estado 1: Spotify conectado + SYNC ON → Video MUTE, reproduce canción del video
+    // Estado 2: Spotify conectado + SYNC OFF → Video MUTE, usuario escucha su propia música
+    // Estado 3: Sin Spotify → Video con AUDIO AMBIENTE
+    // =====================================================================
+
+    // ¿Puede sincronizar canción? (tiene track + conectado + premium + pro + sync ON)
+    const canSyncTrack = !!(
       item.spotify?.enabled &&
       item.spotify.trackUri &&
+      spotifyConnected &&
       spotifyPremium &&
-      isPro
+      isPro &&
+      spotifySyncEnabled
     );
 
+    // ¿Video debe estar muteado? → SI hay Spotify conectado, SIEMPRE mute
+    const shouldMuteVideo = spotifyConnected;
+
     // Debug log
-    if (item.spotify?.enabled) {
-      console.log('🎵 Feed hasSpotifySync check:', {
-        videoId: item.id,
-        spotifyEnabled: item.spotify?.enabled,
-        trackUri: item.spotify?.trackUri,
-        spotifyPremium,
-        isPro,
-        hasSpotifySync,
-      });
-    }
+    console.log('🎵 Feed Audio State:', {
+      videoId: item.id.substring(0, 8),
+      state: !spotifyConnected
+        ? '🔊 Estado 3: Audio Ambiente'
+        : spotifySyncEnabled
+          ? '🎵 Estado 1: SYNC (canción del video)'
+          : '🎧 Estado 2: Tu música',
+      spotifyConnected,
+      spotifySyncEnabled,
+      canSyncTrack,
+      shouldMuteVideo,
+    });
 
     const [isVideoLoading, setIsVideoLoading] = useState(true);
     const [videoError, setVideoError] = useState<string | null>(null);
@@ -135,8 +140,9 @@ const FeedVideoItem = memo(
 
     const player = useVideoPlayer(videoUrl, (p) => {
       p.loop = true;
-      // Si hay Spotify, mutear el video para que solo suene Spotify
-      p.muted = hasSpotifySync ? true : isMuted;
+      // Si Spotify conectado → video SIEMPRE mute (usuario escucha Spotify)
+      // Si NO hay Spotify → video con audio ambiente
+      p.muted = shouldMuteVideo;
     });
 
     // Detectar cuando el video está listo o tiene error
@@ -170,28 +176,33 @@ const FeedVideoItem = memo(
       }
     }, [player, videoUrl]);
 
-    // Control de reproducción basado en isActive
+    // Control de reproducción basado en isActive - 3 ESTADOS CLAROS
     useEffect(() => {
-      // Actualizar mute según Spotify
-      player.muted = hasSpotifySync ? true : isMuted;
+      // Video mute si Spotify conectado, con audio si no
+      player.muted = shouldMuteVideo;
 
       if (isActive) {
         player.play();
 
-        // Si tiene Spotify, usuario es PRO y Premium, sincronizar desde posición exacta
-        if (hasSpotifySync) {
-          const positionMs = item.spotify!.positionMs || 0;
-          console.log('🎵 Feed: Iniciando sync para video', item.id, 'en', positionMs, 'ms');
-          spotify.syncWithVideo(item.spotify!.trackUri!, positionMs).catch(console.warn);
+        if (spotifyConnected) {
+          if (canSyncTrack) {
+            // ESTADO 1: SYNC ON → Reproducir canción del video
+            const positionMs = item.spotify!.positionMs || 0;
+            console.log('🎵 Estado 1: Sync canción del video', item.id.substring(0, 8));
+            spotify.syncWithVideo(item.spotify!.trackUri!, positionMs).catch(console.warn);
+          }
+          // ESTADO 2: SYNC OFF → No tocamos Spotify, usuario sigue con su música
+          // (No hacemos nada, dejamos que Spotify siga reproduciendo lo que tenía)
         }
+        // ESTADO 3: Sin Spotify → Video suena con audio ambiente (ya configurado arriba)
       } else {
         player.pause();
-        // Pausar Spotify al hacer swipe (cambiar de video)
-        if (hasSpotifySync) {
+        // Solo pausar Spotify si estábamos sincronizando canción del video
+        if (canSyncTrack) {
           spotify.pauseForSwipe().catch(console.warn);
         }
       }
-    }, [isActive, player, item.spotify, spotifyPremium, isPro, hasSpotifySync, isMuted]);
+    }, [isActive, player, item.spotify, canSyncTrack, shouldMuteVideo, spotifyConnected]);
 
     const formatDate = (dateStr: string) => {
       const date = new Date(dateStr);
@@ -253,9 +264,6 @@ const FeedVideoItem = memo(
             <Text className="text-zinc-600 text-xs mt-1">URL: {videoUrl?.substring(0, 50)}...</Text>
           </View>
         )}
-
-        {/* Overlay táctil para mute */}
-        <TouchableOpacity activeOpacity={1} onPress={onToggleMute} className="absolute inset-0" />
 
         {/* Gradiente inferior */}
         <LinearGradient
@@ -403,17 +411,6 @@ const FeedVideoItem = memo(
               <Share2 size={24} color="#FFFFFF" />
             </View>
           </TouchableOpacity>
-
-          {/* Mute indicator */}
-          <TouchableOpacity onPress={onToggleMute} className="items-center">
-            <View className="w-10 h-10 rounded-full bg-black/50 items-center justify-center">
-              {isMuted ? (
-                <VolumeX size={18} color="#FFFFFF" />
-              ) : (
-                <Volume2 size={18} color="#FFFFFF" />
-              )}
-            </View>
-          </TouchableOpacity>
         </View>
       </View>
     );
@@ -424,27 +421,49 @@ const FeedVideoItem = memo(
 // MAIN COMPONENT
 // ============================================================================
 export default function FeedScreen() {
-  const { user, spotifyPremium, isPro } = useUserRoleContext();
+  const { user, spotifyPremium, spotifyConnected, isPro } = useUserRoleContext();
 
   const [videos, setVideos] = useState<FeedVideo[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
-  const [isMuted, setIsMuted] = useState(false);
+  // Toggle para sincronizar Spotify con videos - por defecto ON si está conectado
+  const [spotifySyncEnabled, setSpotifySyncEnabled] = useState(true);
 
   const flatListRef = useRef<FlatList>(null);
 
   // -------------------------------------------------------------------------
-  // PAUSAR SPOTIFY AL SALIR DEL FEED
+  // TOGGLE SPOTIFY SYNC
+  // -------------------------------------------------------------------------
+  const handleToggleSpotifySync = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setSpotifySyncEnabled((prev) => {
+      const newValue = !prev;
+      // Si se ACTIVA el sync, la sincronización ocurrirá en el próximo ciclo
+      // Si se DESACTIVA el sync, no pausamos Spotify - el usuario sigue escuchando su música
+      // (En ambos casos el video permanece muteado porque Spotify está conectado)
+      console.log(
+        '🎵 Spotify SYNC toggled:',
+        newValue ? 'ON (auto-sync canción del video)' : 'OFF (tu música)'
+      );
+      return newValue;
+    });
+  }, []);
+
+  // -------------------------------------------------------------------------
+  // PAUSAR AL SALIR DEL FEED (Solo si estaba sincronizando)
   // -------------------------------------------------------------------------
   useFocusEffect(
     useCallback(() => {
       // Al entrar al Feed, no hacer nada especial
       return () => {
-        // Al salir del Feed, pausar Spotify
-        spotify.pauseForSwipe().catch(() => {});
+        // Solo pausar Spotify si estaba en modo SYNC
+        // Si el usuario escucha su propia música (SYNC OFF), no interrumpimos
+        if (spotifyConnected && spotifySyncEnabled) {
+          spotify.pauseForSwipe().catch(() => {});
+        }
       };
-    }, [])
+    }, [spotifyConnected, spotifySyncEnabled])
   );
 
   // -------------------------------------------------------------------------
@@ -558,10 +577,6 @@ export default function FeedScreen() {
   // -------------------------------------------------------------------------
   // HANDLERS
   // -------------------------------------------------------------------------
-  const handleToggleMute = useCallback(() => {
-    setIsMuted((prev) => !prev);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  }, []);
 
   const handleLike = useCallback(
     async (videoId: string) => {
@@ -703,30 +718,30 @@ export default function FeedScreen() {
       <FeedVideoItem
         item={item}
         isActive={index === activeIndex}
-        isMuted={isMuted}
-        onToggleMute={handleToggleMute}
         onLike={handleLike}
         onComment={handleComment}
         onShare={handleShare}
         onSave={handleSave}
         onUserPress={handleUserPress}
         spotifyPremium={spotifyPremium}
+        spotifyConnected={spotifyConnected ?? false}
         isPro={isPro}
         onSpotifyUpgrade={handleSpotifyUpgrade}
+        spotifySyncEnabled={spotifySyncEnabled}
       />
     ),
     [
       activeIndex,
-      isMuted,
-      handleToggleMute,
       handleLike,
       handleComment,
       handleShare,
       handleSave,
       handleUserPress,
       spotifyPremium,
+      spotifyConnected,
       isPro,
       handleSpotifyUpgrade,
+      spotifySyncEnabled,
     ]
   );
 
@@ -768,19 +783,28 @@ export default function FeedScreen() {
         <View className="flex-row items-center justify-between">
           <Text className="text-white text-xl font-bold tracking-wider">TRENS</Text>
           <View className="flex-row items-center gap-2">
-            {/* Indicador de audio */}
-            <View className="bg-black/50 px-3 py-1.5 rounded-full flex-row items-center">
-              {isMuted ? (
-                <VolumeX size={14} color="#71717a" />
-              ) : (
-                <Volume2 size={14} color="#1DB954" />
-              )}
-              <Text
-                className={`ml-1.5 text-xs font-bold ${isMuted ? 'text-zinc-500' : 'text-green-500'}`}
+            {/* Toggle de Spotify Sync - Solo mostrar si está conectado */}
+            {spotifyConnected && (
+              <TouchableOpacity
+                onPress={handleToggleSpotifySync}
+                className={`px-3 py-1.5 rounded-full flex-row items-center ${
+                  spotifySyncEnabled ? 'bg-green-500/20' : 'bg-black/50'
+                }`}
               >
-                {isMuted ? 'MUTE' : 'ON'}
-              </Text>
-            </View>
+                {spotifySyncEnabled ? (
+                  <Music size={14} color="#1DB954" />
+                ) : (
+                  <Unlink size={14} color="#71717a" />
+                )}
+                <Text
+                  className={`ml-1.5 text-xs font-bold ${
+                    spotifySyncEnabled ? 'text-green-500' : 'text-zinc-500'
+                  }`}
+                >
+                  {spotifySyncEnabled ? 'SYNC' : 'OFF'}
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </View>

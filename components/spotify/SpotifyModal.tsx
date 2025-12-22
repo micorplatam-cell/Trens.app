@@ -7,6 +7,7 @@ import {
   FlatList,
   TextInput,
   ActivityIndicator,
+  Dimensions,
 } from 'react-native';
 import { Image } from 'expo-image';
 import Slider from '@react-native-community/slider';
@@ -27,7 +28,16 @@ import {
   X,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
-import Animated, { FadeIn } from 'react-native-reanimated';
+import Animated, {
+  FadeIn,
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withSequence,
+  withTiming,
+  Easing,
+} from 'react-native-reanimated';
+import { BlurView } from 'expo-blur';
 import spotify, {
   SpotifyPlaylist,
   SpotifyPlaylistTrack,
@@ -56,6 +66,8 @@ interface SpotifyModalProps {
 }
 
 type TabType = 'now-playing' | 'playlists' | 'liked' | 'search';
+
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 // ============================================================================
 // FORMATEAR DURACIÓN (helper function)
@@ -102,12 +114,15 @@ const TrackItem = React.memo(
         )}
       </View>
 
-      {/* Album Art */}
+      {/* Album Art - OPTIMIZADO con cache */}
       {item.albumArt ? (
         <Image
           source={{ uri: item.albumArt }}
-          style={{ width: 44, height: 44, borderRadius: 6 }}
+          style={{ width: 44, height: 44, borderRadius: 6, backgroundColor: '#27272a' }}
           contentFit="cover"
+          cachePolicy="memory-disk"
+          recyclingKey={item.id}
+          transition={100}
         />
       ) : (
         <View className="w-11 h-11 bg-zinc-800 rounded-md items-center justify-center">
@@ -209,6 +224,174 @@ const MiniPlayer = ({
 };
 
 // ============================================================================
+// ANIMATED ALBUM BACKGROUND - Fondo animado con carátula
+// ============================================================================
+const AnimatedAlbumBackground = ({
+  albumArt,
+  isPlaying,
+}: {
+  albumArt: string | null | undefined;
+  isPlaying: boolean;
+}) => {
+  // Animaciones de pulso/ritmo
+  const scaleAnim = useSharedValue(1);
+  const rotateAnim = useSharedValue(0);
+  const translateXAnim = useSharedValue(0);
+  const translateYAnim = useSharedValue(0);
+
+  useEffect(() => {
+    if (isPlaying) {
+      // Pulso más pronunciado - escala grande para efecto visual
+      scaleAnim.value = withRepeat(
+        withSequence(
+          withTiming(1.25, { duration: 600, easing: Easing.out(Easing.ease) }),
+          withTiming(1.08, { duration: 500, easing: Easing.inOut(Easing.ease) }),
+          withTiming(1.18, { duration: 550, easing: Easing.out(Easing.ease) }),
+          withTiming(1.0, { duration: 550, easing: Easing.inOut(Easing.ease) })
+        ),
+        -1,
+        false
+      );
+      // Rotación más visible
+      rotateAnim.value = withRepeat(
+        withSequence(
+          withTiming(8, { duration: 2000, easing: Easing.inOut(Easing.ease) }),
+          withTiming(-8, { duration: 2000, easing: Easing.inOut(Easing.ease) })
+        ),
+        -1,
+        true
+      );
+      // Traslación horizontal grande (respira)
+      translateXAnim.value = withRepeat(
+        withSequence(
+          withTiming(40, { duration: 2500, easing: Easing.inOut(Easing.ease) }),
+          withTiming(-40, { duration: 2500, easing: Easing.inOut(Easing.ease) })
+        ),
+        -1,
+        true
+      );
+      // Traslación vertical grande (respira)
+      translateYAnim.value = withRepeat(
+        withSequence(
+          withTiming(-30, { duration: 1800, easing: Easing.inOut(Easing.ease) }),
+          withTiming(30, { duration: 1800, easing: Easing.inOut(Easing.ease) })
+        ),
+        -1,
+        true
+      );
+    } else {
+      // Detener animaciones suavemente
+      scaleAnim.value = withTiming(1, { duration: 400 });
+      rotateAnim.value = withTiming(0, { duration: 400 });
+      translateXAnim.value = withTiming(0, { duration: 400 });
+      translateYAnim.value = withTiming(0, { duration: 400 });
+    }
+  }, [isPlaying, scaleAnim, rotateAnim, translateXAnim, translateYAnim]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [
+      { scale: scaleAnim.value },
+      { rotate: `${rotateAnim.value}deg` },
+      { translateX: translateXAnim.value },
+      { translateY: translateYAnim.value },
+    ],
+  }));
+
+  if (!albumArt) return null;
+
+  return (
+    <View
+      style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        overflow: 'hidden',
+      }}
+    >
+      {/* Carátula animada de fondo - reducida para ver movimiento */}
+      <Animated.View
+        style={[
+          {
+            position: 'absolute',
+            top: -80,
+            left: -80,
+            right: -80,
+            bottom: -80,
+          },
+          animatedStyle,
+        ]}
+      >
+        <Image
+          source={{ uri: albumArt }}
+          style={{ width: '100%', height: '100%' }}
+          contentFit="cover"
+          blurRadius={15}
+        />
+      </Animated.View>
+
+      {/* Overlay oscuro para contraste */}
+      <View
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.55)',
+        }}
+      />
+
+      {/* Glassmorphism overlay */}
+      <BlurView
+        intensity={20}
+        tint="dark"
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+        }}
+      />
+
+      {/* Gradiente superior e inferior para header/footer */}
+      <View
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 120,
+          backgroundColor: 'transparent',
+        }}
+      >
+        <LinearGradient colors={['rgba(0,0,0,0.9)', 'transparent']} style={{ flex: 1 }} />
+      </View>
+      <View
+        style={{
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: 150,
+          backgroundColor: 'transparent',
+        }}
+      >
+        <LinearGradient colors={['transparent', 'rgba(0,0,0,0.9)']} style={{ flex: 1 }} />
+      </View>
+    </View>
+  );
+};
+
+// ============================================================================
+// ESTADO PERSISTENTE A NIVEL DE MÓDULO (sobrevive desmontajes del Modal)
+// ============================================================================
+let persistedTab: TabType = 'now-playing';
+let persistedShowTracks = false;
+
+// ============================================================================
 // COMPONENTE PRINCIPAL
 // ============================================================================
 export default function SpotifyModal({
@@ -226,7 +409,8 @@ export default function SpotifyModal({
   onPrevious,
   onTrackChange,
 }: SpotifyModalProps) {
-  const [activeTab, setActiveTab] = useState<TabType>('now-playing');
+  // Inicializar estado desde variables persistentes
+  const [activeTab, setActiveTab] = useState<TabType>(persistedTab);
   const [playlists, setPlaylists] = useState<SpotifyPlaylist[]>([]);
   const [tracks, setTracks] = useState<SpotifyPlaylistTrack[]>([]);
   const [likedSongs, setLikedSongs] = useState<SpotifyPlaylistTrack[]>([]);
@@ -234,7 +418,16 @@ export default function SpotifyModal({
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SpotifyPlaylistTrack[]>([]);
   const [loading, setLoading] = useState(false);
-  const [showPlaylistTracks, setShowPlaylistTracks] = useState(false);
+  const [showPlaylistTracks, setShowPlaylistTracks] = useState(persistedShowTracks);
+
+  // Guardar estado en variables de módulo cuando cambia
+  useEffect(() => {
+    persistedTab = activeTab;
+  }, [activeTab]);
+
+  useEffect(() => {
+    persistedShowTracks = showPlaylistTracks;
+  }, [showPlaylistTracks]);
 
   // Paginación
   const [tracksOffset, setTracksOffset] = useState(0);
@@ -291,6 +484,26 @@ export default function SpotifyModal({
   }, [currentTrack?.uri]);
 
   // -------------------------------------------------------------------------
+  // SINCRONIZAR POSICIÓN AL ABRIR EL MODAL
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    if (visible && spotifyConnected) {
+      // Obtener la posición actual inmediatamente al abrir
+      const fetchCurrentPosition = async () => {
+        try {
+          const state = await spotify.getPlaybackState();
+          if (state?.track) {
+            setCurrentPosition(state.track.positionMs);
+          }
+        } catch {
+          // Silenciar errores
+        }
+      };
+      fetchCurrentPosition();
+    }
+  }, [visible, spotifyConnected]);
+
+  // -------------------------------------------------------------------------
   // CARGAR PLAYLISTS
   // -------------------------------------------------------------------------
   const loadPlaylists = useCallback(async () => {
@@ -319,11 +532,11 @@ export default function SpotifyModal({
       setHasMoreLiked(true);
 
       try {
-        const data = await spotify.getLikedSongs(50, 0);
+        const data = await spotify.getLikedSongs(20, 0);
         setLikedSongs(data);
-        setHasMoreLiked(data.length === 50);
-        setLikedOffset(50);
-        likedOffsetRef.current = 50;
+        setHasMoreLiked(data.length === 20);
+        setLikedOffset(20);
+        likedOffsetRef.current = 20;
       } catch (error) {
         console.error('Error loading liked songs:', error);
       } finally {
@@ -340,21 +553,18 @@ export default function SpotifyModal({
 
     const currentOffset = likedOffsetRef.current;
     try {
-      console.log('🎵 loadMoreLikedSongs - offset:', currentOffset);
-      const data = await spotify.getLikedSongs(50, currentOffset);
-      console.log('🎵 loadMoreLikedSongs - received:', data.length, 'tracks');
+      const data = await spotify.getLikedSongs(20, currentOffset);
       if (data.length > 0) {
         // Filtrar duplicados por URI
         setLikedSongs((prev) => {
           const existingUris = new Set(prev.map((t) => t.uri));
           const newTracks = data.filter((t) => !existingUris.has(t.uri));
-          console.log('🎵 loadMoreLikedSongs - new unique:', newTracks.length);
           return [...prev, ...newTracks];
         });
-        const newOffset = currentOffset + 50;
+        const newOffset = currentOffset + 20;
         setLikedOffset(newOffset);
         likedOffsetRef.current = newOffset;
-        setHasMoreLiked(data.length === 50);
+        setHasMoreLiked(data.length === 20);
       } else {
         setHasMoreLiked(false);
       }
@@ -378,12 +588,11 @@ export default function SpotifyModal({
     setHasMoreTracks(true);
 
     try {
-      const data = await spotify.getPlaylistTracks(playlist.id, 50, 0);
+      const data = await spotify.getPlaylistTracks(playlist.id, 20, 0);
       setTracks(data);
-      setHasMoreTracks(data.length === 50);
-      setTracksOffset(50);
-      tracksOffsetRef.current = 50;
-      setTracksOffset(50);
+      setHasMoreTracks(data.length === 20);
+      setTracksOffset(20);
+      tracksOffsetRef.current = 20;
     } catch (error) {
       console.error('Error loading playlist tracks:', error);
     } finally {
@@ -398,21 +607,18 @@ export default function SpotifyModal({
 
     const currentOffset = tracksOffsetRef.current;
     try {
-      console.log('🎵 loadMorePlaylistTracks - offset:', currentOffset);
-      const data = await spotify.getPlaylistTracks(selectedPlaylist.id, 50, currentOffset);
-      console.log('🎵 loadMorePlaylistTracks - received:', data.length, 'tracks');
+      const data = await spotify.getPlaylistTracks(selectedPlaylist.id, 20, currentOffset);
       if (data.length > 0) {
         // Filtrar duplicados por URI
         setTracks((prev) => {
           const existingUris = new Set(prev.map((t) => t.uri));
           const newTracks = data.filter((t) => !existingUris.has(t.uri));
-          console.log('🎵 loadMorePlaylistTracks - new unique:', newTracks.length);
           return [...prev, ...newTracks];
         });
-        const newOffset = currentOffset + 50;
+        const newOffset = currentOffset + 20;
         setTracksOffset(newOffset);
         tracksOffsetRef.current = newOffset;
-        setHasMoreTracks(data.length === 50);
+        setHasMoreTracks(data.length === 20);
       } else {
         setHasMoreTracks(false);
       }
@@ -465,6 +671,7 @@ export default function SpotifyModal({
           uri: track.uri,
           name: track.name,
           artist: track.artist,
+          artistId: '', // No disponible en SpotifyPlaylistTrack, se obtiene del playback
           album: track.album,
           albumArt: track.albumArt || '',
           durationMs: track.durationMs,
@@ -558,15 +765,8 @@ export default function SpotifyModal({
     }
   }, [visible, spotifyConnected, activeTab, loadPlaylists, loadLikedSongs]);
 
-  useEffect(() => {
-    if (!visible) {
-      setActiveTab('now-playing');
-      setShowPlaylistTracks(false);
-      setSelectedPlaylist(null);
-      setSearchQuery('');
-      setSearchResults([]);
-    }
-  }, [visible]);
+  // NO reseteamos el estado al cerrar para mantener la navegación
+  // El usuario verá exactamente donde se quedó cuando vuelva a abrir el modal
 
   // -------------------------------------------------------------------------
   // FORMATEAR DURACIÓN
@@ -667,124 +867,132 @@ export default function SpotifyModal({
     <View className="flex-1">
       {/* NOW PLAYING TAB */}
       {activeTab === 'now-playing' && (
-        <Animated.View entering={FadeIn.duration(200)} className="flex-1 px-6 pt-4">
-          {currentTrack ? (
-            <View className="flex-1 items-center justify-center">
-              {/* Large Album Art */}
-              <View className="w-72 h-72 rounded-2xl overflow-hidden shadow-2xl mb-8">
-                {currentTrack.albumArt ? (
-                  <Image
-                    source={{ uri: currentTrack.albumArt }}
-                    style={{ width: '100%', height: '100%' }}
-                    contentFit="cover"
+        <Animated.View entering={FadeIn.duration(200)} className="flex-1">
+          {/* Fondo animado con carátula */}
+          <AnimatedAlbumBackground
+            albumArt={currentTrack?.albumArt}
+            isPlaying={playbackState?.isPlaying ?? false}
+          />
+
+          <View className="flex-1 px-6 pt-4">
+            {currentTrack ? (
+              <View className="flex-1 items-center justify-center">
+                {/* Large Album Art */}
+                <View className="w-72 h-72 rounded-2xl overflow-hidden shadow-2xl mb-8">
+                  {currentTrack.albumArt ? (
+                    <Image
+                      source={{ uri: currentTrack.albumArt }}
+                      style={{ width: '100%', height: '100%' }}
+                      contentFit="cover"
+                    />
+                  ) : (
+                    <View className="w-full h-full bg-zinc-800 items-center justify-center">
+                      <Disc3 size={80} color="#1DB954" />
+                    </View>
+                  )}
+                </View>
+
+                {/* Track Info */}
+                <View className="w-full items-center mb-4">
+                  <Text className="text-white font-bold text-2xl text-center" numberOfLines={2}>
+                    {currentTrack.name}
+                  </Text>
+                  <Text className="text-zinc-400 text-lg mt-2">{currentTrack.artist}</Text>
+                  <Text className="text-zinc-600 text-sm mt-1">{currentTrack.album}</Text>
+                </View>
+
+                {/* Progress Bar Slider */}
+                <View className="w-full mb-6">
+                  <Slider
+                    style={{ width: '100%', height: 40 }}
+                    minimumValue={0}
+                    maximumValue={currentTrack.durationMs || 1}
+                    value={isSeeking ? currentPosition : currentPosition}
+                    onSlidingStart={handleSeekStart}
+                    onSlidingComplete={handleSeekComplete}
+                    minimumTrackTintColor="#1DB954"
+                    maximumTrackTintColor="#27272A"
+                    thumbTintColor="#1DB954"
+                    disabled={!isPro}
                   />
-                ) : (
-                  <View className="w-full h-full bg-zinc-800 items-center justify-center">
-                    <Disc3 size={80} color="#1DB954" />
-                  </View>
-                )}
-              </View>
-
-              {/* Track Info */}
-              <View className="w-full items-center mb-4">
-                <Text className="text-white font-bold text-2xl text-center" numberOfLines={2}>
-                  {currentTrack.name}
-                </Text>
-                <Text className="text-zinc-400 text-lg mt-2">{currentTrack.artist}</Text>
-                <Text className="text-zinc-600 text-sm mt-1">{currentTrack.album}</Text>
-              </View>
-
-              {/* Progress Bar Slider */}
-              <View className="w-full mb-6">
-                <Slider
-                  style={{ width: '100%', height: 40 }}
-                  minimumValue={0}
-                  maximumValue={currentTrack.durationMs || 1}
-                  value={isSeeking ? currentPosition : currentPosition}
-                  onSlidingStart={handleSeekStart}
-                  onSlidingComplete={handleSeekComplete}
-                  minimumTrackTintColor="#1DB954"
-                  maximumTrackTintColor="#27272A"
-                  thumbTintColor="#1DB954"
-                  disabled={!isPro}
-                />
-                <View className="flex-row justify-between px-1 -mt-1">
-                  <Text className="text-zinc-500 text-xs font-mono">
-                    {formatDuration(currentPosition)}
-                  </Text>
-                  <Text className="text-zinc-500 text-xs font-mono">
-                    {formatDuration(currentTrack.durationMs || 0)}
-                  </Text>
-                </View>
-              </View>
-
-              {/* Controls */}
-              {isPro ? (
-                <View className="flex-row items-center justify-center gap-8">
-                  <TouchableOpacity
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                      handlePrevInPlaylist();
-                    }}
-                    className="w-14 h-14 bg-zinc-800 rounded-full items-center justify-center"
-                  >
-                    <SkipBack size={24} color="#fff" />
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                      onPlayPause();
-                    }}
-                    className="w-20 h-20 bg-[#1DB954] rounded-full items-center justify-center"
-                  >
-                    {playbackState?.isPlaying ? (
-                      <Pause size={36} color="#000" fill="#000" />
-                    ) : (
-                      <Play size={36} color="#000" fill="#000" style={{ marginLeft: 4 }} />
-                    )}
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                      handleNextInPlaylist();
-                    }}
-                    className="w-14 h-14 bg-zinc-800 rounded-full items-center justify-center"
-                  >
-                    <SkipForward size={24} color="#fff" />
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                <View className="bg-zinc-900 p-4 rounded-xl border border-zinc-800 w-full">
-                  <Text className="text-zinc-400 text-center text-sm">
-                    Tu música sigue sonando mientras entrenas
-                  </Text>
-                  <View className="mt-3 bg-[#DC2626]/20 border border-[#DC2626]/50 rounded-lg p-3">
-                    <Text className="text-[#DC2626] text-xs text-center font-bold">
-                      🔥 PRO: Desbloquea controles de reproducción
+                  <View className="flex-row justify-between px-1 -mt-1">
+                    <Text className="text-zinc-500 text-xs font-mono">
+                      {formatDuration(currentPosition)}
+                    </Text>
+                    <Text className="text-zinc-500 text-xs font-mono">
+                      {formatDuration(currentTrack.durationMs || 0)}
                     </Text>
                   </View>
                 </View>
-              )}
-            </View>
-          ) : (
-            <View className="flex-1 items-center justify-center">
-              <View className="w-32 h-32 bg-zinc-900 rounded-full items-center justify-center mb-6">
-                <Music size={48} color="#71717A" />
+
+                {/* Controls */}
+                {isPro ? (
+                  <View className="flex-row items-center justify-center gap-8">
+                    <TouchableOpacity
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        handlePrevInPlaylist();
+                      }}
+                      className="w-14 h-14 bg-zinc-800 rounded-full items-center justify-center"
+                    >
+                      <SkipBack size={24} color="#fff" />
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                        onPlayPause();
+                      }}
+                      className="w-20 h-20 bg-[#1DB954] rounded-full items-center justify-center"
+                    >
+                      {playbackState?.isPlaying ? (
+                        <Pause size={36} color="#000" fill="#000" />
+                      ) : (
+                        <Play size={36} color="#000" fill="#000" style={{ marginLeft: 4 }} />
+                      )}
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        handleNextInPlaylist();
+                      }}
+                      className="w-14 h-14 bg-zinc-800 rounded-full items-center justify-center"
+                    >
+                      <SkipForward size={24} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <View className="bg-zinc-900 p-4 rounded-xl border border-zinc-800 w-full">
+                    <Text className="text-zinc-400 text-center text-sm">
+                      Tu música sigue sonando mientras entrenas
+                    </Text>
+                    <View className="mt-3 bg-[#DC2626]/20 border border-[#DC2626]/50 rounded-lg p-3">
+                      <Text className="text-[#DC2626] text-xs text-center font-bold">
+                        🔥 PRO: Desbloquea controles de reproducción
+                      </Text>
+                    </View>
+                  </View>
+                )}
               </View>
-              <Text className="text-white font-bold text-xl mb-2">Sin reproducción</Text>
-              <Text className="text-zinc-500 text-center">
-                Abre Spotify y reproduce algo,{'\n'}o busca una canción aquí
-              </Text>
-              <TouchableOpacity
-                onPress={() => setActiveTab('search')}
-                className="mt-6 bg-[#1DB954] px-6 py-3 rounded-full"
-              >
-                <Text className="text-black font-bold">Buscar música</Text>
-              </TouchableOpacity>
-            </View>
-          )}
+            ) : (
+              <View className="flex-1 items-center justify-center">
+                <View className="w-32 h-32 bg-zinc-900 rounded-full items-center justify-center mb-6">
+                  <Music size={48} color="#71717A" />
+                </View>
+                <Text className="text-white font-bold text-xl mb-2">Sin reproducción</Text>
+                <Text className="text-zinc-500 text-center">
+                  Abre Spotify y reproduce algo,{'\n'}o busca una canción aquí
+                </Text>
+                <TouchableOpacity
+                  onPress={() => setActiveTab('search')}
+                  className="mt-6 bg-[#1DB954] px-6 py-3 rounded-full"
+                >
+                  <Text className="text-black font-bold">Buscar música</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
         </Animated.View>
       )}
 
@@ -832,18 +1040,24 @@ export default function SpotifyModal({
               ) : (
                 <FlatList
                   data={tracks}
-                  keyExtractor={(item, index) => `${item.id}_${index}`}
+                  keyExtractor={(item) => item.id}
                   renderItem={({ item, index }) =>
                     renderTrackItemWithContext(item, index, tracks, 'playlist')
                   }
                   showsVerticalScrollIndicator={false}
                   contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
                   onEndReached={loadMorePlaylistTracks}
-                  onEndReachedThreshold={0.5}
-                  initialNumToRender={15}
-                  maxToRenderPerBatch={10}
-                  windowSize={5}
+                  onEndReachedThreshold={0.3}
+                  initialNumToRender={10}
+                  maxToRenderPerBatch={8}
+                  windowSize={3}
                   removeClippedSubviews={true}
+                  getItemLayout={(_, index) => ({
+                    length: 60,
+                    offset: 60 * index,
+                    index,
+                  })}
+                  updateCellsBatchingPeriod={100}
                   ListFooterComponent={
                     loadingMore ? (
                       <View className="py-4 items-center">
@@ -916,18 +1130,24 @@ export default function SpotifyModal({
           ) : (
             <FlatList
               data={likedSongs}
-              keyExtractor={(item, index) => `${item.id}_${index}`}
+              keyExtractor={(item) => item.id}
               renderItem={({ item, index }) =>
                 renderTrackItemWithContext(item, index, likedSongs, 'liked')
               }
               showsVerticalScrollIndicator={false}
               contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
               onEndReached={loadMoreLikedSongs}
-              onEndReachedThreshold={0.5}
-              initialNumToRender={15}
-              maxToRenderPerBatch={10}
-              windowSize={5}
+              onEndReachedThreshold={0.3}
+              initialNumToRender={10}
+              maxToRenderPerBatch={8}
+              windowSize={3}
               removeClippedSubviews={true}
+              getItemLayout={(_, index) => ({
+                length: 60,
+                offset: 60 * index,
+                index,
+              })}
+              updateCellsBatchingPeriod={100}
               ListFooterComponent={
                 loadingMore ? (
                   <View className="py-4 items-center">

@@ -1,0 +1,58 @@
+{
+  "name": "TRENS Development",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
+
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "GitHub.copilot",
+        "GitHub.copilot-chat",
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "bradlc.vscode-tailwindcss",
+        "expo.vscode-expo-tools",
+        "formulahendry.auto-rename-tag",
+        "mikestead.dotenv"
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "editor.codeActionsOnSave": {
+          "source.fixAll.eslint": "explicit"
+        },
+        "typescript.preferences.importModuleSpecifier": "relative",
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  },
+
+  "forwardPorts": [8081, 19000, 19001, 19002],
+  "portsAttributes": {
+    "8081": { "label": "Metro Bundler", "onAutoForward": "notify" },
+    "19000": { "label": "Expo", "onAutoForward": "notify" },
+    "19001": { "label": "Expo DevTools", "onAutoForward": "silent" },
+    "19002": { "label": "Expo Web", "onAutoForward": "silent" }
+  },
+
+  "postCreateCommand": "npm install && echo '✅ TRENS ready'",
+
+  "postStartCommand": "bash -c 'cat >> ~/.bashrc << \"EOF\"\n# TRENS Autonomous Mode\nexport CI=true\nexport DEBIAN_FRONTEND=noninteractive\nexport npm_config_yes=true\nexport GIT_TERMINAL_PROMPT=0\nexport EXPO_NO_PROMPT=1\nexport FORCE_COLOR=1\nEOF\n'",
+
+  "remoteEnv": {
+    "CI": "true",
+    "DEBIAN_FRONTEND": "noninteractive",
+    "npm_config_yes": "true",
+    "GIT_TERMINAL_PROMPT": "0",
+    "EXPO_NO_PROMPT": "1",
+    "FORCE_COLOR": "1"
+  },
+
+  "containerEnv": {
+    "NODE_OPTIONS": "--max-old-space-size=4096"
+  }
+}

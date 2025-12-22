@@ -1,0 +1,52 @@
+{
+  "name": "trens-global-devcontainer",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
+
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "github.copilot",
+        "github.copilot-chat",
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "bradlc.vscode-tailwindcss",
+        "usernamehw.errorlens",
+        "eamodio.gitlens"
+      ],
+      "settings": {
+        "chat.commandCenter.enabled": true,
+        "chat.agent.enabled": true,
+        "chat.agent.maxRequests": 100,
+        "chat.tools.autoApprove": true,
+        "github.copilot.chat.agent.autoApprove": true,
+        "github.copilot.chat.agent.runTasks.enabled": true,
+        "github.copilot.chat.agent.runTerminalCommands.enabled": true,
+        "github.copilot.chat.agent.runTerminalCommands.approval": "auto",
+        "terminal.integrated.confirmOnExit": "never",
+        "terminal.integrated.confirmOnKill": "never",
+        "security.workspace.trust.enabled": false,
+        "explorer.confirmDelete": false,
+        "git.confirmSync": false,
+        "git.enableSmartCommit": true
+      }
+    }
+  },
+
+  "postCreateCommand": "npm install && echo '🔥 Dev container ready!'",
+
+  "containerEnv": {
+    "CI": "true",
+    "DEBIAN_FRONTEND": "noninteractive",
+    "npm_config_yes": "true"
+  },
+
+  "remoteEnv": {
+    "EDITOR": "code --wait",
+    "GIT_EDITOR": "code --wait"
+  }
+}

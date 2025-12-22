@@ -829,10 +829,14 @@ export const HankOverlay: React.FC = () => {
       },
       onPanResponderRelease: (_, gestureState) => {
         if (gestureState.dy > 150) {
-          setIsOpen(false);
+          // Animar hacia abajo DESDE la posición actual antes de cerrar
+          translateY.value = withTiming(500, { duration: 200 });
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           setTimeout(() => {
+            setIsOpen(false);
+            // Reset DESPUÉS de cerrar
             translateY.value = 0;
-          }, 300);
+          }, 200);
         } else {
           // Vibración cuando vuelve arriba
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);

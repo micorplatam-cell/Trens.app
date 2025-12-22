@@ -477,28 +477,35 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
 
   /**
    * Procesa un comando de texto del usuario usando Gemini AI
+   * @param userText - El comando a procesar
+   * @param options - Opciones adicionales
+   * @param options.saveToHistory - Si es false, no guarda en historial ni Supabase (default: true)
    */
   const executeCommand = useCallback(
-    async (userText: string): Promise<HankToolResult[]> => {
+    async (userText: string, options?: { saveToHistory?: boolean }): Promise<HankToolResult[]> => {
+      const saveToHistory = options?.saveToHistory !== false; // default true
       setIsProcessing(true);
       setLastAction(userText);
       console.warn('🧠 HANK recibió comando:', userText);
+      console.warn('🧠 HANK saveToHistory:', saveToHistory);
       console.warn('🎯 HANK activeAsset:', activeAsset ? activeAsset.name : 'NINGUNO');
 
       try {
         // 1. Verificar si es un alias
         const aliasResults = await executeAlias(userText);
         if (aliasResults) {
-          // Agregar al historial y guardar en DB
-          const aliasMessage = aliasResults.map((r) => r.message).join(' ');
-          setConversationHistory((prev) => [
-            ...prev,
-            { role: 'user', parts: [{ text: userText }] },
-            { role: 'model', parts: [{ text: aliasMessage }] },
-          ]);
-          // Guardar en Supabase
-          await saveMessageToSupabase('user', userText);
-          await saveMessageToSupabase('model', aliasMessage);
+          // Agregar al historial y guardar en DB solo si saveToHistory es true
+          if (saveToHistory) {
+            const aliasMessage = aliasResults.map((r) => r.message).join(' ');
+            setConversationHistory((prev) => [
+              ...prev,
+              { role: 'user', parts: [{ text: userText }] },
+              { role: 'model', parts: [{ text: aliasMessage }] },
+            ]);
+            // Guardar en Supabase
+            await saveMessageToSupabase('user', userText);
+            await saveMessageToSupabase('model', aliasMessage);
+          }
           return aliasResults;
         }
 
@@ -556,14 +563,16 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
             finalResponseText = finalMessage;
           }
 
-          // Actualizar historial de conversación y guardar en DB
-          setConversationHistory((prev) => [
-            ...prev,
-            { role: 'user', parts: [{ text: userText }] },
-            { role: 'model', parts: [{ text: finalResponseText || 'Listo.' }] },
-          ]);
-          await saveMessageToSupabase('user', userText);
-          await saveMessageToSupabase('model', finalResponseText || 'Listo.');
+          // Actualizar historial de conversación y guardar en DB solo si saveToHistory es true
+          if (saveToHistory) {
+            setConversationHistory((prev) => [
+              ...prev,
+              { role: 'user', parts: [{ text: userText }] },
+              { role: 'model', parts: [{ text: finalResponseText || 'Listo.' }] },
+            ]);
+            await saveMessageToSupabase('user', userText);
+            await saveMessageToSupabase('model', finalResponseText || 'Listo.');
+          }
 
           // Trigger refresh si alguna operación fue exitosa
           if (results.some((r) => r.success)) {
@@ -578,13 +587,15 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
         }
 
         // 6. Si no hay tool calls, devolver el mensaje de texto y actualizar historial
-        setConversationHistory((prev) => [
-          ...prev,
-          { role: 'user', parts: [{ text: userText }] },
-          { role: 'model', parts: [{ text: geminiResponse.message }] },
-        ]);
-        await saveMessageToSupabase('user', userText);
-        await saveMessageToSupabase('model', geminiResponse.message);
+        if (saveToHistory) {
+          setConversationHistory((prev) => [
+            ...prev,
+            { role: 'user', parts: [{ text: userText }] },
+            { role: 'model', parts: [{ text: geminiResponse.message }] },
+          ]);
+          await saveMessageToSupabase('user', userText);
+          await saveMessageToSupabase('model', geminiResponse.message);
+        }
 
         return [
           {

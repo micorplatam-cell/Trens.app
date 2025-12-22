@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "trens": {
+      "command": "node",
+      "args": ["/workspaces/Trens.app/mcp-server/dist/index.js"],
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "${env:EXPO_PUBLIC_SUPABASE_URL}",
+        "SUPABASE_SERVICE_ROLE_KEY": "${env:SUPABASE_SERVICE_ROLE_KEY}",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "${env:EXPO_PUBLIC_SUPABASE_ANON_KEY}"
+      }
+    }
+  }
+}

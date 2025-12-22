@@ -2,10 +2,11 @@
 // SPOTIFY OVERLAY - FAB flotante global para control de Spotify
 // Visible en todas las pantallas excepto Feed
 // Gestos: Long press = play/pause, Swipe up = next, Swipe left = restart
+//         Swipe down = HANK Insight (mensaje savage según canción + contexto)
 // ============================================================================
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, PanResponder, GestureResponderEvent } from 'react-native';
+import { View, Text, PanResponder, Dimensions, GestureResponderEvent } from 'react-native';
 import { Image } from 'expo-image';
 import Animated, {
   useAnimatedStyle,
@@ -16,18 +17,316 @@ import Animated, {
   withSpring,
   Easing,
   interpolate,
-  runOnJS,
+  SlideInDown,
+  SlideOutDown,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
-import { Music, Play, Pause, SkipForward, RotateCcw } from 'lucide-react-native';
+import { Music, SkipForward, RotateCcw, Sparkles, GitlabIcon as Bot } from 'lucide-react-native';
 import { usePathname } from 'expo-router';
 import spotify, { SpotifyTrack, SpotifyPlaybackState } from '../../services/spotify/spotify';
 import SpotifyModal from './SpotifyModal';
 import { useUserRoleContext } from '../../context/UserRoleContext';
+import { useHank } from '../../context/HankContext';
+
+// Dimensiones de pantalla
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 // Constantes para gestos
 const LONG_PRESS_DURATION = 500; // ms
 const SWIPE_THRESHOLD = 50; // px mínimo para considerar swipe
+
+// ============================================================================
+// HANK INSIGHT TOAST - Mensaje savage flotante
+// ============================================================================
+interface HankInsightToastProps {
+  visible: boolean;
+  message: string;
+  trackName: string;
+  isLoading: boolean;
+  albumArt?: string | null;
+  artistImage?: string | null; // Imagen del artista (prioritaria)
+  onDismiss: () => void;
+}
+
+const HankInsightToast: React.FC<HankInsightToastProps> = ({
+  visible,
+  message,
+  trackName,
+  isLoading,
+  albumArt,
+  artistImage,
+  onDismiss,
+}) => {
+  // Animaciones
+  const pulseAnim = useSharedValue(1);
+  const glowAnim = useSharedValue(0.5);
+  const shakeAnim = useSharedValue(0);
+  const dismissTranslateY = useSharedValue(0);
+  const dismissOpacity = useSharedValue(1);
+
+  // Track previous loading state para detectar cuando termina de cargar
+  const prevIsLoading = useRef(isLoading);
+  const hasTriggeredHaptics = useRef(false);
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
+
+  // PanResponder para swipe vertical dismiss
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 5,
+
+      onPanResponderMove: (_, gestureState) => {
+        // Usar gestureState.dy directamente (ya es el delta desde el inicio)
+        dismissTranslateY.value = gestureState.dy;
+        // Fade out mientras se arrastra
+        dismissOpacity.value = Math.max(0.3, 1 - Math.abs(gestureState.dy) / 150);
+      },
+
+      onPanResponderRelease: (_, gestureState) => {
+        const dy = gestureState.dy;
+
+        // Si el swipe es suficiente (>40px arriba o abajo), cerrar
+        if (Math.abs(dy) > 40) {
+          // Animar fuera de pantalla DESDE la posición actual
+          const direction = dy > 0 ? 300 : -300;
+          dismissTranslateY.value = withTiming(direction, { duration: 150 });
+          dismissOpacity.value = withTiming(0, { duration: 150 });
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+          // Cerrar SIN resetear - el reset ocurre en el useEffect cuando visible=false
+          setTimeout(() => {
+            onDismissRef.current();
+          }, 150);
+        } else {
+          // Volver a posición original
+          dismissTranslateY.value = withSpring(0);
+          dismissOpacity.value = withTiming(1, { duration: 150 });
+        }
+      },
+
+      onPanResponderTerminate: () => {
+        dismissTranslateY.value = withSpring(0);
+        dismissOpacity.value = withTiming(1, { duration: 150 });
+      },
+    })
+  ).current;
+
+  // Cleanup cuando el componente se oculta
+  useEffect(() => {
+    if (!visible) {
+      pulseAnim.value = 1;
+      glowAnim.value = 0.5;
+      shakeAnim.value = 0;
+      dismissTranslateY.value = 0;
+      dismissOpacity.value = 1;
+      hasTriggeredHaptics.current = false;
+    }
+  }, [visible, pulseAnim, glowAnim, shakeAnim, dismissTranslateY, dismissOpacity]);
+
+  // Pulso mientras carga
+  useEffect(() => {
+    if (visible && isLoading) {
+      pulseAnim.value = withRepeat(
+        withSequence(withTiming(1.02, { duration: 600 }), withTiming(0.98, { duration: 600 })),
+        -1,
+        true
+      );
+    } else if (visible && !isLoading) {
+      pulseAnim.value = withTiming(1, { duration: 150 });
+      glowAnim.value = 0.6;
+    }
+  }, [visible, isLoading, pulseAnim, glowAnim]);
+
+  // 🔥 Vibración HEAVY + Efecto SHAKE cuando el mensaje está listo
+  useEffect(() => {
+    if (visible && prevIsLoading.current && !isLoading && message && !hasTriggeredHaptics.current) {
+      hasTriggeredHaptics.current = true;
+
+      // Vibración triple HEAVY
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy), 100);
+      setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy), 200);
+
+      // Efecto SHAKE visual
+      shakeAnim.value = withSequence(
+        withTiming(-5, { duration: 35, easing: Easing.linear }),
+        withTiming(5, { duration: 35, easing: Easing.linear }),
+        withTiming(-4, { duration: 35, easing: Easing.linear }),
+        withTiming(4, { duration: 35, easing: Easing.linear }),
+        withTiming(0, { duration: 35, easing: Easing.linear })
+      );
+    }
+    prevIsLoading.current = isLoading;
+  }, [visible, isLoading, message, shakeAnim]);
+
+  const containerStyle = useAnimatedStyle(() => ({
+    transform: [
+      { scale: pulseAnim.value },
+      { translateX: shakeAnim.value },
+      { translateY: dismissTranslateY.value },
+    ],
+    opacity: dismissOpacity.value,
+  }));
+
+  const glowStyle = useAnimatedStyle(() => ({
+    shadowOpacity: glowAnim.value,
+  }));
+
+  if (!visible) return null;
+
+  return (
+    <View
+      style={{
+        position: 'absolute',
+        bottom: 260,
+        left: 16,
+        right: 16,
+        zIndex: 9999,
+        alignItems: 'center',
+      }}
+    >
+      <Animated.View
+        entering={SlideInDown.duration(300).springify()}
+        exiting={SlideOutDown.duration(200)}
+        style={[containerStyle]}
+        {...(!isLoading ? panResponder.panHandlers : {})}
+      >
+        <Animated.View
+          style={[
+            {
+              backgroundColor: '#000',
+              borderRadius: 20,
+              padding: 16,
+              borderWidth: 2,
+              borderColor: '#DC2626',
+              maxWidth: SCREEN_WIDTH - 32,
+              shadowColor: '#DC2626',
+              shadowOffset: { width: 0, height: 0 },
+              shadowRadius: 15,
+              elevation: 8,
+            },
+            glowStyle,
+          ]}
+        >
+          {/* Header con icono y track */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+            {/* Imagen del artista o Album Art como fallback */}
+            {(artistImage || albumArt) && (
+              <View
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: artistImage ? 22 : 8, // Circular para artista, cuadrado para álbum
+                  overflow: 'hidden',
+                  marginRight: 12,
+                  borderWidth: 2,
+                  borderColor: artistImage ? '#DC2626' : '#1DB954', // Rojo HANK para artista
+                }}
+              >
+                <Image
+                  key={artistImage ?? albumArt ?? 'img'} // Key única para forzar re-render
+                  source={{ uri: artistImage ?? albumArt ?? undefined }}
+                  style={{ width: 44, height: 44, backgroundColor: '#27272a' }}
+                  contentFit="cover"
+                  cachePolicy="memory-disk"
+                  transition={150}
+                />
+              </View>
+            )}
+
+            {/* HANK badge + track name */}
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
+                <View
+                  style={{
+                    backgroundColor: '#DC2626',
+                    paddingHorizontal: 8,
+                    paddingVertical: 3,
+                    borderRadius: 10,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                  }}
+                >
+                  <Bot size={12} color="#FFF" />
+                  <Text style={{ color: '#FFF', fontSize: 10, fontWeight: 'bold', marginLeft: 4 }}>
+                    HANK
+                  </Text>
+                </View>
+                <View
+                  style={{
+                    backgroundColor: '#1DB954',
+                    paddingHorizontal: 6,
+                    paddingVertical: 3,
+                    borderRadius: 10,
+                    marginLeft: 6,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                  }}
+                >
+                  <Music size={10} color="#000" />
+                </View>
+              </View>
+              <Text
+                numberOfLines={1}
+                style={{
+                  color: '#A1A1AA',
+                  fontSize: 11,
+                  fontFamily: 'monospace',
+                }}
+              >
+                🎵 {trackName}
+              </Text>
+            </View>
+          </View>
+
+          {/* Mensaje o Loading */}
+          {isLoading ? (
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                paddingVertical: 8,
+              }}
+            >
+              <Sparkles size={18} color="#DC2626" />
+              <Text style={{ color: '#DC2626', fontSize: 14, fontWeight: '600', marginLeft: 8 }}>
+                Analizando vibes...
+              </Text>
+            </View>
+          ) : (
+            <Text
+              style={{
+                color: '#FFFFFF',
+                fontSize: 15,
+                lineHeight: 22,
+                fontWeight: '500',
+              }}
+            >
+              {message}
+            </Text>
+          )}
+
+          {/* Dismiss hint */}
+          {!isLoading && (
+            <Text
+              style={{
+                color: '#52525B',
+                fontSize: 10,
+                textAlign: 'center',
+                marginTop: 10,
+                fontFamily: 'monospace',
+              }}
+            >
+              ↕️ SWIPE PARA CERRAR
+            </Text>
+          )}
+        </Animated.View>
+      </Animated.View>
+    </View>
+  );
+};
 
 // ============================================================================
 // COMPONENTE PRINCIPAL
@@ -57,6 +356,18 @@ export function SpotifyOverlay() {
   const [playbackState, setPlaybackState] = useState<SpotifyPlaybackState | null>(null);
   // Estado separado para albumArt para evitar re-renders de imagen
   const [albumArtUrl, setAlbumArtUrl] = useState<string | null>(null);
+
+  // -------------------------------------------------------------------------
+  // HANK INSIGHT - Swipe down para mensaje savage
+  // -------------------------------------------------------------------------
+  const { executeCommand, screenContext, activeAsset } = useHank();
+  const [hankInsight, setHankInsight] = useState<{
+    visible: boolean;
+    message: string;
+    trackName: string;
+    isLoading: boolean;
+    artistImage: string | null; // Imagen del artista
+  }>({ visible: false, message: '', trackName: '', isLoading: false, artistImage: null });
 
   // Animaciones
   const pulseAnim = useSharedValue(1);
@@ -222,7 +533,7 @@ export function SpotifyOverlay() {
   // Handler para reiniciar canción (seek to 0)
   const handleRestartTrack = useCallback(async () => {
     try {
-      console.log('🎵 SpotifyOverlay: handleRestartTrack called');
+      console.warn('🎵 SpotifyOverlay: handleRestartTrack called');
       await spotify.seek(0);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       // Actualizar estado
@@ -236,9 +547,95 @@ export function SpotifyOverlay() {
   }, []);
 
   // -------------------------------------------------------------------------
+  // HANK INSIGHT HANDLER - Swipe down para comentario savage
+  // -------------------------------------------------------------------------
+  const handleHankInsight = useCallback(async () => {
+    if (!currentTrack || hankInsight.isLoading) return;
+
+    console.warn('🤖 SpotifyOverlay: handleHankInsight triggered');
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+
+    // Mostrar estado de carga (sin imagen de artista aún)
+    setHankInsight({
+      visible: true,
+      message: '',
+      trackName: currentTrack.name,
+      isLoading: true,
+      artistImage: null,
+    });
+
+    // 🎨 Obtener imagen del artista en paralelo con el insight
+    let artistImageUrl: string | null = null;
+    const artistImagePromise = currentTrack.artistId
+      ? spotify.getArtistImage(currentTrack.artistId)
+      : Promise.resolve(null);
+
+    try {
+      // Construir el prompt con contexto de canción y pantalla
+      const moduleNames: Record<string, string> = {
+        nucleo: 'el Dashboard Principal',
+        gym: 'el módulo de Entrenamiento',
+        plan: 'el módulo de Nutrición',
+        pro: 'el módulo PRO de Análisis',
+        adn: 'el módulo de ADN (Perfil Físico)',
+      };
+
+      const moduleName = moduleNames[screenContext.module] || screenContext.module;
+      const assetContext = activeAsset ? ` mientras reviso "${activeAsset.name}"` : '';
+
+      const insightPrompt = `[SPOTIFY_INSIGHT] Estoy escuchando "${currentTrack.name}" de ${currentTrack.artist} en ${moduleName}${assetContext}. Dame un comentario SAVAGE y motivacional de máximo 2 oraciones que conecte la canción con lo que estoy haciendo. Sé creativo, usa emojis, y que sea memorable. NO uses herramientas, solo responde con el mensaje.`;
+
+      console.warn('🤖 HANK Insight prompt:', insightPrompt);
+
+      // Ejecutar en paralelo: HANK + imagen artista
+      const [results, fetchedArtistImage] = await Promise.all([
+        executeCommand(insightPrompt, { saveToHistory: false }),
+        artistImagePromise,
+      ]);
+
+      artistImageUrl = fetchedArtistImage;
+
+      if (results && results.length > 0 && results[0].message) {
+        setHankInsight({
+          visible: true,
+          message: results[0].message,
+          trackName: currentTrack.name,
+          isLoading: false,
+          artistImage: artistImageUrl,
+        });
+        // NO auto-hide - el usuario cierra manualmente
+      } else {
+        // Fallback si no hay respuesta
+        setHankInsight({
+          visible: true,
+          message: `🔥 "${currentTrack.name}" sonando. Sin excusas, a darle.`,
+          trackName: currentTrack.name,
+          isLoading: false,
+          artistImage: artistImageUrl,
+        });
+        // NO auto-hide - el usuario cierra manualmente
+      }
+    } catch (error) {
+      console.warn('Error getting HANK insight:', error);
+      // Intentar obtener imagen del artista aunque falle el insight
+      artistImageUrl = await artistImagePromise.catch(() => null);
+      setHankInsight({
+        visible: true,
+        message: `💀 La música dice más que yo. Dale duro.`,
+        trackName: currentTrack.name,
+        isLoading: false,
+        artistImage: artistImageUrl,
+      });
+      // NO auto-hide - el usuario cierra manualmente
+    }
+  }, [currentTrack, screenContext, activeAsset, executeCommand, hankInsight.isLoading]);
+
+  // -------------------------------------------------------------------------
   // GESTURE STATE & REFS
   // -------------------------------------------------------------------------
-  const [gestureIndicator, setGestureIndicator] = useState<'none' | 'next' | 'restart'>('none');
+  const [gestureIndicator, setGestureIndicator] = useState<'none' | 'next' | 'restart' | 'hank'>(
+    'none'
+  );
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startPos = useRef({ x: 0, y: 0 });
   const isLongPress = useRef(false);
@@ -248,6 +645,7 @@ export function SpotifyOverlay() {
   const handleNextRef = useRef(handleNext);
   const handleRestartRef = useRef(handleRestartTrack);
   const handlePlayPauseRef = useRef(handlePlayPause);
+  const handleHankInsightRef = useRef(handleHankInsight);
   const handleFabPressRef = useRef(handleFabPress);
 
   // Mantener refs actualizados
@@ -256,6 +654,7 @@ export function SpotifyOverlay() {
     handleRestartRef.current = handleRestartTrack;
     handlePlayPauseRef.current = handlePlayPause;
     handleFabPressRef.current = handleFabPress;
+    handleHankInsightRef.current = handleHankInsight;
   });
 
   // Animación para feedback visual del FAB
@@ -314,6 +713,9 @@ export function SpotifyOverlay() {
           setGestureIndicator('next');
         } else if (dx < -SWIPE_THRESHOLD && Math.abs(dy) < SWIPE_THRESHOLD) {
           setGestureIndicator('restart');
+        } else if (dy > SWIPE_THRESHOLD && Math.abs(dx) < SWIPE_THRESHOLD) {
+          // Swipe down -> HANK Insight
+          setGestureIndicator('hank');
         } else {
           setGestureIndicator('none');
         }
@@ -350,6 +752,14 @@ export function SpotifyOverlay() {
         if (dx < -SWIPE_THRESHOLD && Math.abs(dy) < SWIPE_THRESHOLD) {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           handleRestartRef.current();
+          gestureHandled.current = true;
+          return;
+        }
+
+        // Detectar swipe down -> HANK Insight 🤖
+        if (dy > SWIPE_THRESHOLD && Math.abs(dx) < SWIPE_THRESHOLD) {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+          handleHankInsightRef.current();
           gestureHandled.current = true;
           return;
         }
@@ -518,6 +928,40 @@ export function SpotifyOverlay() {
           </View>
         )}
 
+        {/* Indicador de Gesto - HANK (abajo) 🤖 */}
+        {gestureIndicator === 'hank' && (
+          <View
+            style={{
+              position: 'absolute',
+              bottom: -45,
+              left: 0,
+              right: 0,
+              alignItems: 'center',
+            }}
+          >
+            <View
+              style={{
+                backgroundColor: '#DC2626',
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                borderRadius: 16,
+                flexDirection: 'row',
+                alignItems: 'center',
+                shadowColor: '#DC2626',
+                shadowOffset: { width: 0, height: 0 },
+                shadowOpacity: 0.8,
+                shadowRadius: 10,
+                elevation: 10,
+              }}
+            >
+              <Bot size={14} color="#FFF" />
+              <Text style={{ color: '#FFF', fontSize: 12, fontWeight: 'bold', marginLeft: 4 }}>
+                HANK
+              </Text>
+            </View>
+          </View>
+        )}
+
         {/* Mini Track Name Badge */}
         {currentTrack && spotifyConnected && playbackState?.isPlaying && (
           <View
@@ -559,6 +1003,17 @@ export function SpotifyOverlay() {
           onTrackChange={handleTrackChange}
         />
       )}
+
+      {/* HANK INSIGHT TOAST - Mensaje savage después de swipe down */}
+      <HankInsightToast
+        visible={hankInsight.visible}
+        message={hankInsight.message}
+        trackName={hankInsight.trackName}
+        isLoading={hankInsight.isLoading}
+        albumArt={albumArtUrl}
+        artistImage={hankInsight.artistImage}
+        onDismiss={() => setHankInsight((prev) => ({ ...prev, visible: false }))}
+      />
     </>
   );
 }

@@ -154,7 +154,10 @@ export interface HankContextState {
   aliases: UserAlias[];
 
   // Actions
-  executeCommand: (command: string) => Promise<HankToolResult[]>;
+  executeCommand: (
+    command: string,
+    options?: { saveToHistory?: boolean }
+  ) => Promise<HankToolResult[]>;
   executeTool: (toolCall: HankToolCall) => Promise<HankToolResult>;
   executeToolChain: (toolCalls: HankToolCall[]) => Promise<HankToolResult[]>;
 

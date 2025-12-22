@@ -41,6 +41,7 @@ export interface SpotifyTrack {
   uri: string;
   name: string;
   artist: string;
+  artistId: string; // ID del primer artista para obtener imagen
   album: string;
   albumArt: string;
   durationMs: number;
@@ -487,6 +488,7 @@ class SpotifyService {
             uri: data.item.uri,
             name: data.item.name,
             artist: data.item.artists.map((a: any) => a.name).join(', '),
+            artistId: data.item.artists?.[0]?.id || '', // ID del primer artista
             album: data.item.album.name,
             albumArt: data.item.album.images[0]?.url || '',
             durationMs: data.item.duration_ms,
@@ -690,6 +692,7 @@ class SpotifyService {
         uri: item.uri,
         name: item.name,
         artist: item.artists?.map((a: any) => a.name).join(', ') || '',
+        artistId: item.artists?.[0]?.id || '',
         album: item.album?.name || '',
         albumArt: item.album?.images?.[0]?.url || '',
         durationMs: item.duration_ms,
@@ -1022,10 +1025,11 @@ class SpotifyService {
 
   /**
    * Obtener los tracks de una playlist
+   * OPTIMIZADO: Usa thumbnails pequeños (64x64) para listas
    */
   async getPlaylistTracks(
     playlistId: string,
-    limit: number = 50,
+    limit: number = 20,
     offset: number = 0
   ): Promise<SpotifyPlaylistTrack[]> {
     const data = await this.apiCall<any>(
@@ -1042,7 +1046,8 @@ class SpotifyService {
         name: item.track.name,
         artist: item.track.artists?.map((a: any) => a.name).join(', ') || 'Unknown',
         album: item.track.album?.name || 'Unknown',
-        albumArt: item.track.album?.images?.[0]?.url || null,
+        // Usar imagen pequeña (índice 2 = 64x64) para listas
+        albumArt: item.track.album?.images?.[2]?.url || item.track.album?.images?.[1]?.url || null,
         durationMs: item.track.duration_ms || 0,
         addedAt: item.added_at,
       }));
@@ -1050,8 +1055,9 @@ class SpotifyService {
 
   /**
    * Obtener los "Liked Songs" del usuario
+   * OPTIMIZADO: Usa thumbnails pequeños (64x64) para listas
    */
-  async getLikedSongs(limit: number = 50, offset: number = 0): Promise<SpotifyPlaylistTrack[]> {
+  async getLikedSongs(limit: number = 20, offset: number = 0): Promise<SpotifyPlaylistTrack[]> {
     const data = await this.apiCall<any>(`/me/tracks?limit=${limit}&offset=${offset}`);
 
     if (!data?.items) return [];
@@ -1064,7 +1070,8 @@ class SpotifyService {
         name: item.track.name,
         artist: item.track.artists?.map((a: any) => a.name).join(', ') || 'Unknown',
         album: item.track.album?.name || 'Unknown',
-        albumArt: item.track.album?.images?.[0]?.url || null,
+        // Usar imagen pequeña (índice 2 = 64x64) para listas, fallback a mediana
+        albumArt: item.track.album?.images?.[2]?.url || item.track.album?.images?.[1]?.url || null,
         durationMs: item.track.duration_ms || 0,
         addedAt: item.added_at,
       }));
@@ -1102,8 +1109,9 @@ class SpotifyService {
 
   /**
    * Buscar tracks
+   * OPTIMIZADO: Límite reducido a 15, usa thumbnails pequeños
    */
-  async searchTracks(query: string, limit: number = 20): Promise<SpotifyPlaylistTrack[]> {
+  async searchTracks(query: string, limit: number = 15): Promise<SpotifyPlaylistTrack[]> {
     if (!query.trim()) return [];
 
     const data = await this.apiCall<any>(
@@ -1118,10 +1126,60 @@ class SpotifyService {
       name: track.name,
       artist: track.artists?.map((a: any) => a.name).join(', ') || 'Unknown',
       album: track.album?.name || 'Unknown',
-      albumArt: track.album?.images?.[0]?.url || null,
+      // Usar imagen pequeña (índice 2 = 64x64) para listas
+      albumArt: track.album?.images?.[2]?.url || track.album?.images?.[1]?.url || null,
       durationMs: track.duration_ms || 0,
       addedAt: '',
     }));
+  }
+
+  // =========================================================================
+  // ARTISTA - Obtener imagen del artista
+  // =========================================================================
+
+  // Caché en memoria para imágenes de artistas
+  private artistImageCache: Map<string, string> = new Map();
+
+  /**
+   * Obtener imagen del artista (con caché en memoria)
+   * @param artistId - ID del artista de Spotify
+   * @returns URL de la imagen o null si no existe
+   */
+  async getArtistImage(artistId: string): Promise<string | null> {
+    if (!artistId) return null;
+
+    // Verificar caché primero
+    if (this.artistImageCache.has(artistId)) {
+      return this.artistImageCache.get(artistId) || null;
+    }
+
+    try {
+      const data = await this.apiCall<any>(`/artists/${artistId}`);
+
+      if (data?.images && data.images.length > 0) {
+        // Usar imagen mediana (índice 1) para mejor calidad sin ser muy pesada
+        const imageUrl = data.images[1]?.url || data.images[0]?.url;
+
+        // Guardar en caché
+        if (imageUrl) {
+          this.artistImageCache.set(artistId, imageUrl);
+        }
+
+        return imageUrl || null;
+      }
+
+      return null;
+    } catch (error) {
+      console.warn('Error fetching artist image:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Limpiar caché de imágenes de artistas (para liberar memoria)
+   */
+  clearArtistImageCache(): void {
+    this.artistImageCache.clear();
   }
 }
 
