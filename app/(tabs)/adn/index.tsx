@@ -27,12 +27,14 @@ import {
   Share2,
   MoreVertical,
   Volume2,
+  LogOut,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { supabase } from '../../../lib/supabase';
 import { useUserRoleContext } from '../../../context/UserRoleContext';
 import { useHank } from '../../../context/HankContext';
+import { useSaveGuard } from '../../_layout';
 import spotify from '../../../services/spotify/spotify';
 import TrensID from '../../../components/adn/TrensID';
 import RecordCard from '../../../components/adn/RecordCard';
@@ -128,6 +130,7 @@ const VideoThumbnail = ({ videoUrl, size }: { videoUrl: string; size: number }) 
 export default function AdnScreen() {
   const { user, isPro, isAuthenticated, spotifyPremium } = useUserRoleContext();
   const { refreshTrigger } = useHank();
+  const { canSave } = useSaveGuard();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'legacy' | 'vault'>('legacy');
@@ -463,6 +466,9 @@ export default function AdnScreen() {
     reps: number;
     video_id?: string;
   }) => {
+    // Guard: Verificar si puede guardar
+    if (!canSave('save_record')) return;
+
     if (!user) return;
 
     // Verificar que el video sea público si se proporciona
@@ -518,9 +524,9 @@ export default function AdnScreen() {
   const vaultVideos = videos.filter((v) => !v.is_public);
 
   // -------------------------------------------------------------------------
-  // RENDER: Loading
+  // RENDER: Loading (solo si hay usuario y está cargando)
   // -------------------------------------------------------------------------
-  if (loading) {
+  if (loading && isAuthenticated) {
     return (
       <View className="flex-1 bg-black items-center justify-center">
         <ActivityIndicator size="large" color="#DC2626" />
@@ -529,33 +535,7 @@ export default function AdnScreen() {
   }
 
   // -------------------------------------------------------------------------
-  // RENDER: No autenticado
-  // -------------------------------------------------------------------------
-  if (!isAuthenticated) {
-    return (
-      <View className="flex-1 bg-black items-center justify-center px-6">
-        <View className="bg-zinc-900 rounded-3xl p-8 items-center">
-          <Lock color="#DC2626" size={48} />
-          <Text className="text-white text-xl font-bold mt-4 mb-2">TU ADN</Text>
-          <Text className="text-zinc-500 text-center mb-6">
-            Inicia sesión para ver tu perfil, récords y bóveda privada
-          </Text>
-          <TouchableOpacity
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              router.push('/(auth)/login');
-            }}
-            className="bg-savage-red py-3 px-8 rounded-xl"
-          >
-            <Text className="text-white font-bold">INICIAR SESIÓN</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
-
-  // -------------------------------------------------------------------------
-  // RENDER: Main
+  // RENDER: Main (con datos reales o placeholders para visitantes)
   // -------------------------------------------------------------------------
   return (
     <View className="flex-1 bg-black">
@@ -614,25 +594,44 @@ export default function AdnScreen() {
 
         {/* TRENS ID (Solo visible para el dueño) */}
         <View className="px-4 -mt-10">
-          {isOwner && profile && (
+          {isOwner && (
             <TrensID
-              userId={user!.id}
-              profileData={{
-                goal: profile.goal,
-                weight: profile.weight,
-                height: profile.height,
-                injuries: profile.injuries,
-                allergies: profile.allergies,
-                // Biometría avanzada
-                age: profile.age,
-                sex: profile.sex,
-                body_fat_percentage: profile.body_fat_percentage,
-                muscle_mass: profile.muscle_mass,
-                activity_level: profile.activity_level,
-                training_experience: profile.training_experience,
-                metabolic_rate: profile.metabolic_rate,
-                training_days_per_week: profile.training_days_per_week,
-              }}
+              userId={user?.id || 'guest'}
+              profileData={
+                profile
+                  ? {
+                      goal: profile.goal,
+                      weight: profile.weight,
+                      height: profile.height,
+                      injuries: profile.injuries,
+                      allergies: profile.allergies,
+                      // Biometría avanzada
+                      age: profile.age,
+                      sex: profile.sex,
+                      body_fat_percentage: profile.body_fat_percentage,
+                      muscle_mass: profile.muscle_mass,
+                      activity_level: profile.activity_level,
+                      training_experience: profile.training_experience,
+                      metabolic_rate: profile.metabolic_rate,
+                      training_days_per_week: profile.training_days_per_week,
+                    }
+                  : {
+                      // Placeholder data para visitantes
+                      goal: 'TU OBJETIVO',
+                      weight: '0',
+                      height: '0',
+                      injuries: '',
+                      allergies: '',
+                      age: undefined,
+                      sex: undefined,
+                      body_fat_percentage: undefined,
+                      muscle_mass: undefined,
+                      activity_level: undefined,
+                      training_experience: undefined,
+                      metabolic_rate: undefined,
+                      training_days_per_week: undefined,
+                    }
+              }
               measurements={measurements}
               onUpdate={fetchData}
             />
@@ -932,6 +931,29 @@ export default function AdnScreen() {
             )}
           </View>
         </View>
+
+        {/* Botón discreto de cerrar sesión */}
+        {user && (
+          <TouchableOpacity
+            onPress={() => {
+              Alert.alert('Cerrar Sesión', '¿Estás seguro de que deseas cerrar sesión?', [
+                { text: 'Cancelar', style: 'cancel' },
+                {
+                  text: 'Cerrar Sesión',
+                  style: 'destructive',
+                  onPress: async () => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                    await supabase.auth.signOut();
+                  },
+                },
+              ]);
+            }}
+            className="flex-row items-center justify-center gap-2 py-4 mt-4 mb-2"
+          >
+            <LogOut size={16} color="#52525B" />
+            <Text className="text-zinc-600 text-sm">Cerrar Sesión</Text>
+          </TouchableOpacity>
+        )}
 
         {/* Espaciado inferior */}
         <View className="h-20" />

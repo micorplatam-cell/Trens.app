@@ -1060,7 +1060,7 @@ export default function SpotifyModal({
                     minimumTrackTintColor="#1DB954"
                     maximumTrackTintColor="#27272A"
                     thumbTintColor="#1DB954"
-                    disabled={!isPro}
+                    disabled={false}
                   />
                   <View className="flex-row justify-between px-1 -mt-1">
                     <Text className="text-zinc-500 text-xs font-mono">
@@ -1072,55 +1072,42 @@ export default function SpotifyModal({
                   </View>
                 </View>
 
-                {/* Controls */}
-                {isPro ? (
-                  <View className="flex-row items-center justify-center gap-8">
-                    <TouchableOpacity
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                        handlePrevInPlaylist();
-                      }}
-                      className="w-14 h-14 bg-zinc-800 rounded-full items-center justify-center"
-                    >
-                      <SkipBack size={24} color="#fff" />
-                    </TouchableOpacity>
+                {/* Controls - Disponibles para todos */}
+                <View className="flex-row items-center justify-center gap-8">
+                  <TouchableOpacity
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      handlePrevInPlaylist();
+                    }}
+                    className="w-14 h-14 bg-zinc-800 rounded-full items-center justify-center"
+                  >
+                    <SkipBack size={24} color="#fff" />
+                  </TouchableOpacity>
 
-                    <TouchableOpacity
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                        onPlayPause();
-                      }}
-                      className="w-20 h-20 bg-[#1DB954] rounded-full items-center justify-center"
-                    >
-                      {playbackState?.isPlaying ? (
-                        <Pause size={36} color="#000" fill="#000" />
-                      ) : (
-                        <Play size={36} color="#000" fill="#000" style={{ marginLeft: 4 }} />
-                      )}
-                    </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                      onPlayPause();
+                    }}
+                    className="w-20 h-20 bg-[#1DB954] rounded-full items-center justify-center"
+                  >
+                    {playbackState?.isPlaying ? (
+                      <Pause size={36} color="#000" fill="#000" />
+                    ) : (
+                      <Play size={36} color="#000" fill="#000" style={{ marginLeft: 4 }} />
+                    )}
+                  </TouchableOpacity>
 
-                    <TouchableOpacity
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                        handleNextInPlaylist();
-                      }}
-                      className="w-14 h-14 bg-zinc-800 rounded-full items-center justify-center"
-                    >
-                      <SkipForward size={24} color="#fff" />
-                    </TouchableOpacity>
-                  </View>
-                ) : (
-                  <View className="bg-zinc-900 p-4 rounded-xl border border-zinc-800 w-full">
-                    <Text className="text-zinc-400 text-center text-sm">
-                      Tu música sigue sonando mientras entrenas
-                    </Text>
-                    <View className="mt-3 bg-[#DC2626]/20 border border-[#DC2626]/50 rounded-lg p-3">
-                      <Text className="text-[#DC2626] text-xs text-center font-bold">
-                        🔥 PRO: Desbloquea controles de reproducción
-                      </Text>
-                    </View>
-                  </View>
-                )}
+                  <TouchableOpacity
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      handleNextInPlaylist();
+                    }}
+                    className="w-14 h-14 bg-zinc-800 rounded-full items-center justify-center"
+                  >
+                    <SkipForward size={24} color="#fff" />
+                  </TouchableOpacity>
+                </View>
               </View>
             ) : (
               <View className="flex-1 items-center justify-center">

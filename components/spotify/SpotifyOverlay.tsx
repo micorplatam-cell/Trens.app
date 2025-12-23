@@ -27,6 +27,7 @@ import spotify, { SpotifyTrack, SpotifyPlaybackState } from '../../services/spot
 import SpotifyModal from './SpotifyModal';
 import { useUserRoleContext } from '../../context/UserRoleContext';
 import { useHank } from '../../context/HankContext';
+import { useSaveGuard } from '../../context/SaveGuardContext';
 
 // Dimensiones de pantalla
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -549,11 +550,34 @@ export function SpotifyOverlay() {
   // -------------------------------------------------------------------------
   // HANK INSIGHT HANDLER - Swipe down para comentario savage
   // -------------------------------------------------------------------------
+  const { canSave } = useSaveGuard();
+
   const handleHankInsight = useCallback(async () => {
     if (!currentTrack || hankInsight.isLoading) return;
 
     console.warn('🤖 SpotifyOverlay: handleHankInsight triggered');
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+
+    // 🔒 Verificar si el usuario puede usar esta función (consume IA)
+    if (!canSave('hank_spotify_insight')) {
+      // Mostrar un EJEMPLO de lo que obtendría con PRO
+      const exampleMessages = [
+        `🔥 "${currentTrack.name}" sonando mientras entrenas? IMPARABLE. Cada rep al ritmo de ${currentTrack.artist}. ¡A romperla!`,
+        `💪 ${currentTrack.artist} en los audífonos, fuego en los músculos. Esta sesión va a ser ÉPICA.`,
+        `🎵 Con "${currentTrack.name}" no hay excusas. El gym es tu escenario. ¡DEMUESTRA QUIÉN ERES!`,
+      ];
+      const randomExample = exampleMessages[Math.floor(Math.random() * exampleMessages.length)];
+
+      // Mostrar ejemplo bloqueado brevemente
+      setHankInsight({
+        visible: true,
+        message: `🔒 EJEMPLO PRO:\n\n${randomExample}\n\n⬆️ Actualiza a PRO para desbloquear mensajes SAVAGE personalizados con IA`,
+        trackName: currentTrack.name,
+        isLoading: false,
+        artistImage: null,
+      });
+      return;
+    }
 
     // Mostrar estado de carga (sin imagen de artista aún)
     setHankInsight({

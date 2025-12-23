@@ -6,10 +6,9 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { HankProvider } from '../context/HankContext';
-import { HankOverlay } from '../components/hank/HankOverlay';
-import { SpotifyOverlay } from '../components/spotify/SpotifyOverlay';
-import { ProContextProvider, useProContext } from '../context/ProContext';
+import { ProContextProvider } from '../context/ProContext';
 import { UserRoleProvider, useUserRoleContext } from '../context/UserRoleContext';
+import { SaveGuardProvider } from '../context/SaveGuardContext';
 import { useDeepLinkHandler } from '../services/share/deepLinkHandler';
 import '../global.css';
 
@@ -81,40 +80,36 @@ export { useHank } from '../context/HankContext';
 export { useProContext } from '../context/ProContext';
 
 // ============================================================================
+// 5. SAVE GUARD CONTEXT - Bloquea guardado para usuarios FREE
+// Re-exportamos useSaveGuard para acceso global
+// ============================================================================
+export { useSaveGuard } from '../context/SaveGuardContext';
+
+// ============================================================================
 // 4. HANK WRAPPER - Conecta HankProvider con userId del Auth
 // Solo renderiza HankProvider y HankOverlay cuando hay usuario autenticado
 // ============================================================================
 const HankWrapper = ({ children }: { children: React.ReactNode }) => {
-  const { user, loading } = useAuth();
+  const { user } = useAuth();
 
   // Manejar deep links entrantes
   useDeepLinkHandler();
 
-  // Si está cargando o no hay usuario, no montar HankProvider
-  if (loading || !user) {
-    return <>{children}</>;
-  }
-
-  return <HankProvider userId={user.id}>{children}</HankProvider>;
+  // HankProvider siempre disponible - userId opcional para visitantes
+  return <HankProvider userId={user?.id || 'visitor'}>{children}</HankProvider>;
 };
 
 // ============================================================================
-// 5. OVERLAYS WRAPPER - Renderiza overlays dentro del contexto de navegación
-// Estos componentes usan usePathname() que requiere estar dentro del Slot
+// 6. SAVE GUARD WRAPPER - Wrapper que conecta con auth y pro context
 // ============================================================================
-const OverlaysWrapper = () => {
+const SaveGuardWrapper = ({ children }: { children: React.ReactNode }) => {
   const { user, loading } = useAuth();
-
-  // Solo mostrar overlays si hay usuario autenticado
-  if (loading || !user) {
-    return null;
-  }
+  const { isPro } = useUserRoleContext();
 
   return (
-    <>
-      <HankOverlay />
-      <SpotifyOverlay />
-    </>
+    <SaveGuardProvider isAuthenticated={!loading && !!user} isPro={isPro}>
+      {children}
+    </SaveGuardProvider>
   );
 };
 
@@ -125,13 +120,15 @@ export default function RootLayout() {
         <AuthProvider>
           <SportProvider>
             <ProContextProvider>
-              <HankWrapper>
-                <View className="flex-1 bg-savage-black">
-                  <Slot />
-                  <OverlaysWrapper />
-                  <StatusBar style="light" />
-                </View>
-              </HankWrapper>
+              <SaveGuardWrapper>
+                <HankWrapper>
+                  <View className="flex-1 bg-savage-black">
+                    <Slot />
+                    {/* Overlays movidos a (tabs)/_layout.tsx donde hay contexto de navegación */}
+                    <StatusBar style="light" />
+                  </View>
+                </HankWrapper>
+              </SaveGuardWrapper>
             </ProContextProvider>
           </SportProvider>
         </AuthProvider>

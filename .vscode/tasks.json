@@ -4,7 +4,7 @@
     {
       "label": "🚀 Expo Start (Tunnel)",
       "type": "shell",
-      "command": "unset CI && npx expo start --tunnel",
+      "command": "unset CI && rm -rf .expo node_modules/.cache && npx expo start --tunnel --clear",
       "group": "build",
       "presentation": {
         "reveal": "always",

@@ -26,6 +26,7 @@ import {
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { supabase } from '../../lib/supabase';
+import { useSaveGuard } from '../../context/SaveGuardContext';
 import {
   calculateUserDailyMacros,
   calculateMealWithUserMacros,
@@ -63,6 +64,7 @@ interface TrensIDProps {
 }
 
 export default function TrensID({ userId, profileData, measurements, onUpdate }: TrensIDProps) {
+  const { canSave } = useSaveGuard();
   const [isExpanded, setIsExpanded] = useState(false);
   const [editData, setEditData] = useState<ProfileData>(profileData);
   const [editMeasurements, setEditMeasurements] = useState<Measurement[]>(measurements);
@@ -101,6 +103,9 @@ export default function TrensID({ userId, profileData, measurements, onUpdate }:
 
   const handleAddMeasurement = async () => {
     if (!newMeasurement.name || !newMeasurement.value) return;
+
+    // Guard: Verificar si puede guardar
+    if (!canSave('save_measurement')) return;
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
@@ -165,6 +170,9 @@ export default function TrensID({ userId, profileData, measurements, onUpdate }:
 
   // Guardar solo los datos del perfil (sin recalcular plan)
   const saveProfileOnly = async () => {
+    // Guard: Verificar si puede guardar
+    if (!canSave('save_profile')) return;
+
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setIsSaving(true);
 
@@ -202,6 +210,9 @@ export default function TrensID({ userId, profileData, measurements, onUpdate }:
 
   // Guardar Y sincronizar con el plan (recalcula macros e ingredientes)
   const saveAndSyncWithPlan = async () => {
+    // Guard: Verificar si puede guardar
+    if (!canSave('save_profile')) return;
+
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setIsSyncing(true);
     setSyncProgress('Guardando perfil...');

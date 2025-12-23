@@ -117,7 +117,17 @@ interface DBChatMessage {
   created_at: string;
 }
 
+// Helper para validar UUID (evita enviar "visitor" a la DB)
+const isValidUUID = (str: string | null): boolean => {
+  if (!str) return false;
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(str);
+};
+
 export const HankProvider = ({ children, userId }: HankProviderProps) => {
+  // Verificar si el userId es válido para operaciones de DB
+  const isValidUser = isValidUUID(userId);
+
   // -------------------------------------------------------------------------
   // STATE
   // -------------------------------------------------------------------------
@@ -200,10 +210,12 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
 
   /**
    * Cargar historial desde Supabase y limpiar mensajes antiguos (medianoche)
+   * Solo para usuarios autenticados con UUID válido
    */
   useEffect(() => {
     const initializeChatHistory = async () => {
-      if (historyInitialized.current || !userId) return;
+      // Solo cargar historial para usuarios con UUID válido (no "visitor")
+      if (historyInitialized.current || !isValidUser) return;
       historyInitialized.current = true;
 
       try {
@@ -246,23 +258,24 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
     };
 
     initializeChatHistory();
-  }, [userId]);
+  }, [userId, isValidUser]);
 
   /**
    * Guardar un mensaje en Supabase
+   * Solo para usuarios autenticados con UUID válido
    */
   const saveMessageToSupabase = useCallback(
     async (role: 'user' | 'model', content: string) => {
+      // No guardar para visitantes
+      if (!isValidUser) {
+        return;
+      }
+
       console.warn('💾 HANK: Intentando guardar mensaje:', {
         role,
         userId,
         contentLength: content.length,
       });
-
-      if (!userId) {
-        console.warn('❌ HANK: No se puede guardar - userId es null');
-        return;
-      }
 
       try {
         const { data, error } = await supabase
@@ -288,15 +301,16 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
         console.warn('⚠️ HANK: Error guardando mensaje:', error);
       }
     },
-    [userId]
+    [userId, isValidUser]
   );
 
   /**
    * Verificar medianoche periódicamente (cada minuto)
    * Esto asegura que si el usuario tiene la app abierta a medianoche, se limpie
+   * Solo para usuarios autenticados
    */
   useEffect(() => {
-    if (!userId) return;
+    if (!isValidUser) return;
 
     const checkMidnight = async () => {
       // Llamar a la función de limpieza de DB
@@ -314,7 +328,7 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
     const interval = setInterval(checkMidnight, 60000);
 
     return () => clearInterval(interval);
-  }, [userId]);
+  }, [userId, isValidUser]);
 
   // -------------------------------------------------------------------------
   // CONTEXT UPDATES
@@ -330,7 +344,8 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
       assetId: string | null,
       alternativeInfo?: { isAlternative: boolean; parentExerciseName: string }
     ) => {
-      if (!assetId || !userId) {
+      // Visitantes no tienen assets en DB
+      if (!assetId || !isValidUser) {
         setActiveAssetState(null);
         return;
       }
@@ -362,7 +377,7 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
         setActiveAssetState(null);
       }
     },
-    [userId]
+    [userId, isValidUser]
   );
 
   // -------------------------------------------------------------------------
@@ -456,11 +471,12 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
 
   /**
    * Limpia el historial de conversación (para nuevo chat)
-   * Elimina todos los mensajes del usuario en Supabase
+   * Elimina todos los mensajes del usuario en Supabase (solo usuarios autenticados)
    */
   const clearConversation = useCallback(async () => {
     setConversationHistory([]);
-    if (!userId) return;
+    // Solo limpiar en DB para usuarios autenticados
+    if (!isValidUser) return;
 
     try {
       const { error } = await supabase.from('hank_chat_messages').delete().eq('user_id', userId);
@@ -473,7 +489,7 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
     } catch (error) {
       console.warn('⚠️ HANK: Error limpiando historial:', error);
     }
-  }, [userId]);
+  }, [userId, isValidUser]);
 
   /**
    * Procesa un comando de texto del usuario usando Gemini AI

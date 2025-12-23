@@ -11,6 +11,10 @@ import Animated, {
   Easing,
 } from 'react-native-reanimated';
 import { useEffect, useRef } from 'react';
+import { useAuth } from '../_layout';
+import FloatingLoginButton from '../../components/auth/FloatingLoginButton';
+import { HankOverlay } from '../../components/hank/HankOverlay';
+import { SpotifyOverlay } from '../../components/spotify/SpotifyOverlay';
 
 // Hook para detectar módulo anterior y si PRO está activo
 function useProContext() {
@@ -203,8 +207,13 @@ function ConnectionLine({
 
 export default function TabsLayout() {
   const { isProActive, previousModule } = useProContext();
+  const { user, loading } = useAuth();
+  const pathname = usePathname();
 
-  // Determinar índice del módulo origen
+  // Determinar si mostrar el botón flotante de login
+  // Solo mostrar si: NO hay usuario autenticado Y NO estamos en Feed o PRO
+  const isFeedOrPro = pathname?.includes('feed') || pathname?.includes('pro');
+  const showLoginButton = !loading && !user && !isFeedOrPro;
   const getSourceIndex = (): number => {
     if (!previousModule) return -1;
     if (previousModule.includes('feed')) return 0;
@@ -220,124 +229,138 @@ export default function TabsLayout() {
   };
 
   return (
-    <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarStyle: {
-          backgroundColor: '#000000',
-          borderTopColor: '#27272a',
-          borderTopWidth: 1,
-          height: 85,
-          paddingBottom: 25,
-          paddingTop: 10,
-          overflow: 'visible',
-        },
-        tabBarActiveTintColor: '#DC2626',
-        tabBarInactiveTintColor: '#71717a',
-        tabBarLabelStyle: {
-          fontSize: 10,
-          fontWeight: '600',
-          letterSpacing: 1,
-        },
-        tabBarBackground: () => (
-          <View style={{ flex: 1, backgroundColor: '#000000' }}>
-            <ConnectionLine isVisible={isProActive} sourceIndex={getSourceIndex()} />
-          </View>
-        ),
-      }}
-    >
-      {/* FEED - Pantalla principal (TikTok-style) */}
-      <Tabs.Screen
-        name="feed/index"
-        options={{
-          title: 'FEED',
-          tabBarIcon: ({ color }) => (
-            <SyncedGlowIcon
-              Icon={Play}
-              color={color}
-              size={26}
-              fill={color}
-              isSource={isSourceModule('feed')}
-            />
-          ),
-        }}
-      />
-
-      {/* ADN - Perfil + Bóveda + Configuración */}
-      <Tabs.Screen
-        name="adn/index"
-        options={{
-          title: 'ADN',
-          tabBarIcon: ({ color }) => (
-            <SyncedGlowIcon Icon={User} color={color} size={26} isSource={isSourceModule('adn')} />
-          ),
-        }}
-      />
-
-      {/* PRO - Botón central de cámara (sin efecto pulsante) */}
-      <Tabs.Screen
-        name="pro/index"
-        options={{
-          title: '',
-          tabBarIcon: ({ focused }) => (
-            <View
-              style={{
-                padding: 16,
-                borderRadius: 999,
-                backgroundColor: focused ? '#DC2626' : '#27272a',
-                marginBottom: 20,
-                shadowColor: focused ? '#DC2626' : 'transparent',
-                shadowOffset: { width: 0, height: 4 },
-                shadowOpacity: focused ? 0.5 : 0,
-                shadowRadius: 8,
-                elevation: focused ? 8 : 0,
-              }}
-            >
-              <Crosshair color="#FFFFFF" size={28} />
+    <>
+      <Tabs
+        screenOptions={{
+          headerShown: false,
+          tabBarStyle: {
+            backgroundColor: '#000000',
+            borderTopColor: '#27272a',
+            borderTopWidth: 1,
+            height: 85,
+            paddingBottom: 25,
+            paddingTop: 10,
+            overflow: 'visible',
+          },
+          tabBarActiveTintColor: '#DC2626',
+          tabBarInactiveTintColor: '#71717a',
+          tabBarLabelStyle: {
+            fontSize: 10,
+            fontWeight: '600',
+            letterSpacing: 1,
+          },
+          tabBarBackground: () => (
+            <View style={{ flex: 1, backgroundColor: '#000000' }}>
+              <ConnectionLine isVisible={isProActive} sourceIndex={getSourceIndex()} />
             </View>
           ),
         }}
-      />
+      >
+        {/* FEED - Pantalla principal (TikTok-style) */}
+        <Tabs.Screen
+          name="feed/index"
+          options={{
+            title: 'FEED',
+            tabBarIcon: ({ color }) => (
+              <SyncedGlowIcon
+                Icon={Play}
+                color={color}
+                size={26}
+                fill={color}
+                isSource={isSourceModule('feed')}
+              />
+            ),
+          }}
+        />
 
-      {/* GYM - Ejercicios */}
-      <Tabs.Screen
-        name="gym/index"
-        options={{
-          title: 'GYM',
-          tabBarIcon: ({ color }) => (
-            <SyncedGlowIcon
-              Icon={Dumbbell}
-              color={color}
-              size={26}
-              isSource={isSourceModule('gym')}
-            />
-          ),
-        }}
-      />
+        {/* ADN - Perfil + Bóveda + Configuración */}
+        <Tabs.Screen
+          name="adn/index"
+          options={{
+            title: 'ADN',
+            tabBarIcon: ({ color }) => (
+              <SyncedGlowIcon
+                Icon={User}
+                color={color}
+                size={26}
+                isSource={isSourceModule('adn')}
+              />
+            ),
+          }}
+        />
 
-      {/* PLAN - Nutrición */}
-      <Tabs.Screen
-        name="plan/index"
-        options={{
-          title: 'PLAN',
-          tabBarIcon: ({ color }) => (
-            <SyncedGlowIcon
-              Icon={Utensils}
-              color={color}
-              size={26}
-              isSource={isSourceModule('plan')}
-            />
-          ),
-        }}
-      />
+        {/* PRO - Botón central de cámara (sin efecto pulsante) */}
+        <Tabs.Screen
+          name="pro/index"
+          options={{
+            title: '',
+            tabBarIcon: ({ focused }) => (
+              <View
+                style={{
+                  padding: 16,
+                  borderRadius: 999,
+                  backgroundColor: focused ? '#DC2626' : '#27272a',
+                  marginBottom: 20,
+                  shadowColor: focused ? '#DC2626' : 'transparent',
+                  shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: focused ? 0.5 : 0,
+                  shadowRadius: 8,
+                  elevation: focused ? 8 : 0,
+                }}
+              >
+                <Crosshair color="#FFFFFF" size={28} />
+              </View>
+            ),
+          }}
+        />
 
-      {/* NUCLEO - Oculto (integrado en ADN) */}
-      <Tabs.Screen
-        name="nucleo/index"
-        options={{
-          href: null,
-        }}
-      />
-    </Tabs>
+        {/* GYM - Ejercicios */}
+        <Tabs.Screen
+          name="gym/index"
+          options={{
+            title: 'GYM',
+            tabBarIcon: ({ color }) => (
+              <SyncedGlowIcon
+                Icon={Dumbbell}
+                color={color}
+                size={26}
+                isSource={isSourceModule('gym')}
+              />
+            ),
+          }}
+        />
+
+        {/* PLAN - Nutrición */}
+        <Tabs.Screen
+          name="plan/index"
+          options={{
+            title: 'PLAN',
+            tabBarIcon: ({ color }) => (
+              <SyncedGlowIcon
+                Icon={Utensils}
+                color={color}
+                size={26}
+                isSource={isSourceModule('plan')}
+              />
+            ),
+          }}
+        />
+
+        {/* NUCLEO - Oculto (integrado en ADN) */}
+        <Tabs.Screen
+          name="nucleo/index"
+          options={{
+            href: null,
+          }}
+        />
+      </Tabs>
+
+      {/* Overlays globales - aquí tienen contexto de navegación */}
+      <HankOverlay />
+      <SpotifyOverlay />
+
+      {/* Botón flotante de login (solo para usuarios no autenticados) */}
+      <FloatingLoginButton visible={showLoginButton} />
+    </>
   );
 }

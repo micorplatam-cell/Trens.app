@@ -20,6 +20,7 @@ import { StackManagerModal } from '../../../components/plan/StackManagerModal';
 import { AddOptionModal } from '../../../components/plan/AddOptionModal';
 import { supabase } from '../../../lib/supabase';
 import { useHank } from '../../../context/HankContext';
+import { useSaveGuard } from '../../_layout';
 import {
   calculateMacrosWithAI,
   calculateUserDailyMacros,
@@ -165,6 +166,7 @@ const parseTimeToSQL = (timeStr: string): string | null => {
 export default function PlanScreen() {
   const router = useRouter();
   const { refreshTrigger } = useHank();
+  const { canSave } = useSaveGuard();
 
   // State
   const [planName, setPlanName] = useState('MI PLAN');
@@ -239,7 +241,18 @@ export default function PlanScreen() {
       const {
         data: { user },
       } = await supabase.auth.getUser();
-      if (!user) return;
+
+      // Si no hay usuario, mostrar vista vacía
+      if (!user) {
+        setPlanName('MI PLAN');
+        setMeals([]);
+        setStackItems([]);
+        setTodayRoutine('SIN RUTINA');
+        setTodayExercises([]);
+        setIsLoading(false);
+        setRefreshing(false);
+        return;
+      }
 
       // Ya no usamos nutrition_plans, directamente cargamos meals
       setPlanName('MI PLAN');
@@ -918,6 +931,9 @@ export default function PlanScreen() {
     time: string,
     useHankAI: boolean
   ) => {
+    // Guard: Verificar si puede guardar
+    if (!canSave('create_meal')) return;
+
     try {
       const {
         data: { user },
@@ -1063,6 +1079,9 @@ export default function PlanScreen() {
   };
 
   const handleAddStackItem = async (item: Omit<StackItem, 'id'>) => {
+    // Guard: Verificar si puede guardar
+    if (!canSave('add_supplement')) return;
+
     try {
       const {
         data: { user },
@@ -1135,6 +1154,9 @@ export default function PlanScreen() {
     optionName: string,
     ingredients: Ingredient[]
   ) => {
+    // Guard: Verificar si puede guardar
+    if (!canSave('save_meal')) return;
+
     try {
       // Obtener el índice de la nueva opción
       const meal = meals.find((m) => m.id === mealId);

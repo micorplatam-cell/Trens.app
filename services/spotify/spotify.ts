@@ -167,11 +167,12 @@ class SpotifyService {
    * Obtener la URL de redirección para la autenticación
    */
   getRedirectUri(): string {
-    // Usar el proxy de Expo para desarrollo (más confiable)
+    // Genera la URI del tunnel actual de Expo
     const uri = AuthSession.makeRedirectUri({
       native: 'trensdev://spotify-callback',
     });
     console.warn('🎵 Spotify: Generated Redirect URI:', uri);
+    console.warn('🎵 Spotify: Si ves error INVALID_CLIENT, agrega esta URL en Spotify Dashboard');
     return uri;
   }
 

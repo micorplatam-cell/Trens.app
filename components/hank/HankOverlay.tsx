@@ -46,6 +46,7 @@ import { useHank } from '../../context/HankContext';
 import { useVoiceInput } from '../../hooks/useVoiceInput';
 import { callGemini } from '../../services/hank/gemini';
 import { supabase } from '../../lib/supabase';
+import { useSaveGuard } from '../../context/SaveGuardContext';
 import type { HankToolResult, HankToolCall } from '../../types/hank';
 
 // ============================================================================
@@ -769,6 +770,9 @@ export const HankOverlay: React.FC = () => {
     return null;
   }
 
+  // Save Guard para verificar si puede usar HANK
+  const { canSave } = useSaveGuard();
+
   const [isOpen, setIsOpen] = useState(false);
   const [inputText, setInputText] = useState('');
   const [isListening, setIsListening] = useState(false);
@@ -985,13 +989,20 @@ export const HankOverlay: React.FC = () => {
   // -------------------------------------------------------------------------
   // HANDLERS
   // -------------------------------------------------------------------------
-  const handleOpen = () => setIsOpen(true);
+  const handleOpen = () => {
+    // Guard: Verificar si puede hablar con HANK
+    if (!canSave('talk_to_hank')) return;
+    setIsOpen(true);
+  };
   const handleClose = () => {
     setIsOpen(false);
     setPendingExecution(null);
   };
 
   const handleSend = async () => {
+    // Guard: Verificar si puede hablar con HANK
+    if (!canSave('talk_to_hank')) return;
+
     if (!inputText.trim() || isProcessing) return;
 
     const userMessage: ChatMessage = {

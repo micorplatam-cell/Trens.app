@@ -57,6 +57,7 @@ import { useHank } from '../../../context/HankContext';
 import { LinearGradient } from 'expo-linear-gradient';
 import spotify, { SpotifyVideoMetadata } from '../../../services/spotify/spotify';
 import { useUserRoleContext } from '../../../context/UserRoleContext';
+import { useSaveGuard } from '../../_layout';
 import cloudflareR2 from '../../../services/cloudflare/r2';
 
 // ============================================================================
@@ -277,6 +278,7 @@ export default function GymScreen() {
     updateSpotifyStatus,
   } = useUserRoleContext();
   const { setTacticalContext } = useProContext();
+  const { canSave } = useSaveGuard();
   const isFocused = useIsFocused(); // Detecta si esta pantalla está activa
   const { setActiveAsset, setScreenContext, refreshTrigger } = useHank();
   const [viewMode, setViewMode] = useState<ViewMode>('LOADING');
@@ -355,7 +357,7 @@ export default function GymScreen() {
 
       // MUTEAR el video si hay Spotify - solo se escuchará Spotify
       historialPlayer.volume = hasSpotify ? 0 : 1;
-      
+
       // Reproducir video si no está pausado manualmente
       if (!isVideoManuallyPaused) {
         historialPlayer.play();
@@ -836,6 +838,9 @@ export default function GymScreen() {
 
   // Guardar nombre de rutina en la base de datos
   const saveRoutineName = async (dayIndex: number, newName: string) => {
+    // Guard: Verificar si puede guardar
+    if (!canSave('save_exercise')) return;
+
     if (!user || !newName.trim()) return;
 
     try {
@@ -882,6 +887,9 @@ export default function GymScreen() {
   // SAVE DAY NAME TO SUPABASE
   // ============================================================================
   const saveDayName = async (dayIndex: number, newName: string) => {
+    // Guard: Verificar si puede guardar
+    if (!canSave('save_exercise')) return;
+
     if (!user || !newName.trim()) return;
 
     try {
@@ -943,9 +951,8 @@ export default function GymScreen() {
 
   // Recargar ejercicios cuando cambie el día seleccionado o el usuario
   useEffect(() => {
-    if (user) {
-      loadExercises(selectedDayIndex);
-    }
+    // Cargar ejercicios siempre - con o sin usuario
+    loadExercises(selectedDayIndex);
   }, [selectedDayIndex, user]);
 
   // Recargar ejercicios cuando HANK modifica datos (mantener posición)
@@ -975,7 +982,11 @@ export default function GymScreen() {
   }, [refreshTrigger]);
 
   const loadExercises = async (dayIndex: number | null = null) => {
+    // Si no hay usuario, mostrar vista STRUCTURE vacía
     if (!user) {
+      setExercises([]);
+      setViewMode('STRUCTURE');
+      setLoading(false);
       return;
     }
     setLoading(true);
@@ -1598,6 +1609,9 @@ export default function GymScreen() {
   };
 
   const saveVideo = async () => {
+    // Guard: Verificar si puede guardar
+    if (!canSave('save_exercise_video')) return;
+
     if (!capturedVideoUri) return;
 
     try {
@@ -2025,6 +2039,9 @@ export default function GymScreen() {
   // SAVE AND TRAIN
   // ============================================================================
   const saveAndTrain = async () => {
+    // Guard: Verificar si puede guardar
+    if (!canSave('save_workout')) return;
+
     if (exercises.length === 0) return;
 
     // Actualizar el día actual en el perfil
@@ -3127,8 +3144,8 @@ export default function GymScreen() {
             <View className="flex-1">
               {/* VIDEO con TAP para pausar/reanudar */}
               {historialVideoSource ? (
-                <TouchableOpacity 
-                  activeOpacity={1} 
+                <TouchableOpacity
+                  activeOpacity={1}
                   onPress={handleHistorialVideoTap}
                   style={{ flex: 1 }}
                 >

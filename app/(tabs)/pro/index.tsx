@@ -19,6 +19,7 @@ import { supabase } from '../../../lib/supabase';
 import { useUserRoleContext } from '../../../context/UserRoleContext';
 import { useProContext } from '../../../context/ProContext';
 import { useHank } from '../../../context/HankContext';
+import { useSaveGuard } from '../../_layout';
 import { ProUpgradeModal } from '../../../components/pro/ProUpgradeModal';
 import { FullscreenVideoEditor } from '../../../components/pro/FullscreenVideoEditor';
 import spotify from '../../../services/spotify/spotify';
@@ -51,6 +52,7 @@ export default function ProScreen() {
   const { user, isPro, spotifyPremium, spotifyConnected } = useUserRoleContext();
   const { context: proContext, clearContext } = useProContext();
   const { triggerRefresh } = useHank();
+  const { canSave } = useSaveGuard();
 
   // Upgrade Modal (para usuarios FREE)
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
@@ -296,11 +298,8 @@ export default function ProScreen() {
     spotifyTrack: SpotifyMetadata | null;
     isPublic: boolean;
   }) => {
-    if (!isPro) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-      setShowUpgradeModal(true);
-      return;
-    }
+    // Guard: Verificar si puede guardar (muestra modal persuasivo)
+    if (!canSave('save_video_pro')) return;
 
     if (!capturedVideo || !user) return;
 
