@@ -15,7 +15,7 @@ import {
   Alert,
 } from 'react-native';
 import { Image } from 'expo-image';
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useIsFocused } from '@react-navigation/native';
 import { supabase } from '../../../lib/supabase';
 import { useAuth, useProContext } from '../../_layout';
@@ -38,6 +38,7 @@ import {
   RotateCcw,
   Lock,
   Volume2,
+  Zap,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -58,6 +59,7 @@ import { useHank } from '../../../context/HankContext';
 import { LinearGradient } from 'expo-linear-gradient';
 import spotify, { SpotifyVideoMetadata } from '../../../services/spotify/spotify';
 import cloudflareStream from '../../../services/cloudflare/stream';
+import { DraggableExerciseCard } from '../../../components/gym/DraggableExerciseCard';
 import { useUserRoleContext } from '../../../context/UserRoleContext';
 import { useSaveGuard } from '../../_layout';
 import cloudflareR2 from '../../../services/cloudflare/r2';
@@ -183,7 +185,7 @@ const VideoHero = ({
 // TYPES
 // ============================================================================
 type ViewMode = 'LOADING' | 'FOCUS' | 'STRUCTURE';
-type SeriesType = 'WARMUP' | 'FEEDER' | 'EFFECTIVE' | 'INTENSITY';
+type SeriesType = 'CALENTAMIENTO' | 'APROXIMACION' | 'EFECTIVA' | 'FALLO';
 type UserLevel = 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED' | 'PRO';
 type DayOfWeek = 'Lunes' | 'Martes' | 'Miércoles' | 'Jueves' | 'Viernes' | 'Sábado' | 'Domingo';
 
@@ -211,7 +213,7 @@ interface TrainingProgram {
 interface SeriesConfig {
   id: string;
   reps: number;
-  type: 'WARMUP' | 'APPROACH' | 'EFFECTIVE' | 'FAILURE';
+  type: 'CALENTAMIENTO' | 'APROXIMACION' | 'EFECTIVA' | 'FALLO';
   note: string;
   weight: number;
 }
@@ -270,6 +272,108 @@ interface AssetTemplate {
 }
 
 // ============================================================================
+// ANIMATED EXERCISE ITEM - Para animar items durante drag
+// ============================================================================
+interface AnimatedExerciseItemProps {
+  children: React.ReactNode;
+  offset: number;
+  isDragging?: boolean;
+}
+
+const AnimatedExerciseItem: React.FC<AnimatedExerciseItemProps> = ({
+  children,
+  offset,
+  isDragging,
+}) => {
+  const animatedStyle = useAnimatedStyle(
+    () => ({
+      transform: [{ translateY: withSpring(offset, { damping: 20, stiffness: 300 }) }],
+      zIndex: isDragging ? 9999 : 1,
+    }),
+    [offset, isDragging]
+  );
+
+  return <Animated.View style={animatedStyle}>{children}</Animated.View>;
+};
+
+// ============================================================================
+// SWIPEABLE SERIES ROW - Para swipe-to-delete en series
+// ============================================================================
+interface SwipeableSeriesRowProps {
+  children: React.ReactNode;
+  onDelete: () => void;
+}
+
+const SwipeableSeriesRow: React.FC<SwipeableSeriesRowProps> = ({ children, onDelete }) => {
+  const translateX = useSharedValue(0);
+  const DELETE_THRESHOLD = -80;
+  const hasDeleted = useRef(false);
+  const onDeleteRef = useRef(onDelete);
+
+  // Mantener el ref actualizado con el callback más reciente
+  useEffect(() => {
+    onDeleteRef.current = onDelete;
+  }, [onDelete]);
+
+  // Resetear hasDeleted cuando el componente recibe nuevo onDelete
+  useEffect(() => {
+    hasDeleted.current = false;
+    translateX.value = 0;
+  }, [onDelete, translateX]);
+
+  const executeDelete = useCallback(() => {
+    if (hasDeleted.current) return;
+    hasDeleted.current = true;
+    onDeleteRef.current();
+  }, []);
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => false,
+        onMoveShouldSetPanResponder: (_, gestureState) =>
+          Math.abs(gestureState.dx) > 10 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy),
+        onPanResponderMove: (_, gestureState) => {
+          if (gestureState.dx < 0) {
+            translateX.value = Math.max(gestureState.dx, -120);
+          }
+        },
+        onPanResponderRelease: (_, gestureState) => {
+          if (gestureState.dx < DELETE_THRESHOLD) {
+            // Ejecutar delete inmediatamente al superar threshold
+            translateX.value = withSpring(-500, { damping: 15 });
+            executeDelete();
+          } else {
+            translateX.value = withSpring(0);
+          }
+        },
+      }),
+    [translateX, executeDelete]
+  );
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: translateX.value }],
+  }));
+
+  return (
+    <View className="relative">
+      {/* Delete Background */}
+      <View className="absolute right-0 top-0 bottom-0 w-28 mb-2 rounded-xl bg-red-950 items-center justify-center flex-row gap-1">
+        <View className="flex-1 h-full items-center justify-center">
+          <Trash2 color="#DC2626" size={20} />
+          <Text className="text-savage-red text-[10px] font-bold mt-1">ELIMINAR</Text>
+        </View>
+      </View>
+
+      {/* Content */}
+      <Animated.View style={animatedStyle} {...panResponder.panHandlers}>
+        {children}
+      </Animated.View>
+    </View>
+  );
+};
+
+// ============================================================================
 // MAIN COMPONENT
 // ============================================================================
 
@@ -322,6 +426,10 @@ function GymScreen() {
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
   const [adding, setAdding] = useState(false);
+
+  // Catalog Tabs State
+  const [catalogTab, setCatalogTab] = useState<'SUGERIDOS' | string>('SUGERIDOS');
+  const [categories, setCategories] = useState<string[]>([]);
 
   // Timer State
   const [timerExpanded, setTimerExpanded] = useState(false);
@@ -493,6 +601,8 @@ function GymScreen() {
 
   // Series Config Modal State
   const [seriesConfigModalVisible, setSeriesConfigModalVisible] = useState(false);
+  const [seriesConfigFromCatalog, setSeriesConfigFromCatalog] = useState(false); // true si se abrió desde catálogo
+  const seriesConfigFromCatalogRef = useRef(false); // Ref para acceder en panResponder
   const [selectedTemplate, setSelectedTemplate] = useState<AssetTemplate | null>(null);
   const [seriesConfig, setSeriesConfig] = useState<SeriesConfig[]>([]);
   const [userLevel, setUserLevel] = useState<UserLevel>('INTERMEDIATE');
@@ -504,6 +614,192 @@ function GymScreen() {
   const [dayNameModalVisible, setDayNameModalVisible] = useState(false);
   const [editingDayIndex, setEditingDayIndex] = useState<number | null>(null);
   const [editingDayName, setEditingDayName] = useState('');
+
+  // Modal para agregar nuevo día con selección de grupos musculares
+  const [addDayModalVisible, setAddDayModalVisible] = useState(false);
+  const [selectedMuscleGroups, setSelectedMuscleGroups] = useState<string[]>([]);
+
+  // Grupos musculares disponibles para seleccionar - MÁS ESPECÍFICOS
+  const MUSCLE_GROUPS = [
+    // Parte Superior
+    {
+      id: 'pecho',
+      name: 'PECHO',
+      emoji: '💪',
+      color: '#ef4444',
+      bg: '#450a0a',
+      category: 'superior',
+    },
+    {
+      id: 'espalda',
+      name: 'ESPALDA',
+      emoji: '🔙',
+      color: '#3b82f6',
+      bg: '#1e3a5f',
+      category: 'superior',
+    },
+    {
+      id: 'hombros',
+      name: 'HOMBROS',
+      emoji: '🎯',
+      color: '#f59e0b',
+      bg: '#422006',
+      category: 'superior',
+    },
+    {
+      id: 'biceps',
+      name: 'BÍCEPS',
+      emoji: '💪',
+      color: '#10b981',
+      bg: '#052e16',
+      category: 'brazos',
+    },
+    {
+      id: 'triceps',
+      name: 'TRÍCEPS',
+      emoji: '💪',
+      color: '#8b5cf6',
+      bg: '#2e1065',
+      category: 'brazos',
+    },
+    {
+      id: 'antebrazos',
+      name: 'ANTEBRAZOS',
+      emoji: '🦾',
+      color: '#6366f1',
+      bg: '#312e81',
+      category: 'brazos',
+    },
+    // Parte Inferior
+    {
+      id: 'cuadriceps',
+      name: 'CUÁDRICEPS',
+      emoji: '🦵',
+      color: '#ec4899',
+      bg: '#500724',
+      category: 'piernas',
+    },
+    {
+      id: 'femorales',
+      name: 'FEMORALES',
+      emoji: '🦵',
+      color: '#be185d',
+      bg: '#4a044e',
+      category: 'piernas',
+    },
+    {
+      id: 'gluteos',
+      name: 'GLÚTEOS',
+      emoji: '🍑',
+      color: '#f97316',
+      bg: '#431407',
+      category: 'piernas',
+    },
+    {
+      id: 'aductores',
+      name: 'ADUCTORES',
+      emoji: '🦵',
+      color: '#a855f7',
+      bg: '#3b0764',
+      category: 'piernas',
+    },
+    {
+      id: 'pantorrillas',
+      name: 'PANTORRILLAS',
+      emoji: '🦶',
+      color: '#14b8a6',
+      bg: '#134e4a',
+      category: 'piernas',
+    },
+    // Core y Otros
+    {
+      id: 'abdominales',
+      name: 'ABDOMINALES',
+      emoji: '🔥',
+      color: '#eab308',
+      bg: '#422006',
+      category: 'core',
+    },
+    {
+      id: 'oblicuos',
+      name: 'OBLICUOS',
+      emoji: '🔥',
+      color: '#facc15',
+      bg: '#422006',
+      category: 'core',
+    },
+    {
+      id: 'lumbar',
+      name: 'LUMBAR',
+      emoji: '🔙',
+      color: '#22c55e',
+      bg: '#14532d',
+      category: 'core',
+    },
+    // Especiales
+    {
+      id: 'trapecio',
+      name: 'TRAPECIO',
+      emoji: '🔺',
+      color: '#0ea5e9',
+      bg: '#0c4a6e',
+      category: 'superior',
+    },
+    {
+      id: 'cardio',
+      name: 'CARDIO',
+      emoji: '❤️',
+      color: '#ef4444',
+      bg: '#450a0a',
+      category: 'cardio',
+    },
+    {
+      id: 'full',
+      name: 'FULL BODY',
+      emoji: '⚡',
+      color: '#06b6d4',
+      bg: '#083344',
+      category: 'especial',
+    },
+  ];
+
+  // Función para obtener color de grupo muscular
+  const getMuscleGroupColor = (category: string) => {
+    const normalizedCategory = category?.toLowerCase() || '';
+    const group = MUSCLE_GROUPS.find(
+      (g) => normalizedCategory.includes(g.id) || normalizedCategory.includes(g.name.toLowerCase())
+    );
+    return group || { color: '#71717a', bg: '#27272a' };
+  };
+
+  // Shared value para drag-to-dismiss del modal de agregar día
+  const translateYAddDay = useSharedValue(0);
+  const animatedStyleAddDay = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateYAddDay.value }],
+  }));
+  const panResponderAddDay = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 5,
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0) {
+          translateYAddDay.value = gestureState.dy;
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 100) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          setAddDayModalVisible(false);
+          setSelectedMuscleGroups([]);
+          setTimeout(() => {
+            translateYAddDay.value = 0;
+          }, 300);
+        } else {
+          translateYAddDay.value = withSpring(0);
+        }
+      },
+    })
+  ).current;
 
   // Training Program State
   const [trainingProgram, setTrainingProgram] = useState<TrainingProgram>({
@@ -642,6 +938,8 @@ function GymScreen() {
   // Modal drag state
   const translateYHistorial = useSharedValue(0);
   const translateYStructure = useSharedValue(0);
+  const translateYCatalog = useSharedValue(0);
+  const translateYSeriesConfig = useSharedValue(0);
 
   const animatedStyleHistorial = useAnimatedStyle(() => ({
     transform: [{ translateY: translateYHistorial.value }],
@@ -649,6 +947,14 @@ function GymScreen() {
 
   const animatedStyleStructure = useAnimatedStyle(() => ({
     transform: [{ translateY: translateYStructure.value }],
+  }));
+
+  const animatedStyleCatalog = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateYCatalog.value }],
+  }));
+
+  const animatedStyleSeriesConfig = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateYSeriesConfig.value }],
   }));
 
   const panResponderHistorial = useRef(
@@ -690,6 +996,64 @@ function GymScreen() {
           }, 300);
         } else {
           translateYStructure.value = withSpring(0);
+        }
+      },
+    })
+  ).current;
+
+  const panResponderCatalog = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 5,
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0) {
+          translateYCatalog.value = gestureState.dy;
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 150) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          setModalVisible(false);
+          setCatalogTab('SUGERIDOS');
+          setTimeout(() => {
+            translateYCatalog.value = 0;
+          }, 300);
+        } else {
+          translateYCatalog.value = withSpring(0);
+        }
+      },
+    })
+  ).current;
+
+  const closeSeriesConfigModal = () => {
+    setSeriesConfigModalVisible(false);
+    // Solo abrir catálogo si vino del catálogo (usar ref porque se llama desde panResponder)
+    if (seriesConfigFromCatalogRef.current) {
+      setModalVisible(true);
+    }
+    setSeriesConfigFromCatalog(false);
+    seriesConfigFromCatalogRef.current = false;
+    setTimeout(() => {
+      translateYSeriesConfig.value = 0;
+    }, 300);
+  };
+
+  const panResponderSeriesConfig = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 5,
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0) {
+          translateYSeriesConfig.value = gestureState.dy;
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 150) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          // Cerrar usando la función que respeta el origen
+          closeSeriesConfigModal();
+        } else {
+          translateYSeriesConfig.value = withSpring(0);
         }
       },
     })
@@ -1318,15 +1682,17 @@ function GymScreen() {
               customSeriesData.length > 0
                 ? customSeriesData.map((s: SeriesConfig) => ({
                     id: s.id,
-                    type:
-                      s.type === 'WARMUP'
-                        ? 'WARMUP'
-                        : s.type === 'APPROACH'
-                          ? 'FEEDER'
-                          : s.type === 'FAILURE'
-                            ? 'INTENSITY'
-                            : 'EFFECTIVE',
-                    reps: s.reps.toString(),
+                    // Normalizar tipos a español (el tipo almacenado puede ser legacy en inglés)
+                    type: (
+                      s.type === 'CALENTAMIENTO' || (s.type as string) === 'WARMUP'
+                        ? 'CALENTAMIENTO'
+                        : s.type === 'APROXIMACION' || (s.type as string) === 'APPROACH'
+                          ? 'APROXIMACION'
+                          : s.type === 'FALLO' || (s.type as string) === 'FAILURE'
+                            ? 'FALLO'
+                            : 'EFECTIVA'
+                    ) as SeriesType,
+                    reps: String(s.reps),
                     note: s.note || undefined,
                     weight: s.weight || 0,
                   }))
@@ -1445,6 +1811,12 @@ function GymScreen() {
           },
         }));
         setTemplates(mappedTemplates);
+
+        // Extraer categorías únicas para los tabs
+        const uniqueCategories = [...new Set(mappedTemplates.map((t) => t.category))].filter(
+          Boolean
+        );
+        setCategories(uniqueCategories);
       }
     } catch (error) {
       console.error('💥 Error loading templates:', error);
@@ -1494,38 +1866,20 @@ function GymScreen() {
     const numSets = parseInt(count) || 4;
 
     const series: Series[] = [
-      { id: '1', type: 'WARMUP', reps: '12', note: 'Calentamiento' },
-      { id: '2', type: 'FEEDER', reps: '10', note: 'Aproximación' },
+      { id: '1', type: 'CALENTAMIENTO', reps: '12', note: 'Calentamiento' },
+      { id: '2', type: 'APROXIMACION', reps: '10', note: 'Aproximación' },
     ];
 
     for (let i = 0; i < numSets; i++) {
       series.push({
         id: `${i + 3}`,
-        type: 'EFFECTIVE',
+        type: 'EFECTIVA',
         reps: '10',
         note: 'Al fallo',
       });
     }
 
     return series;
-  };
-
-  // ============================================================================
-  // HELPER: Get Series Color
-  // ============================================================================
-  const getSeriesColor = (type: SeriesType): string => {
-    switch (type) {
-      case 'WARMUP':
-        return '#FBBF24'; // Amarillo
-      case 'FEEDER':
-        return '#3B82F6'; // Azul
-      case 'EFFECTIVE':
-        return '#DC2626'; // Rojo Neón
-      case 'INTENSITY':
-        return '#A855F7'; // Morado
-      default:
-        return '#FFFFFF';
-    }
   };
 
   // ============================================================================
@@ -1983,15 +2337,224 @@ function GymScreen() {
     setSelectedTemplate(template);
     setSeriesConfig([]);
     setModalVisible(false);
+    setSeriesConfigFromCatalog(true); // Viene del catálogo
+    seriesConfigFromCatalogRef.current = true; // Actualizar ref también
     setSeriesConfigModalVisible(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
   };
+
+  // ============================================================================
+  // QUICK ADD - Agregar ejercicio con estructura automática según nivel
+  // ============================================================================
+  const quickAddExercise = async (template: AssetTemplate) => {
+    if (!user) return;
+
+    // Generar estructura según nivel del usuario
+    const autoStructures: Record<UserLevel, SeriesConfig[]> = {
+      BEGINNER: [
+        { id: '1', reps: 12, type: 'CALENTAMIENTO', note: 'Calentamiento', weight: 0 },
+        { id: '2', reps: 10, type: 'EFECTIVA', note: '', weight: 0 },
+        { id: '3', reps: 10, type: 'EFECTIVA', note: '', weight: 0 },
+        { id: '4', reps: 10, type: 'EFECTIVA', note: '', weight: 0 },
+      ],
+      INTERMEDIATE: [
+        { id: '1', reps: 12, type: 'CALENTAMIENTO', note: 'Calentamiento', weight: 0 },
+        { id: '2', reps: 10, type: 'APROXIMACION', note: 'Aproximación', weight: 0 },
+        { id: '3', reps: 8, type: 'EFECTIVA', note: '', weight: 0 },
+        { id: '4', reps: 8, type: 'EFECTIVA', note: '', weight: 0 },
+        { id: '5', reps: 8, type: 'EFECTIVA', note: '', weight: 0 },
+      ],
+      ADVANCED: [
+        { id: '1', reps: 12, type: 'CALENTAMIENTO', note: 'Calentamiento', weight: 0 },
+        { id: '2', reps: 8, type: 'APROXIMACION', note: 'Aproximación 1', weight: 0 },
+        { id: '3', reps: 6, type: 'APROXIMACION', note: 'Aproximación 2', weight: 0 },
+        { id: '4', reps: 6, type: 'EFECTIVA', note: '', weight: 0 },
+        { id: '5', reps: 6, type: 'EFECTIVA', note: '', weight: 0 },
+        { id: '6', reps: 6, type: 'EFECTIVA', note: '', weight: 0 },
+        { id: '7', reps: 12, type: 'FALLO', note: 'Al fallo', weight: 0 },
+      ],
+      PRO: [
+        { id: '1', reps: 15, type: 'CALENTAMIENTO', note: 'Calentamiento', weight: 0 },
+        { id: '2', reps: 10, type: 'APROXIMACION', note: 'Aproximación 1', weight: 0 },
+        { id: '3', reps: 8, type: 'APROXIMACION', note: 'Aproximación 2', weight: 0 },
+        { id: '4', reps: 5, type: 'EFECTIVA', note: '', weight: 0 },
+        { id: '5', reps: 5, type: 'EFECTIVA', note: '', weight: 0 },
+        { id: '6', reps: 5, type: 'EFECTIVA', note: '', weight: 0 },
+        { id: '7', reps: 15, type: 'FALLO', note: 'Al fallo', weight: 0 },
+      ],
+    };
+
+    const autoSeries = autoStructures[userLevel];
+
+    // Agregar en silencio sin cerrar el modal
+    await addExerciseFromTemplateSilent(template, autoSeries);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
+
+  // Versión silenciosa que no cierra el modal
+  const addExerciseFromTemplateSilent = async (
+    template: AssetTemplate,
+    customSeries?: SeriesConfig[]
+  ) => {
+    if (!user) return;
+
+    setAdding(true);
+    try {
+      // Verificar si ya existe configuración para este ejercicio
+      const { data: existingConfig, error: searchError } = await supabase
+        .from('user_exercise_config')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('exercise_id', template.id)
+        .maybeSingle();
+
+      if (searchError) {
+        console.error('Error buscando configuración existente:', searchError);
+      }
+
+      let data;
+      let error;
+
+      if (existingConfig) {
+        // El ejercicio YA EXISTE - agregar este día a su array training_days
+        const currentDays = existingConfig.training_days || [0];
+
+        if (currentDays.includes(selectedDayIndex)) {
+          // Ya está agregado, no hacer nada
+          setAdding(false);
+          return;
+        }
+
+        // Agregar el nuevo día al array
+        const updatedDays = [...currentDays, selectedDayIndex].sort();
+        const currentConfig = existingConfig.config || {};
+        const seriesByDay = (currentConfig.series_by_day as Record<string, any[]>) || {};
+
+        if (customSeries && customSeries.length > 0) {
+          seriesByDay[String(selectedDayIndex)] = customSeries;
+        } else {
+          const firstDaySeries = seriesByDay[String(currentDays[0])] || [];
+          if (firstDaySeries.length > 0) {
+            seriesByDay[String(selectedDayIndex)] = [...firstDaySeries];
+          }
+        }
+
+        const result = await supabase
+          .from('user_exercise_config')
+          .update({
+            training_days: updatedDays,
+            updated_at: new Date().toISOString(),
+            config: { ...currentConfig, series_by_day: seriesByDay },
+          })
+          .eq('id', existingConfig.id)
+          .select()
+          .single();
+
+        data = result.data;
+        error = result.error;
+      } else {
+        // Crear NUEVA configuración
+        const seriesByDay: Record<string, any[]> = {};
+        if (customSeries) {
+          seriesByDay[String(selectedDayIndex)] = customSeries;
+        }
+
+        const result = await supabase
+          .from('user_exercise_config')
+          .insert({
+            user_id: user.id,
+            exercise_id: template.id,
+            training_days: [selectedDayIndex],
+            display_order: exercises.length,
+            config: {
+              sets: customSeries
+                ? `${customSeries.length}x${customSeries[0]?.reps || 10}`
+                : template.default_metadata.sets,
+              rest: template.default_metadata.rest,
+              series_by_day: customSeries ? seriesByDay : {},
+              custom_series: customSeries || null,
+            },
+          })
+          .select()
+          .single();
+
+        data = result.data;
+        error = result.error;
+      }
+
+      if (error) throw error;
+
+      if (data) {
+        // Convertir SeriesConfig a Series para el estado local
+        const seriesForState: Series[] = customSeries
+          ? customSeries.map((s) => ({
+              id: s.id,
+              type: (
+                s.type === 'CALENTAMIENTO' || (s.type as string) === 'WARMUP'
+                  ? 'CALENTAMIENTO'
+                  : s.type === 'APROXIMACION' || (s.type as string) === 'APPROACH'
+                    ? 'APROXIMACION'
+                    : s.type === 'FALLO' || (s.type as string) === 'FAILURE'
+                      ? 'FALLO'
+                      : 'EFECTIVA'
+              ) as SeriesType,
+              reps: String(s.reps),
+              note: s.note || undefined,
+            }))
+          : generateDefaultSeries(data.config?.sets || template.default_metadata.sets);
+
+        const newExercise: Exercise = {
+          id: data.id,
+          name: template.name,
+          sets: data.config?.sets || template.default_metadata.sets,
+          image_url: template.image_url,
+          order: data.display_order || 0,
+          series: seriesForState,
+          training_days: data.training_days || [selectedDayIndex],
+          videos: [],
+          alternatives: [],
+        };
+
+        // Actualizar estado local inmediatamente (sin cerrar modal)
+        setExercises((prev) => [...prev, newExercise]);
+      }
+    } catch (error) {
+      console.error('💥 Error adding exercise:', error);
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  // ============================================================================
+  // HELPER: Obtener ejercicios sugeridos por grupo muscular del día
+  // ============================================================================
+  const getSuggestedExercises = useCallback(() => {
+    const currentMuscleGroups = trainingProgram.days[selectedDayIndex]?.muscleGroups || '';
+    const muscleKeywords = currentMuscleGroups
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '') // Quitar acentos
+      .split(/[\s,+y&|]+/)
+      .filter((k) => k.length > 2);
+
+    if (muscleKeywords.length === 0) return templates;
+
+    return templates.filter((t) => {
+      const category = (t.category || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+      return muscleKeywords.some(
+        (keyword) => category.includes(keyword) || keyword.includes(category.substring(0, 4))
+      );
+    });
+  }, [templates, trainingProgram.days, selectedDayIndex]);
 
   const addSeriesManually = () => {
     const newSeries: SeriesConfig = {
       id: Date.now().toString(),
       reps: 10,
-      type: 'EFFECTIVE',
+      type: 'EFECTIVA',
       note: '',
       weight: 0,
     };
@@ -2011,37 +2574,37 @@ function GymScreen() {
   const generateRecommendedStructure = () => {
     const structures: Record<UserLevel, SeriesConfig[]> = {
       BEGINNER: [
-        { id: '1', reps: 12, type: 'WARMUP', note: 'Calentamiento', weight: 0 },
-        { id: '2', reps: 10, type: 'EFFECTIVE', note: '', weight: 0 },
-        { id: '3', reps: 10, type: 'EFFECTIVE', note: '', weight: 0 },
-        { id: '4', reps: 10, type: 'EFFECTIVE', note: '', weight: 0 },
+        { id: '1', reps: 12, type: 'CALENTAMIENTO', note: 'Calentamiento', weight: 0 },
+        { id: '2', reps: 10, type: 'EFECTIVA', note: '', weight: 0 },
+        { id: '3', reps: 10, type: 'EFECTIVA', note: '', weight: 0 },
+        { id: '4', reps: 10, type: 'EFECTIVA', note: '', weight: 0 },
       ],
       INTERMEDIATE: [
-        { id: '1', reps: 12, type: 'WARMUP', note: 'Calentamiento', weight: 0 },
-        { id: '2', reps: 10, type: 'APPROACH', note: 'Aproximación', weight: 0 },
-        { id: '3', reps: 8, type: 'EFFECTIVE', note: '', weight: 0 },
-        { id: '4', reps: 8, type: 'EFFECTIVE', note: '', weight: 0 },
-        { id: '5', reps: 8, type: 'EFFECTIVE', note: '', weight: 0 },
+        { id: '1', reps: 12, type: 'CALENTAMIENTO', note: 'Calentamiento', weight: 0 },
+        { id: '2', reps: 10, type: 'APROXIMACION', note: 'Aproximación', weight: 0 },
+        { id: '3', reps: 8, type: 'EFECTIVA', note: '', weight: 0 },
+        { id: '4', reps: 8, type: 'EFECTIVA', note: '', weight: 0 },
+        { id: '5', reps: 8, type: 'EFECTIVA', note: '', weight: 0 },
       ],
       ADVANCED: [
-        { id: '1', reps: 12, type: 'WARMUP', note: 'Calentamiento', weight: 0 },
-        { id: '2', reps: 8, type: 'APPROACH', note: 'Aproximación 1', weight: 0 },
-        { id: '3', reps: 6, type: 'APPROACH', note: 'Aproximación 2', weight: 0 },
-        { id: '4', reps: 6, type: 'EFFECTIVE', note: '', weight: 0 },
-        { id: '5', reps: 6, type: 'EFFECTIVE', note: '', weight: 0 },
-        { id: '6', reps: 6, type: 'EFFECTIVE', note: '', weight: 0 },
-        { id: '7', reps: 12, type: 'FAILURE', note: 'Al fallo', weight: 0 },
+        { id: '1', reps: 12, type: 'CALENTAMIENTO', note: 'Calentamiento', weight: 0 },
+        { id: '2', reps: 8, type: 'APROXIMACION', note: 'Aproximación 1', weight: 0 },
+        { id: '3', reps: 6, type: 'APROXIMACION', note: 'Aproximación 2', weight: 0 },
+        { id: '4', reps: 6, type: 'EFECTIVA', note: '', weight: 0 },
+        { id: '5', reps: 6, type: 'EFECTIVA', note: '', weight: 0 },
+        { id: '6', reps: 6, type: 'EFECTIVA', note: '', weight: 0 },
+        { id: '7', reps: 12, type: 'FALLO', note: 'Al fallo', weight: 0 },
       ],
       PRO: [
-        { id: '1', reps: 15, type: 'WARMUP', note: 'Calentamiento', weight: 0 },
-        { id: '2', reps: 10, type: 'APPROACH', note: 'Aproximación 1', weight: 0 },
-        { id: '3', reps: 8, type: 'APPROACH', note: 'Aproximación 2', weight: 0 },
-        { id: '4', reps: 6, type: 'APPROACH', note: 'Aproximación 3', weight: 0 },
-        { id: '5', reps: 5, type: 'EFFECTIVE', note: '', weight: 0 },
-        { id: '6', reps: 5, type: 'EFFECTIVE', note: '', weight: 0 },
-        { id: '7', reps: 5, type: 'EFFECTIVE', note: '', weight: 0 },
-        { id: '8', reps: 5, type: 'EFFECTIVE', note: '', weight: 0 },
-        { id: '9', reps: 15, type: 'FAILURE', note: 'Al fallo', weight: 0 },
+        { id: '1', reps: 15, type: 'CALENTAMIENTO', note: 'Calentamiento', weight: 0 },
+        { id: '2', reps: 10, type: 'APROXIMACION', note: 'Aproximación 1', weight: 0 },
+        { id: '3', reps: 8, type: 'APROXIMACION', note: 'Aproximación 2', weight: 0 },
+        { id: '4', reps: 6, type: 'APROXIMACION', note: 'Aproximación 3', weight: 0 },
+        { id: '5', reps: 5, type: 'EFECTIVA', note: '', weight: 0 },
+        { id: '6', reps: 5, type: 'EFECTIVA', note: '', weight: 0 },
+        { id: '7', reps: 5, type: 'EFECTIVA', note: '', weight: 0 },
+        { id: '8', reps: 5, type: 'EFECTIVA', note: '', weight: 0 },
+        { id: '9', reps: 15, type: 'FALLO', note: 'Al fallo', weight: 0 },
       ],
     };
 
@@ -2159,15 +2722,17 @@ function GymScreen() {
         const seriesForState: Series[] = customSeries
           ? customSeries.map((s) => ({
               id: s.id,
-              type:
-                s.type === 'WARMUP'
-                  ? 'WARMUP'
-                  : s.type === 'APPROACH'
-                    ? 'FEEDER'
-                    : s.type === 'FAILURE'
-                      ? 'INTENSITY'
-                      : 'EFFECTIVE',
-              reps: s.reps.toString(),
+              // Normalizar tipos a español (el tipo almacenado puede ser legacy en inglés)
+              type: (
+                s.type === 'CALENTAMIENTO' || (s.type as string) === 'WARMUP'
+                  ? 'CALENTAMIENTO'
+                  : s.type === 'APROXIMACION' || (s.type as string) === 'APPROACH'
+                    ? 'APROXIMACION'
+                    : s.type === 'FALLO' || (s.type as string) === 'FAILURE'
+                      ? 'FALLO'
+                      : 'EFECTIVA'
+              ) as SeriesType,
+              reps: String(s.reps),
               note: s.note || undefined,
             }))
           : generateDefaultSeries(data.config?.sets || template.default_metadata.sets);
@@ -2244,6 +2809,46 @@ function GymScreen() {
   };
 
   // ============================================================================
+  // REORDER EXERCISES - Drag & Drop
+  // ============================================================================
+  const [isDraggingExercise, setIsDraggingExercise] = useState(false);
+  const [dragTargetIndex, setDragTargetIndex] = useState<number | null>(null);
+  const [draggingFromIndex, setDraggingFromIndex] = useState<number | null>(null);
+
+  const reorderExercises = useCallback(
+    async (fromIndex: number, toIndex: number) => {
+      if (fromIndex === toIndex) return;
+
+      // Reordenar localmente
+      const newExercises = [...exercises];
+      const [movedItem] = newExercises.splice(fromIndex, 1);
+      newExercises.splice(toIndex, 0, movedItem);
+      setExercises(newExercises);
+
+      // Actualizar orden en Supabase
+      // Guardar el nuevo orden como un campo en user_exercise_config
+      try {
+        const orderUpdates = newExercises.map((ex, idx) => ({
+          id: ex.id,
+          display_order: idx,
+        }));
+
+        for (const update of orderUpdates) {
+          await supabase
+            .from('user_exercise_config')
+            .update({ display_order: update.display_order })
+            .eq('id', update.id);
+        }
+
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } catch (error) {
+        console.error('💥 Error reordering exercises:', error);
+      }
+    },
+    [exercises]
+  );
+
+  // ============================================================================
   // SAVE AND TRAIN
   // ============================================================================
   const saveAndTrain = async () => {
@@ -2289,392 +2894,657 @@ function GymScreen() {
   // ============================================================================
   // RENDER SERIES CONFIG MODAL
   // ============================================================================
-  const getSeriesTypeColor = (type: SeriesConfig['type']) => {
-    const colors = {
-      WARMUP: { bg: 'bg-blue-500/20', text: 'text-blue-400', bar: '#3B82F6' },
-      APPROACH: { bg: 'bg-yellow-500/20', text: 'text-yellow-400', bar: '#EAB308' },
-      EFFECTIVE: { bg: 'bg-green-500/20', text: 'text-green-400', bar: '#22C55E' },
-      FAILURE: { bg: 'bg-red-500/20', text: 'text-red-400', bar: '#EF4444' },
-    };
-    return colors[type];
-  };
+  const SERIES_TYPES = [
+    {
+      key: 'CALENTAMIENTO',
+      label: 'C',
+      fullLabel: 'Calentamiento',
+      color: '#3B82F6',
+      bg: '#1e3a5f',
+    },
+    { key: 'APROXIMACION', label: 'A', fullLabel: 'Aproximación', color: '#F59E0B', bg: '#422006' },
+    { key: 'EFECTIVA', label: 'E', fullLabel: 'Efectiva', color: '#22C55E', bg: '#052e16' },
+    { key: 'FALLO', label: 'F', fullLabel: 'Al Fallo', color: '#EF4444', bg: '#450a0a' },
+  ] as const;
 
-  const getSeriesTypeLabel = (type: SeriesConfig['type']) => {
-    return {
-      WARMUP: 'Calentamiento',
-      APPROACH: 'Aproximación',
-      EFFECTIVE: 'Efectiva',
-      FAILURE: 'Al Fallo',
-    }[type];
+  const getSeriesTypeConfig = (type: string) => {
+    return SERIES_TYPES.find((t) => t.key === type) || SERIES_TYPES[2]; // Default: EFECTIVA
   };
 
   const renderSeriesConfigModal = () => (
     <Modal
       visible={seriesConfigModalVisible}
       animationType="slide"
-      transparent={false}
-      statusBarTranslucent
+      transparent={true}
+      onRequestClose={closeSeriesConfigModal}
     >
-      <View className="flex-1 bg-savage-black">
-        {/* HEADER */}
-        <View className="px-6 pt-16 pb-4 border-b border-zinc-800">
-          <View className="flex-row justify-between items-center mb-4">
-            <Text className="text-savage-text text-3xl font-bold italic">CONFIGURAR EJERCICIO</Text>
+      <View className="flex-1 bg-transparent justify-end">
+        <Animated.View
+          className="bg-black rounded-t-3xl"
+          style={[{ height: '92%' }, animatedStyleSeriesConfig]}
+        >
+          {/* HEADER DRAGGABLE */}
+          <View
+            {...panResponderSeriesConfig.panHandlers}
+            className="px-4 pt-4 pb-3 border-b border-zinc-900"
+          >
+            {/* Indicador de drag */}
+            <View className="items-center mb-3">
+              <View className="w-10 h-1 bg-zinc-600 rounded-full" />
+            </View>
+
+            <View className="flex-row justify-between items-center">
+              <TouchableOpacity
+                onPress={() => {
+                  closeSeriesConfigModal();
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                }}
+                className="w-10 h-10 bg-zinc-900 rounded-full items-center justify-center"
+              >
+                <ChevronDown size={22} color="#fff" />
+              </TouchableOpacity>
+
+              {/* EXERCISE INFO COMPACTA */}
+              {selectedTemplate && (
+                <View className="flex-1 flex-row items-center mx-3">
+                  <Image
+                    source={{
+                      uri:
+                        exercises.find((ex) => ex.name === selectedTemplate.name)?.image_url ||
+                        selectedTemplate.image_url,
+                    }}
+                    style={{ width: 36, height: 36 }}
+                    className="rounded-lg mr-2"
+                    contentFit="cover"
+                  />
+                  <View className="flex-1">
+                    <Text className="text-white font-bold text-sm" numberOfLines={1}>
+                      {selectedTemplate.name}
+                    </Text>
+                    <Text className="text-zinc-600 text-[10px]">{selectedTemplate.category}</Text>
+                  </View>
+                </View>
+              )}
+
+              <TouchableOpacity
+                onPress={async () => {
+                  if (seriesConfig.length === 0) {
+                    alert('Agrega al menos una serie');
+                    return;
+                  }
+                  if (!selectedTemplate) return;
+
+                  // Cerrar modal sin abrir catálogo (guardamos, no cancelamos)
+                  setSeriesConfigModalVisible(false);
+                  setSeriesConfigFromCatalog(false);
+                  seriesConfigFromCatalogRef.current = false;
+
+                  const existingExercise = exercises.find((ex) => ex.id === selectedTemplate.id);
+                  if (existingExercise) {
+                    try {
+                      const { data: currentConfig } = await supabase
+                        .from('user_exercise_config')
+                        .select('config')
+                        .eq('id', selectedTemplate.id)
+                        .single();
+
+                      const currentConfigData = currentConfig?.config || {};
+                      const seriesByDay =
+                        (currentConfigData.series_by_day as Record<string, unknown[]>) || {};
+                      seriesByDay[String(selectedDayIndex)] = seriesConfig;
+
+                      await supabase
+                        .from('user_exercise_config')
+                        .update({
+                          config: {
+                            ...selectedTemplate.default_metadata,
+                            ...currentConfigData,
+                            sets: `${seriesConfig.length}x${seriesConfig[0]?.reps || 10}`,
+                            series_by_day: seriesByDay,
+                          },
+                        })
+                        .eq('id', selectedTemplate.id);
+
+                      await loadExercises();
+                    } catch (error) {
+                      console.error('Error actualizando:', error);
+                    }
+                  } else {
+                    await addExerciseFromTemplate(selectedTemplate, seriesConfig);
+                  }
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                }}
+                className="bg-savage-red px-4 py-2 rounded-full"
+              >
+                <Text className="text-white font-bold text-sm">GUARDAR</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* LEYENDA DE TIPOS */}
+          <View className="flex-row justify-center gap-3 py-2 bg-zinc-950/50">
+            {SERIES_TYPES.map((type) => (
+              <View key={type.key} className="flex-row items-center gap-1">
+                <View
+                  className="w-5 h-5 rounded items-center justify-center"
+                  style={{ backgroundColor: type.bg, borderWidth: 1, borderColor: type.color }}
+                >
+                  <Text className="text-[10px] font-bold" style={{ color: type.color }}>
+                    {type.label}
+                  </Text>
+                </View>
+                <Text className="text-zinc-500 text-[10px]">{type.fullLabel}</Text>
+              </View>
+            ))}
+          </View>
+
+          <Text className="text-zinc-600 text-[10px] text-center py-1">
+            👈 Desliza izquierda para eliminar
+          </Text>
+
+          {/* SERIES LIST */}
+          <ScrollView className="flex-1 px-3" keyboardShouldPersistTaps="handled">
+            {seriesConfig.map((serie, index) => {
+              const typeConfig = getSeriesTypeConfig(serie.type);
+              return (
+                <SwipeableSeriesRow
+                  key={serie.id}
+                  onDelete={() => {
+                    removeSeriesConfig(serie.id);
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                  }}
+                >
+                  <View
+                    className="flex-row items-stretch rounded-xl overflow-hidden mb-2"
+                    style={{ backgroundColor: '#0a0a0a', borderWidth: 1, borderColor: '#1a1a1a' }}
+                  >
+                    {/* NÚMERO DE SERIE + TIPO */}
+                    <TouchableOpacity
+                      onPress={() => {
+                        const currentIndex = SERIES_TYPES.findIndex((t) => t.key === serie.type);
+                        const nextIndex = (currentIndex + 1) % SERIES_TYPES.length;
+                        updateSeriesConfig(serie.id, 'type', SERIES_TYPES[nextIndex].key);
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      }}
+                      className="w-12 items-center justify-center py-2"
+                      style={{ backgroundColor: typeConfig.bg }}
+                    >
+                      <Text className="text-zinc-500 text-[10px] font-mono">{index + 1}</Text>
+                      <Text className="text-lg font-bold" style={{ color: typeConfig.color }}>
+                        {typeConfig.label}
+                      </Text>
+                    </TouchableOpacity>
+
+                    {/* CONTENIDO */}
+                    <View className="flex-1 py-2">
+                      {/* REPS + PESO */}
+                      <View className="flex-row items-center px-2">
+                        {/* REPS */}
+                        <View className="flex-1 flex-row items-center">
+                          <TouchableOpacity
+                            onPress={() => {
+                              updateSeriesConfig(serie.id, 'reps', Math.max(1, serie.reps - 1));
+                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                            }}
+                            className="w-7 h-7 rounded-full bg-zinc-800 items-center justify-center"
+                          >
+                            <Text className="text-white font-bold">−</Text>
+                          </TouchableOpacity>
+                          <View className="flex-1 items-center">
+                            <Text className="text-white font-mono font-bold text-lg">
+                              {serie.reps}
+                            </Text>
+                            <Text className="text-zinc-600 text-[8px] -mt-1">REPS</Text>
+                          </View>
+                          <TouchableOpacity
+                            onPress={() => {
+                              updateSeriesConfig(serie.id, 'reps', serie.reps + 1);
+                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                            }}
+                            className="w-7 h-7 rounded-full bg-zinc-800 items-center justify-center"
+                          >
+                            <Text className="text-white font-bold">+</Text>
+                          </TouchableOpacity>
+                        </View>
+
+                        {/* SEPARADOR */}
+                        <View className="w-px h-6 bg-zinc-800 mx-1" />
+
+                        {/* PESO */}
+                        <View className="flex-1 flex-row items-center">
+                          <TouchableOpacity
+                            onPress={() => {
+                              updateSeriesConfig(
+                                serie.id,
+                                'weight',
+                                Math.max(0, (serie.weight || 0) - 2.5)
+                              );
+                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                            }}
+                            className="w-7 h-7 rounded-full bg-zinc-800 items-center justify-center"
+                          >
+                            <Text className="text-white font-bold">−</Text>
+                          </TouchableOpacity>
+                          <View className="flex-1 items-center">
+                            <TextInput
+                              className="text-white font-mono font-bold text-lg text-center w-full p-0"
+                              keyboardType="numeric"
+                              placeholder="—"
+                              placeholderTextColor="#52525b"
+                              value={serie.weight ? String(serie.weight) : ''}
+                              onChangeText={(text) => {
+                                const num = parseFloat(text) || 0;
+                                updateSeriesConfig(serie.id, 'weight', num);
+                              }}
+                            />
+                            <Text className="text-zinc-600 text-[8px] -mt-1">KG</Text>
+                          </View>
+                          <TouchableOpacity
+                            onPress={() => {
+                              updateSeriesConfig(serie.id, 'weight', (serie.weight || 0) + 2.5);
+                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                            }}
+                            className="w-7 h-7 rounded-full bg-zinc-800 items-center justify-center"
+                          >
+                            <Text className="text-white font-bold">+</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+
+                      {/* INDICACIÓN (opcional) */}
+                      <TextInput
+                        className="text-zinc-400 text-xs mx-2 mt-1 px-2 py-1 bg-zinc-900/50 rounded"
+                        placeholder="+ Indicación (opcional)"
+                        placeholderTextColor="#52525b"
+                        value={serie.note || ''}
+                        onChangeText={(text) => updateSeriesConfig(serie.id, 'note', text)}
+                      />
+                    </View>
+                  </View>
+                </SwipeableSeriesRow>
+              );
+            })}
+
+            {/* AGREGAR SERIE */}
             <TouchableOpacity
               onPress={() => {
-                setSeriesConfigModalVisible(false);
-                setModalVisible(true);
+                addSeriesManually();
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
               }}
-              className="bg-zinc-900 p-3 rounded-lg"
+              className="flex-row items-center justify-center gap-2 py-3 mb-4 rounded-xl"
+              style={{
+                borderWidth: 2,
+                borderStyle: 'dashed',
+                borderColor: '#27272a',
+                backgroundColor: '#050505',
+              }}
             >
-              <X color="#DC2626" size={24} />
+              <Plus color="#71717a" size={20} />
+              <Text className="text-zinc-500 font-bold text-sm">AGREGAR SERIE</Text>
+            </TouchableOpacity>
+          </ScrollView>
+
+          {/* FOOTER */}
+          <View
+            className="px-4 pt-3 border-t border-zinc-900"
+            style={{ paddingBottom: insets.bottom + 16 }}
+          >
+            <TouchableOpacity
+              onPress={() => {
+                generateRecommendedStructure();
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+              }}
+              className="flex-row items-center justify-center gap-2 py-3 rounded-xl"
+              style={{ backgroundColor: '#0f0f0f', borderWidth: 1, borderColor: '#DC2626' }}
+            >
+              <Zap color="#DC2626" size={16} />
+              <Text className="text-savage-red font-bold text-sm">
+                ESTRUCTURA RECOMENDADA POR HANK
+              </Text>
             </TouchableOpacity>
           </View>
+        </Animated.View>
+      </View>
+    </Modal>
+  );
 
-          {/* EXERCISE INFO */}
-          {selectedTemplate && (
-            <View className="flex-row items-center bg-zinc-900 p-4 rounded-lg">
-              <Image
-                source={{
-                  uri:
-                    exercises.find((ex) => ex.name === selectedTemplate.name)?.image_url ||
-                    selectedTemplate.image_url,
-                }}
-                style={{ width: 60, height: 60 }}
-                className="rounded-lg mr-4"
-                contentFit="cover"
-              />
-              <View className="flex-1">
-                <Text className="text-white font-bold text-lg">{selectedTemplate.name}</Text>
-                <Text className="text-zinc-500 text-sm">{selectedTemplate.category}</Text>
-              </View>
-            </View>
-          )}
-        </View>
+  // ============================================================================
+  // RENDER CATALOG MODAL - CON TABS INTELIGENTES
+  // ============================================================================
+  const renderCatalogModal = () => {
+    // Obtener ejercicios según tab activo
+    const suggestedExercises = getSuggestedExercises();
+    const filteredTemplates =
+      catalogTab === 'SUGERIDOS'
+        ? suggestedExercises
+        : templates.filter((t) => t.category === catalogTab);
 
-        {/* SERIES LIST */}
-        <ScrollView className="flex-1 px-6 pt-4">
-          {seriesConfig.map((serie, index) => {
-            const colors = getSeriesTypeColor(serie.type);
-            return (
-              <View
-                key={serie.id}
-                className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 mb-3"
-              >
-                {/* HEADER */}
-                <View className="flex-row justify-between items-center mb-3">
-                  <Text className="text-white font-bold">SERIE {index + 1}</Text>
-                  <TouchableOpacity onPress={() => removeSeriesConfig(serie.id)}>
-                    <Trash2 color="#DC2626" size={20} />
-                  </TouchableOpacity>
+    // Nombre del grupo muscular del día actual
+    const currentMuscleGroup =
+      trainingProgram.days[selectedDayIndex]?.muscleGroups || 'ENTRENAMIENTO';
+
+    // Parsear grupos musculares para mostrar badges de colores
+    const muscleGroupBadges = currentMuscleGroup
+      .split(/[,yx&]+/)
+      .map((g) => g.trim())
+      .filter(Boolean);
+
+    return (
+      <Modal
+        visible={modalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => {
+          setModalVisible(false);
+          setCatalogTab('SUGERIDOS');
+        }}
+      >
+        <View className="flex-1 bg-transparent justify-end">
+          <Animated.View
+            className="bg-black rounded-t-3xl overflow-hidden"
+            style={[{ height: '92%' }, animatedStyleCatalog]}
+          >
+            {/* HEADER DRAGGABLE - GRADIENT */}
+            <LinearGradient
+              colors={['#1a0805', '#0d0502', '#000000']}
+              start={{ x: 0.5, y: 0 }}
+              end={{ x: 0.5, y: 1 }}
+            >
+              <View {...panResponderCatalog.panHandlers} className="px-4 pt-4 pb-3">
+                {/* Indicador de drag */}
+                <View className="items-center mb-3">
+                  <View className="w-10 h-1 bg-zinc-600 rounded-full" />
                 </View>
 
-                {/* REPETICIONES */}
-                <Text className="text-zinc-500 text-sm mb-2">Repeticiones *</Text>
-                <View className="flex-row items-center mb-3">
-                  <TouchableOpacity
-                    onPress={() =>
-                      updateSeriesConfig(serie.id, 'reps', Math.max(1, serie.reps - 1))
-                    }
-                    className="bg-zinc-800 px-4 py-2 rounded-l-lg"
-                  >
-                    <Text className="text-white font-bold">-</Text>
-                  </TouchableOpacity>
-                  <TextInput
-                    className="bg-black px-6 py-2 border-y border-zinc-700 text-white font-mono font-bold text-center"
-                    keyboardType="numeric"
-                    value={serie.reps.toString()}
-                    onChangeText={(text) => {
-                      const num = parseInt(text) || 0;
-                      updateSeriesConfig(serie.id, 'reps', Math.max(1, num));
-                    }}
-                  />
-                  <TouchableOpacity
-                    onPress={() => updateSeriesConfig(serie.id, 'reps', serie.reps + 1)}
-                    className="bg-zinc-800 px-4 py-2 rounded-r-lg"
-                  >
-                    <Text className="text-white font-bold">+</Text>
-                  </TouchableOpacity>
-                </View>
-
-                {/* TIPO DE SERIE CON SLIDER */}
-                <Text className="text-zinc-500 text-sm mb-2">Tipo de Serie *</Text>
-                <View className="mb-3">
-                  <View className="flex-row justify-between mb-2">
-                    {(['WARMUP', 'APPROACH', 'EFFECTIVE', 'FAILURE'] as const).map((type) => {
-                      const isActive = serie.type === type;
-                      const typeColors = getSeriesTypeColor(type);
-                      return (
-                        <TouchableOpacity
-                          key={type}
-                          onPress={() => updateSeriesConfig(serie.id, 'type', type)}
-                          className={`flex-1 mx-1 py-2 rounded ${
-                            isActive ? typeColors.bg : 'bg-zinc-800'
-                          }`}
-                        >
-                          <Text
-                            className={`text-center text-xs font-bold ${
-                              isActive ? typeColors.text : 'text-zinc-600'
-                            }`}
+                <View className="flex-row justify-between items-start mb-3">
+                  <View className="flex-1">
+                    <View className="flex-row items-center gap-2 mb-1">
+                      <Text className="text-savage-red text-2xl font-bold">CATÁLOGO</Text>
+                      <View className="bg-savage-red/20 px-2 py-0.5 rounded-full">
+                        <Text className="text-savage-red text-[10px] font-bold">
+                          DÍA {selectedDayIndex + 1}
+                        </Text>
+                      </View>
+                    </View>
+                    {/* Badges de grupos musculares con colores */}
+                    <View className="flex-row flex-wrap gap-1 mt-1">
+                      {muscleGroupBadges.map((group, idx) => {
+                        const groupColor = getMuscleGroupColor(group);
+                        return (
+                          <View
+                            key={idx}
+                            className="px-2 py-0.5 rounded-full"
+                            style={{
+                              backgroundColor: groupColor.bg,
+                              borderWidth: 1,
+                              borderColor: groupColor.color,
+                            }}
                           >
-                            {getSeriesTypeLabel(type)}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    })}
+                            <Text
+                              className="text-[10px] font-bold uppercase"
+                              style={{ color: groupColor.color }}
+                            >
+                              {group}
+                            </Text>
+                          </View>
+                        );
+                      })}
+                    </View>
                   </View>
-                  {/* SLIDER ARRASTRABLE */}
-                  <Slider
-                    style={{ width: '100%', height: 40 }}
-                    minimumValue={0}
-                    maximumValue={3}
-                    value={
-                      serie.type === 'WARMUP'
-                        ? 0
-                        : serie.type === 'APPROACH'
-                          ? 1
-                          : serie.type === 'EFFECTIVE'
-                            ? 2
-                            : 3
-                    }
-                    onValueChange={(value) => {
-                      const types: SeriesConfig['type'][] = [
-                        'WARMUP',
-                        'APPROACH',
-                        'EFFECTIVE',
-                        'FAILURE',
-                      ];
-                      const index = Math.round(value);
-                      updateSeriesConfig(serie.id, 'type', types[index]);
+                  <TouchableOpacity
+                    onPress={() => {
+                      setModalVisible(false);
+                      setCatalogTab('SUGERIDOS');
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                     }}
-                    onSlidingComplete={() => {
+                    className="w-10 h-10 bg-zinc-900/80 rounded-full items-center justify-center"
+                    style={{ borderWidth: 1, borderColor: '#27272a' }}
+                  >
+                    <ChevronDown size={22} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+
+                {/* TABS - Scroll horizontal con mejor diseño */}
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  className="flex-row -mx-4 px-4"
+                  contentContainerStyle={{ paddingRight: 32 }}
+                >
+                  {/* Tab SUGERIDOS */}
+                  <TouchableOpacity
+                    onPress={() => {
+                      setCatalogTab('SUGERIDOS');
                       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                     }}
-                    minimumTrackTintColor={colors.bar}
-                    maximumTrackTintColor="#27272a"
-                    thumbTintColor={colors.bar}
-                  />
-                </View>
-
-                {/* PESO */}
-                <Text className="text-zinc-500 text-sm mb-2">Peso (kg)</Text>
-                <View className="flex-row items-center mb-3">
-                  <TouchableOpacity
-                    onPress={() =>
-                      updateSeriesConfig(serie.id, 'weight', Math.max(0, serie.weight - 2.5))
+                    className="mr-2 px-4 py-2.5 rounded-xl"
+                    style={
+                      catalogTab === 'SUGERIDOS'
+                        ? {
+                            backgroundColor: '#DC2626',
+                            shadowColor: '#DC2626',
+                            shadowOffset: { width: 0, height: 4 },
+                            shadowOpacity: 0.4,
+                            shadowRadius: 8,
+                          }
+                        : {
+                            backgroundColor: '#18181b',
+                            borderWidth: 1,
+                            borderColor: '#27272a',
+                          }
                     }
-                    className="bg-zinc-800 px-4 py-2 rounded-l-lg"
                   >
-                    <Text className="text-white font-bold">-</Text>
+                    <Text
+                      className={`text-xs font-bold ${
+                        catalogTab === 'SUGERIDOS' ? 'text-white' : 'text-zinc-400'
+                      }`}
+                    >
+                      🔥 SUGERIDOS ({suggestedExercises.length})
+                    </Text>
                   </TouchableOpacity>
-                  <TextInput
-                    className="bg-black px-6 py-2 border-y border-zinc-700 text-white font-mono font-bold text-center"
-                    keyboardType="numeric"
-                    value={serie.weight.toString()}
-                    onChangeText={(text) => {
-                      const num = parseFloat(text) || 0;
-                      updateSeriesConfig(serie.id, 'weight', Math.max(0, num));
-                    }}
-                  />
-                  <TouchableOpacity
-                    onPress={() => updateSeriesConfig(serie.id, 'weight', serie.weight + 2.5)}
-                    className="bg-zinc-800 px-4 py-2 rounded-r-lg"
-                  >
-                    <Text className="text-white font-bold">+</Text>
-                  </TouchableOpacity>
-                </View>
 
-                {/* INDICACIÓN */}
-                <Text className="text-zinc-500 text-sm mb-2">Indicación</Text>
-                <TextInput
-                  className="bg-black border border-zinc-700 rounded-lg p-3 text-white"
-                  placeholder="Sin indicación"
-                  placeholderTextColor="#71717a"
-                  value={serie.note}
-                  onChangeText={(text) => updateSeriesConfig(serie.id, 'note', text)}
-                  multiline
-                />
+                  {/* Tabs por categoría - estilo uniforme */}
+                  {categories.map((category) => {
+                    const count = templates.filter((t) => t.category === category).length;
+                    const isActive = catalogTab === category;
+                    return (
+                      <TouchableOpacity
+                        key={category}
+                        onPress={() => {
+                          setCatalogTab(category);
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        }}
+                        className="mr-2 px-4 py-2.5 rounded-xl"
+                        style={
+                          isActive
+                            ? {
+                                backgroundColor: '#27272a',
+                                borderWidth: 1,
+                                borderColor: '#3f3f46',
+                              }
+                            : {
+                                backgroundColor: '#18181b',
+                                borderWidth: 1,
+                                borderColor: '#27272a',
+                              }
+                        }
+                      >
+                        <Text
+                          className="text-xs font-bold uppercase"
+                          style={{ color: isActive ? '#fff' : '#71717a' }}
+                        >
+                          {category} ({count})
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
               </View>
-            );
-          })}
+            </LinearGradient>
 
-          {/* AGREGAR SERIE */}
-          <TouchableOpacity
-            onPress={addSeriesManually}
-            className="bg-zinc-900 border-2 border-dashed border-zinc-700 rounded-lg p-4 mb-3 items-center"
-          >
-            <Plus color="#FFFFFF" size={32} />
-            <Text className="text-white font-bold mt-2">AGREGAR SERIE</Text>
-          </TouchableOpacity>
-        </ScrollView>
-
-        {/* FOOTER */}
-        <View className="border-t border-zinc-800 p-6 bg-savage-dark">
-          <TouchableOpacity
-            onPress={generateRecommendedStructure}
-            className="bg-zinc-900 border border-savage-red p-4 rounded-lg mb-3"
-          >
-            <Text className="text-savage-red font-bold text-center">
-              AGREGAR ESTRUCTURA RECOMENDADA ({userLevel})
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={async () => {
-              if (seriesConfig.length === 0) {
-                alert('Debes agregar al menos una serie');
-                return;
-              }
-              if (!selectedTemplate) return;
-
-              setSeriesConfigModalVisible(false);
-
-              // Verificar si el ejercicio ya existe
-              const existingExercise = exercises.find((ex) => ex.id === selectedTemplate.id);
-
-              if (existingExercise) {
-                // Actualizar ejercicio existente - solo el día actual
-                try {
-                  // NUEVA ARQUITECTURA: Obtener config actual para preservar series de otros días
-                  const { data: currentConfig } = await supabase
-                    .from('user_exercise_config')
-                    .select('config')
-                    .eq('id', selectedTemplate.id)
-                    .single();
-
-                  const currentConfigData = currentConfig?.config || {};
-                  const seriesByDay =
-                    (currentConfigData.series_by_day as Record<string, any[]>) || {};
-                  seriesByDay[String(selectedDayIndex)] = seriesConfig;
-
-                  const { error } = await supabase
-                    .from('user_exercise_config')
-                    .update({
-                      config: {
-                        ...selectedTemplate.default_metadata,
-                        ...currentConfigData,
-                        sets: `${seriesConfig.length}x${seriesConfig[0]?.reps || 10}`,
-                        series_by_day: seriesByDay,
-                      },
-                    })
-                    .eq('id', selectedTemplate.id);
-
-                  if (error) throw error;
-
-                  // Recargar ejercicios sin cambiar de modo
-                  await loadExercises();
-                } catch (error) {
-                  console.error('Error actualizando ejercicio:', error);
-                  alert('Error al actualizar ejercicio');
-                }
-              } else {
-                // Agregar nuevo ejercicio
-                await addExerciseFromTemplate(selectedTemplate, seriesConfig);
-              }
-            }}
-            className="bg-savage-red p-4 rounded-lg"
-            disabled={adding}
-          >
-            {adding ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <Text className="text-white font-bold text-center text-lg">
-                {exercises.find((ex) => ex.id === selectedTemplate?.id)
-                  ? 'ACTUALIZAR'
-                  : 'GUARDAR Y AGREGAR'}{' '}
-                ({seriesConfig.length} SERIES)
-              </Text>
-            )}
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
-  );
-
-  // ============================================================================
-  // RENDER CATALOG MODAL
-  // ============================================================================
-  const renderCatalogModal = () => (
-    <Modal
-      visible={modalVisible}
-      animationType="slide"
-      transparent={true}
-      onRequestClose={() => setModalVisible(false)}
-    >
-      <View className="flex-1 bg-black/95">
-        {/* HEADER */}
-        <View className="px-6 pt-16 pb-4 border-b border-zinc-800 flex-row justify-between items-center">
-          <View>
-            <Text className="text-savage-text text-3xl font-bold italic">CATÁLOGO</Text>
-            <Text className="text-zinc-500 text-sm tracking-wider">SELECCIONA UN EJERCICIO</Text>
-          </View>
-          <TouchableOpacity
-            onPress={() => setModalVisible(false)}
-            className="bg-zinc-900 p-3 rounded-lg"
-          >
-            <X color="#DC2626" size={24} />
-          </TouchableOpacity>
-        </View>
-
-        {/* CATALOG LIST */}
-        <FlatList
-          data={templates}
-          keyExtractor={(item) => item.id}
-          className="flex-1 px-6 pt-4"
-          renderItem={({ item }) => {
-            // Buscar si el ejercicio ya existe con imagen personalizada (en cualquier día)
-            const existingExercise = allUserExercises.find((ex) => ex.name === item.name);
-            const imageUrl = existingExercise?.image_url || item.image_url;
-
-            return (
-              <TouchableOpacity
-                onPress={() => openSeriesConfigModal(item)}
-                disabled={adding}
-                className="flex-row bg-zinc-900/50 border border-zinc-800 rounded-xl p-3 mb-2 items-center"
-              >
-                {/* IMAGE */}
-                <Image
-                  source={{ uri: imageUrl }}
-                  className="w-16 h-16 rounded-lg mr-3"
-                  contentFit="cover"
-                />
-
-                {/* INFO */}
-                <View className="flex-1">
-                  <Text className="text-white font-bold text-sm mb-0.5" numberOfLines={1}>
-                    {item.name}
+            {/* CATALOG LIST */}
+            <FlatList
+              data={filteredTemplates}
+              keyExtractor={(item) => item.id}
+              className="flex-1 px-3 pt-3"
+              showsVerticalScrollIndicator={false}
+              ListEmptyComponent={
+                <View className="flex-1 justify-center items-center py-16">
+                  <Text className="text-zinc-500 text-center mb-2">
+                    No hay ejercicios en esta categoría
                   </Text>
-                  <Text className="text-zinc-500 text-xs mb-1.5" numberOfLines={1}>
-                    {item.description}
+                  <Text className="text-zinc-600 text-xs text-center">
+                    Prueba con otra categoría o renombra tu día de entrenamiento
                   </Text>
-                  <View className="flex-row gap-1.5">
-                    <View className="bg-zinc-800 px-1.5 py-0.5 rounded">
-                      <Text className="text-zinc-400 text-[10px] font-mono">{item.category}</Text>
-                    </View>
-                    <View className="bg-savage-red/20 px-1.5 py-0.5 rounded">
-                      <Text className="text-savage-red text-[10px] font-bold">
-                        {item.difficulty}
-                      </Text>
-                    </View>
-                  </View>
                 </View>
+              }
+              renderItem={({ item }) => {
+                // Buscar si el ejercicio ya existe con imagen personalizada
+                const existingExercise = allUserExercises.find((ex) => ex.name === item.name);
+                // Prioridad: 1) Imagen personalizada del usuario, 2) Imagen del template, 3) Placeholder
+                const imageUrl =
+                  existingExercise?.image_url ||
+                  item.image_url ||
+                  'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=200&h=200&fit=crop';
+                const alreadyAdded = exercises.some((ex) => ex.name === item.name);
+                // Solo mostrar color en tab SUGERIDOS
+                const showCategoryColor = catalogTab === 'SUGERIDOS';
+                const catColor = showCategoryColor ? getMuscleGroupColor(item.category) : null;
 
-                {/* ARROW */}
-                {adding ? (
-                  <ActivityIndicator color="#DC2626" size="small" />
-                ) : (
-                  <View className="bg-savage-red/20 p-2 rounded-full">
-                    <Plus color="#DC2626" size={16} />
+                return (
+                  <View
+                    className="mb-2 rounded-2xl overflow-hidden"
+                    style={{
+                      backgroundColor: alreadyAdded ? '#052e16' : '#0a0a0a',
+                      borderWidth: 1,
+                      borderColor: alreadyAdded
+                        ? '#22c55e40'
+                        : showCategoryColor && catColor
+                          ? `${catColor.color}30`
+                          : '#1a1a1a',
+                    }}
+                  >
+                    <View className="flex-row p-3 items-center">
+                      {/* IMAGE CON GLOW */}
+                      <View className="relative">
+                        <Image
+                          source={{ uri: imageUrl }}
+                          style={{ width: 60, height: 60, borderRadius: 12 }}
+                          contentFit="cover"
+                        />
+                        {alreadyAdded && (
+                          <View
+                            className="absolute -top-1 -right-1 w-5 h-5 rounded-full items-center justify-center"
+                            style={{ backgroundColor: '#22c55e' }}
+                          >
+                            <Text className="text-white text-[10px] font-bold">✓</Text>
+                          </View>
+                        )}
+                      </View>
+
+                      {/* INFO */}
+                      <View className="flex-1 ml-3">
+                        <Text className="text-white font-bold text-sm mb-0.5" numberOfLines={1}>
+                          {item.name}
+                        </Text>
+                        <Text className="text-zinc-500 text-[11px] mb-1.5" numberOfLines={1}>
+                          {item.description}
+                        </Text>
+                        {/* Badge de categoría - solo en SUGERIDOS con color */}
+                        <View
+                          className="self-start px-2 py-0.5 rounded-full"
+                          style={{
+                            backgroundColor:
+                              showCategoryColor && catColor ? catColor.bg : '#18181b',
+                            borderWidth: 1,
+                            borderColor: showCategoryColor && catColor ? catColor.color : '#3f3f46',
+                          }}
+                        >
+                          <Text
+                            className="text-[9px] font-bold uppercase"
+                            style={{
+                              color: showCategoryColor && catColor ? catColor.color : '#71717a',
+                            }}
+                          >
+                            {item.category}
+                          </Text>
+                        </View>
+                      </View>
+
+                      {/* ACTIONS */}
+                      <View className="flex-row gap-2">
+                        {/* Quick Add Button */}
+                        <TouchableOpacity
+                          onPress={() => quickAddExercise(item)}
+                          disabled={adding || alreadyAdded}
+                          className="w-11 h-11 rounded-xl items-center justify-center"
+                          style={{
+                            backgroundColor: alreadyAdded ? '#18181b' : '#DC2626',
+                            shadowColor: alreadyAdded ? 'transparent' : '#DC2626',
+                            shadowOffset: { width: 0, height: 4 },
+                            shadowOpacity: 0.4,
+                            shadowRadius: 8,
+                          }}
+                        >
+                          {adding ? (
+                            <ActivityIndicator color="#FFFFFF" size="small" />
+                          ) : (
+                            <Plus color={alreadyAdded ? '#52525b' : '#FFFFFF'} size={20} />
+                          )}
+                        </TouchableOpacity>
+
+                        {/* Config Button */}
+                        <TouchableOpacity
+                          onPress={() => openSeriesConfigModal(item)}
+                          disabled={adding}
+                          className="w-11 h-11 rounded-xl items-center justify-center"
+                          style={{
+                            backgroundColor: '#18181b',
+                            borderWidth: 1,
+                            borderColor: '#27272a',
+                          }}
+                        >
+                          <Sliders color="#a1a1aa" size={18} />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
                   </View>
-                )}
-              </TouchableOpacity>
-            );
-          }}
-        />
-      </View>
-    </Modal>
-  );
+                );
+              }}
+            />
+
+            {/* FOOTER INFO - MEJORADO */}
+            <View
+              className="px-4 pt-3 border-t border-zinc-800/50"
+              style={{
+                paddingBottom: insets.bottom + 16,
+                backgroundColor: 'rgba(10, 10, 10, 0.95)',
+              }}
+            >
+              <View className="flex-row justify-center items-center gap-4">
+                <View className="flex-row items-center gap-1.5">
+                  <View className="w-6 h-6 rounded-lg bg-savage-red items-center justify-center">
+                    <Plus size={14} color="#fff" />
+                  </View>
+                  <Text className="text-zinc-400 text-[10px]">
+                    Estructura recomendada por{' '}
+                    <Text className="text-savage-red font-bold">HANK</Text>
+                  </Text>
+                </View>
+                <View className="w-px h-4 bg-zinc-700" />
+                <View className="flex-row items-center gap-1.5">
+                  <View className="w-6 h-6 rounded-lg bg-zinc-800 items-center justify-center border border-zinc-700">
+                    <Sliders size={12} color="#a1a1aa" />
+                  </View>
+                  <Text className="text-zinc-400 text-[10px]">Configurar manualmente</Text>
+                </View>
+              </View>
+            </View>
+          </Animated.View>
+        </View>
+      </Modal>
+    );
+  };
 
   // ============================================================================
   // RENDER STRUCTURE MODE - ED HARDY FIRE STYLE
@@ -2682,10 +3552,10 @@ function GymScreen() {
   if (viewMode === 'STRUCTURE') {
     return (
       <View className="flex-1 bg-black">
-        {/* HEADER - ED HARDY FIRE STYLE */}
-        <View className="relative pt-14 pb-4 px-4">
+        {/* HEADER - SAVAGE FIRE STYLE */}
+        <View className="relative pb-5 px-4" style={{ paddingTop: insets.top + 12 }}>
           <LinearGradient
-            colors={['#1a0a0a', '#0a0000', '#000000']}
+            colors={['#1a0805', '#0d0502', '#000000']}
             start={{ x: 0.5, y: 0 }}
             end={{ x: 0.5, y: 1 }}
             className="absolute inset-0"
@@ -2693,27 +3563,44 @@ function GymScreen() {
 
           {/* Fire glow effect */}
           <View
-            className="absolute top-0 left-0 right-0 h-24"
+            className="absolute top-0 left-0 right-0 h-32"
             style={{
-              backgroundColor: 'rgba(220, 38, 38, 0.06)',
+              backgroundColor: 'rgba(249, 115, 22, 0.08)',
             }}
           />
 
-          <View className="flex-row items-center justify-between mb-4">
+          {/* Header Row */}
+          <View className="flex-row items-center justify-between mb-5">
             <View>
-              <Text
-                className="text-fire-orange text-2xl font-bold tracking-tight"
-                style={{
-                  textShadowColor: '#F97316',
-                  textShadowOffset: { width: 0, height: 0 },
-                  textShadowRadius: 10,
-                }}
-              >
-                🔥 ESTRUCTURA
-              </Text>
-              <Text className="text-zinc-500 text-xs uppercase tracking-widest font-mono">
-                Configura tu rutina
-              </Text>
+              <View className="flex-row items-center gap-2">
+                <View
+                  className="w-10 h-10 rounded-xl items-center justify-center"
+                  style={{
+                    backgroundColor: '#DC2626',
+                    shadowColor: '#DC2626',
+                    shadowOffset: { width: 0, height: 0 },
+                    shadowOpacity: 0.6,
+                    shadowRadius: 12,
+                  }}
+                >
+                  <Sliders size={20} color="#fff" />
+                </View>
+                <View>
+                  <Text
+                    className="text-white text-xl font-bold tracking-tight"
+                    style={{
+                      textShadowColor: '#F97316',
+                      textShadowOffset: { width: 0, height: 0 },
+                      textShadowRadius: 8,
+                    }}
+                  >
+                    ESTRUCTURA
+                  </Text>
+                  <Text className="text-zinc-500 text-[10px] uppercase tracking-widest font-mono">
+                    {trainingProgram.days.length} DÍAS • {exercises.length} EJERCICIOS
+                  </Text>
+                </View>
+              </View>
             </View>
             <TouchableOpacity
               onPress={async () => {
@@ -2742,263 +3629,446 @@ function GymScreen() {
                   setViewMode('FOCUS');
                 }
               }}
-              className={`px-4 py-2 rounded-lg ${exercises.length > 0 ? '' : 'bg-zinc-800'}`}
+              disabled={exercises.length === 0}
+              className="flex-row items-center gap-2 px-5 py-3 rounded-xl"
               style={
                 exercises.length > 0
                   ? {
-                      backgroundColor: '#0a0000',
-                      borderWidth: 2,
-                      borderColor: '#F97316',
+                      backgroundColor: '#DC2626',
                       shadowColor: '#DC2626',
-                      shadowOffset: { width: 0, height: 0 },
-                      shadowOpacity: 0.8,
-                      shadowRadius: 10,
+                      shadowOffset: { width: 0, height: 4 },
+                      shadowOpacity: 0.5,
+                      shadowRadius: 12,
                     }
-                  : {}
+                  : {
+                      backgroundColor: '#27272a',
+                    }
               }
             >
+              <Play
+                size={16}
+                color={exercises.length > 0 ? '#fff' : '#71717a'}
+                fill={exercises.length > 0 ? '#fff' : '#71717a'}
+              />
               <Text
-                className={`font-bold text-sm ${exercises.length > 0 ? 'text-fire-orange' : 'text-zinc-500'}`}
+                className={`font-bold text-sm ${exercises.length > 0 ? 'text-white' : 'text-zinc-500'}`}
               >
-                ENTRENAR 🔥
+                ENTRENAR
               </Text>
             </TouchableOpacity>
           </View>
 
-          {/* WHEEL SELECTOR DÍAS - ED HARDY FIRE */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            {trainingProgram.days.map((day, index) => {
-              const isActive = selectedDayIndex === index;
-              const isCurrent = trainingProgram.currentDayIndex === index;
+          {/* DAYS SELECTOR - Horizontal Pills */}
+          <View className="mb-2">
+            <Text className="text-zinc-600 text-[10px] font-mono mb-2 uppercase tracking-wider">
+              Selecciona el día a configurar
+            </Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} className="-mx-4 px-4">
+              {trainingProgram.days.map((day, index) => {
+                const isActive = selectedDayIndex === index;
+                const isCurrent = trainingProgram.currentDayIndex === index;
 
-              return (
-                <TouchableOpacity
-                  key={day.id}
-                  onPress={() => {
-                    setSelectedDayIndex(index);
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                  }}
-                  onLongPress={() => {
-                    setEditingDayIndex(index);
-                    setEditingDayName(day.muscleGroups);
-                    setDayNameModalVisible(true);
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-                  }}
-                  className={`mr-2 px-3 py-2 rounded-lg`}
-                  style={
-                    isActive
-                      ? {
-                          backgroundColor: '#0a0000',
-                          borderWidth: 2,
-                          borderColor: '#F97316',
-                          shadowColor: '#F97316',
-                          shadowOffset: { width: 0, height: 0 },
-                          shadowOpacity: 0.6,
-                          shadowRadius: 8,
-                        }
-                      : {
-                          backgroundColor: '#0a0a0a',
-                          borderWidth: 1,
-                          borderColor: '#27272a',
-                        }
-                  }
-                >
-                  <View className="flex-row items-center gap-1.5">
-                    {isCurrent && (
+                return (
+                  <TouchableOpacity
+                    key={day.id}
+                    onPress={() => {
+                      setSelectedDayIndex(index);
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                    }}
+                    onLongPress={() => {
+                      if (trainingProgram.days.length <= 1) {
+                        Alert.alert(
+                          'Mínimo requerido',
+                          'Debes tener al menos 1 día de entrenamiento'
+                        );
+                        return;
+                      }
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                      Alert.alert(
+                        '🗑️ Eliminar día',
+                        `¿Eliminar "${day.muscleGroups}" y todos sus ejercicios?`,
+                        [
+                          { text: 'Cancelar', style: 'cancel' },
+                          {
+                            text: 'Eliminar',
+                            style: 'destructive',
+                            onPress: async () => {
+                              const deletedDayIndex = index;
+
+                              // Eliminar el día seleccionado
+                              const updatedDays = trainingProgram.days.filter(
+                                (_, i) => i !== deletedDayIndex
+                              );
+                              const newSelectedIndex = Math.min(
+                                selectedDayIndex,
+                                updatedDays.length - 1
+                              );
+
+                              setTrainingProgram((prev) => ({
+                                ...prev,
+                                frequency: updatedDays.length,
+                                days: updatedDays.map((d, i) => ({ ...d, id: String(i + 1) })),
+                                currentDayIndex: Math.min(
+                                  prev.currentDayIndex,
+                                  updatedDays.length - 1
+                                ),
+                              }));
+                              setSelectedDayIndex(newSelectedIndex);
+
+                              // Actualizar en Supabase
+                              if (user) {
+                                // Reconstruir los nombres de rutina
+                                const updatedNames: Record<string, string> = {};
+                                updatedDays.forEach((d, i) => {
+                                  updatedNames[String(i)] = d.muscleGroups;
+                                });
+
+                                await supabase
+                                  .from('profiles')
+                                  .update({
+                                    training_frequency: updatedDays.length,
+                                    training_current_day: Math.min(
+                                      trainingProgram.currentDayIndex,
+                                      updatedDays.length - 1
+                                    ),
+                                    training_routine_names: updatedNames,
+                                  })
+                                  .eq('id', user.id);
+
+                                // Actualizar training_days de todos los ejercicios del usuario
+                                const { data: userExercises } = await supabase
+                                  .from('user_exercise_config')
+                                  .select('id, training_days, config')
+                                  .eq('user_id', user.id);
+
+                                if (userExercises) {
+                                  for (const ex of userExercises) {
+                                    const currentDays: number[] = ex.training_days || [];
+                                    // Remover el día eliminado y reindexar días mayores
+                                    const newDays = currentDays
+                                      .filter((d: number) => d !== deletedDayIndex)
+                                      .map((d: number) => (d > deletedDayIndex ? d - 1 : d));
+
+                                    // También limpiar series_by_day en config
+                                    const config = ex.config || {};
+                                    const seriesByDay =
+                                      (config.series_by_day as Record<string, unknown>) || {};
+                                    const newSeriesByDay: Record<string, unknown> = {};
+
+                                    Object.entries(seriesByDay).forEach(([dayKey, series]) => {
+                                      const dayNum = parseInt(dayKey);
+                                      if (dayNum !== deletedDayIndex) {
+                                        const newKey =
+                                          dayNum > deletedDayIndex ? String(dayNum - 1) : dayKey;
+                                        newSeriesByDay[newKey] = series;
+                                      }
+                                    });
+
+                                    await supabase
+                                      .from('user_exercise_config')
+                                      .update({
+                                        training_days: newDays,
+                                        config: { ...config, series_by_day: newSeriesByDay },
+                                      })
+                                      .eq('id', ex.id);
+                                  }
+                                }
+                              }
+                              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                              loadExercises(newSelectedIndex);
+                            },
+                          },
+                        ]
+                      );
+                    }}
+                    className="mr-2.5 px-4 py-2.5 rounded-xl"
+                    style={
+                      isActive
+                        ? {
+                            backgroundColor: '#F97316',
+                            shadowColor: '#F97316',
+                            shadowOffset: { width: 0, height: 4 },
+                            shadowOpacity: 0.5,
+                            shadowRadius: 12,
+                          }
+                        : {
+                            backgroundColor: '#18181b',
+                            borderWidth: 1,
+                            borderColor: '#27272a',
+                          }
+                    }
+                  >
+                    <View className="flex-row items-center gap-2">
+                      {/* Day Number Badge */}
                       <View
-                        className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-fire-gold' : 'bg-green-500'}`}
-                      />
-                    )}
-                    <Text
-                      className={`font-bold text-[10px] uppercase tracking-wider ${
-                        isActive ? 'text-fire-orange' : 'text-zinc-400'
-                      }`}
-                      numberOfLines={1}
-                    >
-                      {day.muscleGroups}
+                        className="w-6 h-6 rounded-lg items-center justify-center"
+                        style={{
+                          backgroundColor: isActive ? 'rgba(0,0,0,0.3)' : '#27272a',
+                        }}
+                      >
+                        <Text
+                          className={`font-bold text-xs font-mono ${isActive ? 'text-white' : 'text-zinc-500'}`}
+                        >
+                          {index + 1}
+                        </Text>
+                      </View>
+                      <View>
+                        <Text
+                          className={`font-bold text-xs uppercase tracking-wide ${
+                            isActive ? 'text-black' : 'text-zinc-300'
+                          }`}
+                          numberOfLines={1}
+                        >
+                          {day.muscleGroups}
+                        </Text>
+                        {isCurrent && (
+                          <Text
+                            className={`text-[8px] font-mono ${isActive ? 'text-black/60' : 'text-green-500'}`}
+                          >
+                            • HOY
+                          </Text>
+                        )}
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+
+              {/* BOTÓN AGREGAR DÍA */}
+              <TouchableOpacity
+                onPress={() => {
+                  if (trainingProgram.days.length >= 7) {
+                    Alert.alert('Límite alcanzado', 'Máximo 7 días de entrenamiento');
+                    return;
+                  }
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  setSelectedMuscleGroups([]);
+                  setAddDayModalVisible(true);
+                }}
+                className="px-4 py-2.5 rounded-xl border-2 border-dashed border-zinc-700 items-center justify-center flex-row gap-2"
+                style={{ minWidth: 60 }}
+              >
+                <Plus size={16} color="#F97316" />
+                <Text className="text-fire-orange font-bold text-xs">NUEVO</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+
+        {/* EXERCISES LIST - DRAG & DROP */}
+        <GestureHandlerRootView style={{ flex: 1 }}>
+          <ScrollView
+            className="flex-1 px-4 pt-3"
+            showsVerticalScrollIndicator={false}
+            scrollEnabled={!isDraggingExercise}
+          >
+            {exercises.length === 0 ? (
+              <View className="flex-1 justify-center items-center py-20">
+                <View
+                  className="w-20 h-20 rounded-2xl items-center justify-center mb-5"
+                  style={{
+                    backgroundColor: '#0a0500',
+                    borderWidth: 2,
+                    borderColor: '#F97316',
+                    shadowColor: '#F97316',
+                    shadowOffset: { width: 0, height: 0 },
+                    shadowOpacity: 0.3,
+                    shadowRadius: 16,
+                  }}
+                >
+                  <Plus size={32} color="#F97316" />
+                </View>
+                <Text className="text-zinc-400 text-center mb-2 text-base font-bold">
+                  Sin ejercicios configurados
+                </Text>
+                <Text className="text-zinc-600 text-center mb-6 text-xs">
+                  Agrega ejercicios para este día de entrenamiento
+                </Text>
+                <TouchableOpacity
+                  onPress={() => setModalVisible(true)}
+                  className="px-8 py-4 rounded-xl"
+                  style={{
+                    backgroundColor: '#0a0000',
+                    borderWidth: 2,
+                    borderColor: '#F97316',
+                    shadowColor: '#F97316',
+                    shadowOffset: { width: 0, height: 4 },
+                    shadowOpacity: 0.4,
+                    shadowRadius: 16,
+                  }}
+                >
+                  <Text className="text-fire-orange font-bold text-sm tracking-wider">
+                    + AGREGAR EJERCICIO 🔥
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <>
+                {/* Header de lista con consejos */}
+                <View className="mb-3 px-1">
+                  <View className="flex-row items-center justify-between mb-2">
+                    <View className="flex-row items-center gap-2">
+                      <View className="w-2 h-2 rounded-full bg-fire-orange" />
+                      <Text className="text-zinc-400 text-xs font-bold uppercase tracking-wider">
+                        {exercises.length} EJERCICIO{exercises.length !== 1 ? 'S' : ''}
+                      </Text>
+                    </View>
+                  </View>
+                  {/* Tips */}
+                  <View className="flex-row flex-wrap gap-x-3 gap-y-1">
+                    <Text className="text-zinc-600 text-[9px] font-mono">👆 Toca para editar</Text>
+                    <Text className="text-zinc-600 text-[9px] font-mono">
+                      👈 Desliza para eliminar
+                    </Text>
+                    <Text className="text-zinc-600 text-[9px] font-mono">
+                      ✊ Mantén para reordenar
                     </Text>
                   </View>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-          <Text className="text-zinc-600 text-[10px] mt-1.5 font-mono">
-            Mantén presionado para renombrar
-          </Text>
-        </View>
+                </View>
 
-        {/* EXERCISES LIST - ED HARDY FIRE STYLE */}
-        <FlatList
-          data={exercises}
-          keyExtractor={(item) => item.id}
-          className="flex-1 px-4 pt-2"
-          showsVerticalScrollIndicator={false}
-          ListEmptyComponent={
-            <View className="flex-1 justify-center items-center py-16">
-              <View
-                className="w-16 h-16 rounded-full items-center justify-center mb-4"
-                style={{
-                  backgroundColor: '#0a0500',
-                  borderWidth: 2,
-                  borderColor: '#F97316',
-                }}
-              >
-                <Plus size={28} color="#F97316" />
-              </View>
-              <Text className="text-zinc-500 text-center mb-6 text-sm">
-                Sin ejercicios configurados
-              </Text>
-              <TouchableOpacity
-                onPress={() => setModalVisible(true)}
-                className="px-6 py-3 rounded-lg"
-                style={{
-                  backgroundColor: '#0a0000',
-                  borderWidth: 2,
-                  borderColor: '#F97316',
-                  shadowColor: '#DC2626',
-                  shadowOffset: { width: 0, height: 0 },
-                  shadowOpacity: 0.8,
-                  shadowRadius: 12,
-                }}
-              >
-                <Text className="text-fire-orange font-bold text-sm tracking-wider">
-                  + AGREGAR EJERCICIO 🔥
-                </Text>
-              </TouchableOpacity>
-            </View>
-          }
-          renderItem={({ item, index }) => (
-            <TouchableOpacity
-              onPress={async () => {
-                // NUEVA ARQUITECTURA: Cargar config del ejercicio para editarlo
-                const { data } = await supabase
-                  .from('user_exercise_config')
-                  .select(
-                    `
-                    id,
-                    config,
-                    custom_media_url,
-                    exercises:exercise_id (
-                      id,
-                      name,
-                      description,
-                      muscle_group,
-                      difficulty,
-                      default_media_url
+                {/* Lista de ejercicios arrastrables */}
+                {exercises.map((item, index) => {
+                  // Calcular offset de animación basado en la posición del drag
+                  const ITEM_HEIGHT = 88;
+                  const getAnimatedOffset = (): number => {
+                    if (
+                      !isDraggingExercise ||
+                      dragTargetIndex === null ||
+                      draggingFromIndex === null
                     )
-                  `
-                  )
-                  .eq('id', item.id)
-                  .single();
+                      return 0;
+                    if (index === draggingFromIndex) return 0; // El item arrastrado no necesita offset
 
-                if (data) {
-                  // Cast: Supabase devuelve el objeto de exercises como objeto, no array
-                  const exerciseInfo = data.exercises as unknown as {
-                    id: string;
-                    name: string;
-                    description: string | null;
-                    muscle_group: string | null;
-                    difficulty: string | null;
-                    default_media_url: string | null;
-                  } | null;
-
-                  const template: AssetTemplate = {
-                    id: data.id,
-                    name: exerciseInfo?.name || item.name,
-                    description: exerciseInfo?.description || '',
-                    image_url: data.custom_media_url || exerciseInfo?.default_media_url || '',
-                    category: exerciseInfo?.muscle_group || 'OTRO',
-                    difficulty: exerciseInfo?.difficulty || 'INTERMEDIO',
-                    default_metadata: data.config || {},
+                    // Si el target está DESPUÉS del origen (arrastrando hacia abajo)
+                    if (dragTargetIndex > draggingFromIndex) {
+                      // Los items entre origen+1 y target deben subir
+                      if (index > draggingFromIndex && index <= dragTargetIndex) {
+                        return -ITEM_HEIGHT;
+                      }
+                    }
+                    // Si el target está ANTES del origen (arrastrando hacia arriba)
+                    else if (dragTargetIndex < draggingFromIndex) {
+                      // Los items entre target y origen-1 deben bajar
+                      if (index >= dragTargetIndex && index < draggingFromIndex) {
+                        return ITEM_HEIGHT;
+                      }
+                    }
+                    return 0;
                   };
 
-                  // Cargar series existentes del DÍA ACTUAL
-                  const seriesByDay = data.config?.series_by_day as
-                    | Record<string, SeriesConfig[]>
-                    | undefined;
-                  const existingSeries: SeriesConfig[] =
-                    seriesByDay?.[String(selectedDayIndex)] || // Primero series_by_day del día actual
-                    (data.config?.custom_series as SeriesConfig[] | undefined) || // Fallback legacy
-                    [];
-                  setSeriesConfig(existingSeries);
-                  setSelectedTemplate(template);
-                  setSeriesConfigModalVisible(true);
-                }
-              }}
-              className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-3 mb-2 flex-row items-center"
-            >
-              {/* ORDER NUMBER */}
-              <View className="bg-savage-red rounded-full w-6 h-6 items-center justify-center mr-2">
-                <Text className="text-white font-bold text-xs font-mono">{index + 1}</Text>
-              </View>
+                  const offset = getAnimatedOffset();
 
-              {/* IMAGE */}
-              <Image
-                source={{ uri: item.image_url }}
-                className="w-12 h-12 rounded-lg mr-3"
-                contentFit="cover"
-              />
+                  return (
+                    <AnimatedExerciseItem
+                      key={item.id}
+                      offset={offset}
+                      isDragging={draggingFromIndex === index}
+                    >
+                      <DraggableExerciseCard
+                        exercise={item}
+                        index={index}
+                        totalItems={exercises.length}
+                        onEdit={async () => {
+                          // NUEVA ARQUITECTURA: Cargar config del ejercicio para editarlo
+                          const { data } = await supabase
+                            .from('user_exercise_config')
+                            .select(
+                              `
+                          id,
+                          config,
+                          custom_media_url,
+                          exercises:exercise_id (
+                            id,
+                            name,
+                            description,
+                            muscle_group,
+                            difficulty,
+                            default_media_url
+                          )
+                        `
+                            )
+                            .eq('id', item.id)
+                            .single();
 
-              {/* INFO */}
-              <View className="flex-1">
-                <Text className="text-white font-bold text-sm mb-1" numberOfLines={1}>
-                  {item.name}
-                </Text>
-                {/* RESUMEN DE ESTRUCTURA */}
-                {item.series && item.series.length > 0 && (
-                  <View className="flex-row flex-wrap gap-0.5">
-                    {item.series
-                      .filter((s) => s && typeof s === 'object')
-                      .map((s, idx) => {
-                        const typeColors = {
-                          WARMUP: 'bg-blue-500',
-                          FEEDER: 'bg-yellow-500',
-                          EFFECTIVE: 'bg-green-500',
-                          INTENSITY: 'bg-red-500',
-                        };
-                        const colorClass = typeColors[s.type] || 'bg-zinc-500';
-                        return (
-                          <View
-                            key={String(idx)}
-                            className={`${colorClass} w-5 h-5 rounded-full items-center justify-center`}
-                          >
-                            <Text className="text-white text-[8px] font-bold">
-                              {String(s.reps || 0)}
-                            </Text>
-                          </View>
-                        );
-                      })}
-                  </View>
-                )}
-              </View>
+                          if (data) {
+                            const exerciseInfo = data.exercises as unknown as {
+                              id: string;
+                              name: string;
+                              description: string | null;
+                              muscle_group: string | null;
+                              difficulty: string | null;
+                              default_media_url: string | null;
+                            } | null;
 
-              <TouchableOpacity
-                onPress={() => deleteExercise(item.id)}
-                className="p-2 bg-zinc-800 rounded-lg"
-              >
-                <Trash2 color="#DC2626" size={16} />
-              </TouchableOpacity>
-            </TouchableOpacity>
-          )}
-        />
+                            const template: AssetTemplate = {
+                              id: data.id,
+                              name: exerciseInfo?.name || item.name,
+                              description: exerciseInfo?.description || '',
+                              image_url:
+                                data.custom_media_url || exerciseInfo?.default_media_url || '',
+                              category: exerciseInfo?.muscle_group || 'OTRO',
+                              difficulty: exerciseInfo?.difficulty || 'INTERMEDIO',
+                              default_metadata: data.config || {},
+                            };
 
-        {/* FOOTER - ED HARDY FIRE STYLE */}
-        <View className="border-t border-fire-red/20 p-4 bg-black">
-          <TouchableOpacity
-            onPress={() => setModalVisible(true)}
-            className="p-3 rounded-lg items-center flex-row justify-center gap-2"
-            style={{
-              borderWidth: 1,
-              borderColor: '#F97316',
-              backgroundColor: '#0a0500',
-            }}
-          >
-            <Plus color="#F97316" size={18} />
-            <Text className="text-fire-orange font-bold text-sm tracking-wider">
-              AGREGAR EJERCICIO
-            </Text>
-          </TouchableOpacity>
-        </View>
+                            const seriesByDay = data.config?.series_by_day as
+                              | Record<string, SeriesConfig[]>
+                              | undefined;
+                            const existingSeries: SeriesConfig[] =
+                              seriesByDay?.[String(selectedDayIndex)] ||
+                              (data.config?.custom_series as SeriesConfig[] | undefined) ||
+                              [];
+                            setSeriesConfig(existingSeries);
+                            setSelectedTemplate(template);
+                            // NO viene del catálogo, viene de editar ejercicio existente
+                            setSeriesConfigFromCatalog(false);
+                            seriesConfigFromCatalogRef.current = false;
+                            setSeriesConfigModalVisible(true);
+                          }
+                        }}
+                        onDelete={() => deleteExercise(item.id)}
+                        onDragStart={() => {
+                          setIsDraggingExercise(true);
+                          setDraggingFromIndex(index);
+                        }}
+                        onDragEnd={(newIndex) => {
+                          setIsDraggingExercise(false);
+                          setDragTargetIndex(null);
+                          setDraggingFromIndex(null);
+                          reorderExercises(index, newIndex);
+                        }}
+                        onDragCancel={() => {
+                          setIsDraggingExercise(false);
+                          setDragTargetIndex(null);
+                          setDraggingFromIndex(null);
+                        }}
+                        onPositionChange={(targetIndex) => setDragTargetIndex(targetIndex)}
+                        itemHeight={88}
+                      />
+                    </AnimatedExerciseItem>
+                  );
+                })}
+
+                {/* BOTÓN AGREGAR EJERCICIO - Dentro del scroll */}
+                <TouchableOpacity
+                  onPress={() => setModalVisible(true)}
+                  className="mt-2 mb-4 p-4 rounded-xl items-center flex-row justify-center gap-2"
+                  style={{
+                    borderWidth: 2,
+                    borderColor: '#F97316',
+                    backgroundColor: '#0a0500',
+                    borderStyle: 'dashed',
+                  }}
+                >
+                  <Plus color="#F97316" size={18} />
+                  <Text className="text-fire-orange font-bold text-sm tracking-wider">
+                    AGREGAR EJERCICIO
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </ScrollView>
+        </GestureHandlerRootView>
 
         {/* CATALOG MODAL */}
         {renderCatalogModal()}
@@ -3050,6 +4120,370 @@ function GymScreen() {
               </View>
             </Pressable>
           </Pressable>
+        </Modal>
+
+        {/* MODAL AGREGAR DÍA - SELECCIÓN DE GRUPOS MUSCULARES */}
+        <Modal
+          visible={addDayModalVisible}
+          transparent
+          animationType="slide"
+          onRequestClose={() => {
+            setAddDayModalVisible(false);
+            setSelectedMuscleGroups([]);
+          }}
+        >
+          <View className="flex-1 bg-transparent justify-end">
+            <Animated.View
+              style={[animatedStyleAddDay, { height: '85%' }]}
+              className="bg-black rounded-t-3xl"
+            >
+              {/* Header - Draggable para cerrar */}
+              <View
+                {...panResponderAddDay.panHandlers}
+                className="px-5 pt-6 pb-4 border-b border-zinc-900"
+              >
+                {/* Indicador de drag centrado arriba */}
+                <View className="absolute top-2 left-0 right-0 items-center">
+                  <View className="w-10 h-1 bg-zinc-600 rounded-full" />
+                </View>
+
+                <View className="flex-row justify-between items-center">
+                  <View>
+                    <Text className="text-white text-xl font-bold">🔥 NUEVO DÍA</Text>
+                    <Text className="text-zinc-500 text-xs mt-0.5">
+                      Selecciona los grupos musculares
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setAddDayModalVisible(false);
+                      setSelectedMuscleGroups([]);
+                    }}
+                    className="w-10 h-10 bg-zinc-900 rounded-full items-center justify-center"
+                  >
+                    <ChevronDown size={22} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Contenido */}
+              <View className="flex-1 px-5 pt-4">
+                {/* Grupos seleccionados */}
+                {selectedMuscleGroups.length > 0 && (
+                  <View className="bg-zinc-900/80 rounded-xl p-3 mb-4 border border-fire-orange/30">
+                    <Text className="text-fire-orange font-bold text-xs mb-1">TU SELECCIÓN:</Text>
+                    <Text className="text-white font-bold">{selectedMuscleGroups.join(' + ')}</Text>
+                  </View>
+                )}
+
+                {/* Grid de grupos musculares por categorías */}
+                <ScrollView
+                  showsVerticalScrollIndicator={false}
+                  className="flex-1 mb-4"
+                  contentContainerStyle={{ paddingBottom: 20 }}
+                >
+                  {/* PARTE SUPERIOR */}
+                  <View
+                    className="mb-4 rounded-xl p-3"
+                    style={{ backgroundColor: '#0a0a0a', borderWidth: 1, borderColor: '#ef444450' }}
+                  >
+                    <Text className="text-xs font-bold mb-2" style={{ color: '#ef4444' }}>
+                      💪 PARTE SUPERIOR
+                    </Text>
+                    <View className="flex-row flex-wrap gap-2">
+                      {MUSCLE_GROUPS.filter((g) => g.category === 'superior').map((group) => {
+                        const isSelected = selectedMuscleGroups.includes(group.name);
+                        return (
+                          <TouchableOpacity
+                            key={group.id}
+                            onPress={() => {
+                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                              if (isSelected) {
+                                setSelectedMuscleGroups((prev) =>
+                                  prev.filter((g) => g !== group.name)
+                                );
+                              } else {
+                                setSelectedMuscleGroups((prev) => [...prev, group.name]);
+                              }
+                            }}
+                            className="px-3 py-2 rounded-lg"
+                            style={{
+                              backgroundColor: isSelected ? '#ef4444' : '#18181b',
+                              borderWidth: 1,
+                              borderColor: isSelected ? '#ef4444' : '#27272a',
+                            }}
+                          >
+                            <Text
+                              className="font-bold text-xs"
+                              style={{ color: isSelected ? '#000' : '#a1a1aa' }}
+                            >
+                              {group.name}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
+
+                  {/* BRAZOS */}
+                  <View
+                    className="mb-4 rounded-xl p-3"
+                    style={{ backgroundColor: '#0a0a0a', borderWidth: 1, borderColor: '#10b98150' }}
+                  >
+                    <Text className="text-xs font-bold mb-2" style={{ color: '#10b981' }}>
+                      💪 BRAZOS
+                    </Text>
+                    <View className="flex-row flex-wrap gap-2">
+                      {MUSCLE_GROUPS.filter((g) => g.category === 'brazos').map((group) => {
+                        const isSelected = selectedMuscleGroups.includes(group.name);
+                        return (
+                          <TouchableOpacity
+                            key={group.id}
+                            onPress={() => {
+                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                              if (isSelected) {
+                                setSelectedMuscleGroups((prev) =>
+                                  prev.filter((g) => g !== group.name)
+                                );
+                              } else {
+                                setSelectedMuscleGroups((prev) => [...prev, group.name]);
+                              }
+                            }}
+                            className="px-3 py-2 rounded-lg"
+                            style={{
+                              backgroundColor: isSelected ? '#10b981' : '#18181b',
+                              borderWidth: 1,
+                              borderColor: isSelected ? '#10b981' : '#27272a',
+                            }}
+                          >
+                            <Text
+                              className="font-bold text-xs"
+                              style={{ color: isSelected ? '#000' : '#a1a1aa' }}
+                            >
+                              {group.name}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
+
+                  {/* PIERNAS */}
+                  <View
+                    className="mb-4 rounded-xl p-3"
+                    style={{ backgroundColor: '#0a0a0a', borderWidth: 1, borderColor: '#ec489950' }}
+                  >
+                    <Text className="text-xs font-bold mb-2" style={{ color: '#ec4899' }}>
+                      🦵 PIERNAS
+                    </Text>
+                    <View className="flex-row flex-wrap gap-2">
+                      {MUSCLE_GROUPS.filter((g) => g.category === 'piernas').map((group) => {
+                        const isSelected = selectedMuscleGroups.includes(group.name);
+                        return (
+                          <TouchableOpacity
+                            key={group.id}
+                            onPress={() => {
+                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                              if (isSelected) {
+                                setSelectedMuscleGroups((prev) =>
+                                  prev.filter((g) => g !== group.name)
+                                );
+                              } else {
+                                setSelectedMuscleGroups((prev) => [...prev, group.name]);
+                              }
+                            }}
+                            className="px-3 py-2 rounded-lg"
+                            style={{
+                              backgroundColor: isSelected ? '#ec4899' : '#18181b',
+                              borderWidth: 1,
+                              borderColor: isSelected ? '#ec4899' : '#27272a',
+                            }}
+                          >
+                            <Text
+                              className="font-bold text-xs"
+                              style={{ color: isSelected ? '#000' : '#a1a1aa' }}
+                            >
+                              {group.name}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
+
+                  {/* CORE */}
+                  <View
+                    className="mb-4 rounded-xl p-3"
+                    style={{ backgroundColor: '#0a0a0a', borderWidth: 1, borderColor: '#eab30850' }}
+                  >
+                    <Text className="text-xs font-bold mb-2" style={{ color: '#eab308' }}>
+                      🔥 CORE
+                    </Text>
+                    <View className="flex-row flex-wrap gap-2">
+                      {MUSCLE_GROUPS.filter((g) => g.category === 'core').map((group) => {
+                        const isSelected = selectedMuscleGroups.includes(group.name);
+                        return (
+                          <TouchableOpacity
+                            key={group.id}
+                            onPress={() => {
+                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                              if (isSelected) {
+                                setSelectedMuscleGroups((prev) =>
+                                  prev.filter((g) => g !== group.name)
+                                );
+                              } else {
+                                setSelectedMuscleGroups((prev) => [...prev, group.name]);
+                              }
+                            }}
+                            className="px-3 py-2 rounded-lg"
+                            style={{
+                              backgroundColor: isSelected ? '#eab308' : '#18181b',
+                              borderWidth: 1,
+                              borderColor: isSelected ? '#eab308' : '#27272a',
+                            }}
+                          >
+                            <Text
+                              className="font-bold text-xs"
+                              style={{ color: isSelected ? '#000' : '#a1a1aa' }}
+                            >
+                              {group.name}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
+
+                  {/* ESPECIALES */}
+                  <View
+                    className="mb-2 rounded-xl p-3"
+                    style={{ backgroundColor: '#0a0a0a', borderWidth: 1, borderColor: '#06b6d450' }}
+                  >
+                    <Text className="text-xs font-bold mb-2" style={{ color: '#06b6d4' }}>
+                      ⚡ ESPECIALES
+                    </Text>
+                    <View className="flex-row flex-wrap gap-2">
+                      {MUSCLE_GROUPS.filter(
+                        (g) => g.category === 'cardio' || g.category === 'especial'
+                      ).map((group) => {
+                        const isSelected = selectedMuscleGroups.includes(group.name);
+                        return (
+                          <TouchableOpacity
+                            key={group.id}
+                            onPress={() => {
+                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                              if (isSelected) {
+                                setSelectedMuscleGroups((prev) =>
+                                  prev.filter((g) => g !== group.name)
+                                );
+                              } else {
+                                setSelectedMuscleGroups((prev) => [...prev, group.name]);
+                              }
+                            }}
+                            className="px-3 py-2 rounded-lg"
+                            style={{
+                              backgroundColor: isSelected ? '#06b6d4' : '#18181b',
+                              borderWidth: 1,
+                              borderColor: isSelected ? '#06b6d4' : '#27272a',
+                            }}
+                          >
+                            <Text
+                              className="font-bold text-xs"
+                              style={{ color: isSelected ? '#000' : '#a1a1aa' }}
+                            >
+                              {group.name}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
+                </ScrollView>
+
+                {/* Botón crear - con safe area */}
+                <View style={{ paddingBottom: insets.bottom + 16 }}>
+                  <TouchableOpacity
+                    onPress={async () => {
+                      if (selectedMuscleGroups.length === 0) {
+                        Alert.alert('Selección requerida', 'Elige al menos un grupo muscular');
+                        return;
+                      }
+
+                      const newDayIndex = trainingProgram.days.length;
+                      const muscleGroupsName = selectedMuscleGroups.join(' + ');
+                      const newDay = {
+                        id: String(newDayIndex + 1),
+                        muscleGroups: muscleGroupsName,
+                        exercises: [],
+                      };
+
+                      // Actualizar estado local
+                      const updatedDays = [...trainingProgram.days, newDay];
+                      setTrainingProgram((prev) => ({
+                        ...prev,
+                        frequency: updatedDays.length,
+                        days: updatedDays,
+                      }));
+
+                      // Guardar en Supabase
+                      if (user) {
+                        const { data: profile } = await supabase
+                          .from('profiles')
+                          .select('training_routine_names')
+                          .eq('id', user.id)
+                          .single();
+
+                        const currentNames = profile?.training_routine_names || {};
+                        const updatedNames = {
+                          ...currentNames,
+                          [String(newDayIndex)]: muscleGroupsName,
+                        };
+
+                        await supabase
+                          .from('profiles')
+                          .update({
+                            training_frequency: updatedDays.length,
+                            training_routine_names: updatedNames,
+                          })
+                          .eq('id', user.id);
+                      }
+
+                      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                      setAddDayModalVisible(false);
+                      setSelectedMuscleGroups([]);
+
+                      // Seleccionar el nuevo día
+                      setSelectedDayIndex(newDayIndex);
+                    }}
+                    disabled={selectedMuscleGroups.length === 0}
+                    className={`py-4 rounded-xl ${
+                      selectedMuscleGroups.length > 0 ? 'bg-fire-orange' : 'bg-zinc-800'
+                    }`}
+                    style={
+                      selectedMuscleGroups.length > 0
+                        ? {
+                            shadowColor: '#F97316',
+                            shadowOffset: { width: 0, height: 4 },
+                            shadowOpacity: 0.5,
+                            shadowRadius: 12,
+                          }
+                        : {}
+                    }
+                  >
+                    <Text
+                      className={`text-center font-bold text-base ${
+                        selectedMuscleGroups.length > 0 ? 'text-black' : 'text-zinc-500'
+                      }`}
+                    >
+                      {selectedMuscleGroups.length > 0
+                        ? `🔥 CREAR DÍA ${trainingProgram.days.length + 1}`
+                        : 'SELECCIONA GRUPOS MUSCULARES'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </Animated.View>
+          </View>
         </Modal>
       </View>
     );
@@ -3130,7 +4564,10 @@ function GymScreen() {
     <Modal visible={editorVisible} animationType="slide" statusBarTranslucent>
       <View className="flex-1 bg-black">
         {/* Header */}
-        <View className="flex-row justify-between items-center px-6 pt-14 pb-4 border-b border-zinc-800">
+        <View
+          className="flex-row justify-between items-center px-6 pb-4 border-b border-zinc-800"
+          style={{ paddingTop: insets.top + 12 }}
+        >
           <TouchableOpacity
             onPress={() => {
               setEditorVisible(false);
@@ -3486,7 +4923,7 @@ function GymScreen() {
               <View className="absolute top-0 left-0 right-0 z-50">
                 <LinearGradient
                   colors={['rgba(0,0,0,0.8)', 'rgba(0,0,0,0)']}
-                  className="px-6 pt-14 pb-10"
+                  style={{ paddingTop: insets.top + 12, paddingBottom: 40, paddingHorizontal: 24 }}
                 >
                   <View className="flex-row justify-between items-center">
                     {/* Close Button */}
@@ -3865,7 +5302,8 @@ function GymScreen() {
       <View className="absolute top-0 left-0 right-0 z-50">
         <LinearGradient
           colors={['rgba(10,0,0,0.98)', 'rgba(10,0,0,0.85)', 'transparent']}
-          className="px-4 pt-14 pb-6"
+          className="px-4 pb-6"
+          style={{ paddingTop: insets.top + 12 }}
         >
           <View className="flex-row items-center justify-between">
             <View className="flex-1">

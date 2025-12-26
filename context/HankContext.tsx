@@ -871,17 +871,21 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
       }
 
       // Extraer tipo
-      let seriesType: 'WARMUP' | 'APPROACH' | 'EFFECTIVE' | 'FAILURE' = 'EFFECTIVE';
+      let seriesType: 'CALENTAMIENTO' | 'APROXIMACION' | 'EFECTIVA' | 'FALLO' = 'EFECTIVA';
       if (lower.includes('calentamiento') || lower.includes('warmup')) {
-        seriesType = 'WARMUP';
-      } else if (lower.includes('fallo') || lower.includes('failure')) {
-        seriesType = 'FAILURE';
+        seriesType = 'CALENTAMIENTO';
+      } else if (
+        lower.includes('fallo') ||
+        lower.includes('failure') ||
+        lower.includes('intensidad')
+      ) {
+        seriesType = 'FALLO';
       } else if (
         lower.includes('aproximación') ||
         lower.includes('approach') ||
         lower.includes('aproximacion')
       ) {
-        seriesType = 'APPROACH';
+        seriesType = 'APROXIMACION';
       }
 
       if (activeAsset) {

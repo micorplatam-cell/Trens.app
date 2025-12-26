@@ -54,6 +54,9 @@ interface ProfileData {
   training_experience?: string;
   metabolic_rate?: string;
   training_days_per_week?: number;
+  // Campos calculados (read-only, vienen de GYM y PLAN)
+  training_frequency?: number; // Cantidad de días en estructura de entrenamiento
+  meal_count?: number; // Cantidad de comidas configuradas en PLAN
 }
 
 interface TrensIDProps {
@@ -608,21 +611,29 @@ export default function TrensID({ userId, profileData, measurements, onUpdate }:
                       placeholderTextColor="#52525b"
                     />
                   </View>
-                  {/* Días de Entreno */}
-                  <View className="w-1/2 px-1 mb-3">
-                    <Text className="text-[9px] text-zinc-500 uppercase font-bold tracking-wider mb-1">
-                      Días/Semana
+                  {/* Días de Entreno - CALCULADO (no editable) */}
+                  <View className="w-1/4 px-1 mb-3">
+                    <Text className="text-[9px] text-fire-orange uppercase font-bold tracking-wider mb-1">
+                      🏋️ Días
                     </Text>
-                    <TextInput
-                      value={editData.training_days_per_week?.toString() || '4'}
-                      onChangeText={(text) =>
-                        setEditData({ ...editData, training_days_per_week: parseInt(text) || 4 })
-                      }
-                      keyboardType="numeric"
-                      placeholder="4"
-                      className="bg-black border border-zinc-800 p-3 text-white text-xs font-bold"
-                      placeholderTextColor="#52525b"
-                    />
+                    <View className="bg-zinc-900 border border-zinc-700 p-3 rounded">
+                      <Text className="text-fire-orange text-lg font-mono font-bold text-center">
+                        {editData.training_frequency || profileData.training_frequency || '-'}
+                      </Text>
+                    </View>
+                    <Text className="text-[7px] text-zinc-600 text-center mt-1">Desde GYM</Text>
+                  </View>
+                  {/* Comidas/Día - CALCULADO (no editable) */}
+                  <View className="w-1/4 px-1 mb-3">
+                    <Text className="text-[9px] text-green-500 uppercase font-bold tracking-wider mb-1">
+                      🍽️ Comidas
+                    </Text>
+                    <View className="bg-zinc-900 border border-zinc-700 p-3 rounded">
+                      <Text className="text-green-500 text-lg font-mono font-bold text-center">
+                        {editData.meal_count || profileData.meal_count || '-'}
+                      </Text>
+                    </View>
+                    <Text className="text-[7px] text-zinc-600 text-center mt-1">Desde PLAN</Text>
                   </View>
                 </View>
 

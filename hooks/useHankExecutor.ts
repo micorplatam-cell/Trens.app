@@ -244,7 +244,7 @@ export const useHankExecutor = (
                 id?: string;
                 reps: number;
                 weight: number;
-                type: 'WARMUP' | 'APPROACH' | 'EFFECTIVE' | 'FAILURE';
+                type: 'CALENTAMIENTO' | 'APROXIMACION' | 'EFECTIVA' | 'FALLO';
                 note?: string;
               }>
             ).map((s, i) => ({

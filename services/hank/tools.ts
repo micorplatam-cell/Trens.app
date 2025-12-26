@@ -34,13 +34,44 @@ interface AssetTemplate {
   difficulty?: string;
 }
 
+type SeriesTypeSpanish = 'CALENTAMIENTO' | 'APROXIMACION' | 'EFECTIVA' | 'FALLO';
+type SeriesTypeEnglish = 'WARMUP' | 'APPROACH' | 'EFFECTIVE' | 'FAILURE';
+
 interface SeriesConfig {
   id: string;
   reps: number;
   weight: number;
-  type: 'WARMUP' | 'APPROACH' | 'EFFECTIVE' | 'FAILURE';
+  type: SeriesTypeSpanish;
   note?: string;
 }
+
+// Mapeo de tipos de series inglés -> español
+const mapSeriesType = (type: SeriesTypeEnglish | string): SeriesTypeSpanish => {
+  const mapping: Record<string, SeriesTypeSpanish> = {
+    WARMUP: 'CALENTAMIENTO',
+    APPROACH: 'APROXIMACION',
+    EFFECTIVE: 'EFECTIVA',
+    FAILURE: 'FALLO',
+    // También aceptar español directamente
+    CALENTAMIENTO: 'CALENTAMIENTO',
+    APROXIMACION: 'APROXIMACION',
+    EFECTIVA: 'EFECTIVA',
+    FALLO: 'FALLO',
+  };
+  return mapping[type] || 'EFECTIVA';
+};
+
+// Convertir series custom a SeriesConfig con ids
+const toSeriesConfig = (
+  series: Array<{ reps: number; weight: number; type: string }>
+): SeriesConfig[] => {
+  return series.map((s, i) => ({
+    id: String(Date.now() + i),
+    reps: s.reps,
+    weight: s.weight,
+    type: mapSeriesType(s.type),
+  }));
+};
 
 // Tipo para resultado de búsqueda de ejercicio
 interface ExerciseConfigResult {
@@ -148,97 +179,159 @@ function setSeriesForDay(
  */
 function getDefaultSeries(): SeriesConfig[] {
   return [
-    { id: '1', reps: 12, type: 'WARMUP', weight: 0 },
-    { id: '2', reps: 10, type: 'EFFECTIVE', weight: 0 },
-    { id: '3', reps: 10, type: 'EFFECTIVE', weight: 0 },
-    { id: '4', reps: 10, type: 'EFFECTIVE', weight: 0 },
+    { id: '1', reps: 12, type: 'CALENTAMIENTO', weight: 0 },
+    { id: '2', reps: 10, type: 'EFECTIVA', weight: 0 },
+    { id: '3', reps: 10, type: 'EFECTIVA', weight: 0 },
+    { id: '4', reps: 10, type: 'EFECTIVA', weight: 0 },
   ];
 }
 
+/**
+ * Series automáticas según nivel del usuario
+ */
+function getSeriesByLevel(level: string = 'INTERMEDIATE'): SeriesConfig[] {
+  const structures: Record<string, SeriesConfig[]> = {
+    BEGINNER: [
+      { id: '1', reps: 12, type: 'CALENTAMIENTO', weight: 0 },
+      { id: '2', reps: 10, type: 'EFECTIVA', weight: 0 },
+      { id: '3', reps: 10, type: 'EFECTIVA', weight: 0 },
+      { id: '4', reps: 10, type: 'EFECTIVA', weight: 0 },
+    ],
+    INTERMEDIATE: [
+      { id: '1', reps: 12, type: 'CALENTAMIENTO', weight: 0 },
+      { id: '2', reps: 10, type: 'APROXIMACION', weight: 0 },
+      { id: '3', reps: 8, type: 'EFECTIVA', weight: 0 },
+      { id: '4', reps: 8, type: 'EFECTIVA', weight: 0 },
+      { id: '5', reps: 8, type: 'EFECTIVA', weight: 0 },
+    ],
+    ADVANCED: [
+      { id: '1', reps: 12, type: 'CALENTAMIENTO', weight: 0 },
+      { id: '2', reps: 8, type: 'APROXIMACION', weight: 0 },
+      { id: '3', reps: 6, type: 'APROXIMACION', weight: 0 },
+      { id: '4', reps: 6, type: 'EFECTIVA', weight: 0 },
+      { id: '5', reps: 6, type: 'EFECTIVA', weight: 0 },
+      { id: '6', reps: 6, type: 'EFECTIVA', weight: 0 },
+      { id: '7', reps: 12, type: 'FALLO', weight: 0 },
+    ],
+    PRO: [
+      { id: '1', reps: 15, type: 'CALENTAMIENTO', weight: 0 },
+      { id: '2', reps: 10, type: 'APROXIMACION', weight: 0 },
+      { id: '3', reps: 8, type: 'APROXIMACION', weight: 0 },
+      { id: '4', reps: 5, type: 'EFECTIVA', weight: 0 },
+      { id: '5', reps: 5, type: 'EFECTIVA', weight: 0 },
+      { id: '6', reps: 5, type: 'EFECTIVA', weight: 0 },
+      { id: '7', reps: 15, type: 'FALLO', weight: 0 },
+    ],
+  };
+  return structures[level] || structures.INTERMEDIATE;
+}
+
 // ============================================================================
-// GYM TOOL: Agregar Ejercicio
+// GYM TOOL: Agregar Ejercicio (NUEVA ARQUITECTURA: exercises + user_exercise_config)
 // ============================================================================
 export async function gymAddExercise(
   userId: string,
   exerciseName: string,
   trainingDay: number,
-  customSeries?: Array<{ reps: number; weight: number; type: string }>
+  customSeries?: Array<{ reps: number; weight: number; type: string }>,
+  userLevel?: string
 ): Promise<HankToolResult> {
   try {
-    // Buscar template del ejercicio
-    const { data: template, error: templateError } = await supabase
-      .from('asset_templates')
+    // NUEVA ARQUITECTURA: Buscar en tabla exercises (catálogo global)
+    const { data: exercise, error: exerciseError } = await supabase
+      .from('exercises')
       .select('*')
-      .eq('asset_type', 'gym_exercise')
+      .eq('is_active', true)
       .ilike('name', `%${exerciseName}%`)
       .limit(1)
       .single();
 
-    if (templateError || !template) {
-      return {
-        success: false,
-        message: `No encontré el ejercicio "${exerciseName}" en el catálogo.`,
-      };
+    if (exerciseError || !exercise) {
+      // Fallback: buscar coincidencia parcial más amplia
+      const { data: exercises } = await supabase
+        .from('exercises')
+        .select('*')
+        .eq('is_active', true)
+        .order('name');
+
+      const match = exercises?.find((e) =>
+        e.name.toLowerCase().includes(exerciseName.toLowerCase())
+      );
+
+      if (!match) {
+        return {
+          success: false,
+          message: `No encontré el ejercicio "${exerciseName}" en el catálogo. Intenta con el nombre exacto.`,
+        };
+      }
+      // Usar el match encontrado
+      return gymAddExercise(userId, match.name, trainingDay, customSeries, userLevel);
     }
 
-    const typedTemplate = template as AssetTemplate;
-
-    // Verificar si ya existe
-    const { data: existing } = await supabase
-      .from('user_assets')
-      .select('id, training_days')
+    // Verificar si ya existe user_exercise_config para este ejercicio
+    const { data: existingConfig } = await supabase
+      .from('user_exercise_config')
+      .select('id, training_days, config')
       .eq('user_id', userId)
-      .eq('name', typedTemplate.name)
-      .is('deleted_at', null)
+      .eq('exercise_id', exercise.id)
       .maybeSingle();
 
-    if (existing) {
-      const existingAsset = existing as UserAsset;
-      const currentDays = existingAsset.training_days || [];
+    if (existingConfig) {
+      const currentDays = existingConfig.training_days || [];
       if (currentDays.includes(trainingDay)) {
         return {
           success: false,
-          message: `${typedTemplate.name} ya está en el día ${trainingDay + 1}.`,
+          message: `${exercise.name} ya está en el día ${trainingDay + 1}.`,
         };
       }
 
-      const updatedDays = [...new Set([...currentDays, trainingDay])];
+      // Agregar día al array
+      const updatedDays = [...new Set([...currentDays, trainingDay])].sort((a, b) => a - b);
+
+      // Copiar series del día existente o crear nuevas
+      const currentConfig = existingConfig.config || {};
+      const seriesByDay = (currentConfig.series_by_day as Record<string, SeriesConfig[]>) || {};
+      const existingDaySeries = seriesByDay[String(currentDays[0])];
+      seriesByDay[String(trainingDay)] = customSeries
+        ? toSeriesConfig(customSeries)
+        : existingDaySeries || getSeriesByLevel(userLevel);
+
       const { error } = await supabase
-        .from('user_assets')
-        .update({ training_days: updatedDays })
-        .eq('id', existingAsset.id);
+        .from('user_exercise_config')
+        .update({
+          training_days: updatedDays,
+          config: { ...currentConfig, series_by_day: seriesByDay },
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existingConfig.id);
 
       if (error) throw error;
 
       return {
         success: true,
-        message: `✅ ${typedTemplate.name} añadido al día ${trainingDay + 1}`,
+        message: `✅ ${exercise.name} añadido al día ${trainingDay + 1}`,
         affectedRecords: 1,
       };
     }
 
-    // Crear nuevo ejercicio
-    const defaultSeries = customSeries || getDefaultSeries();
-
-    // Crear estructura series_by_day con las series para este día
+    // Crear nueva configuración de usuario
+    const autoSeries = customSeries ? toSeriesConfig(customSeries) : getSeriesByLevel(userLevel);
     const seriesByDay: Record<string, SeriesConfig[]> = {
-      [String(trainingDay)]: defaultSeries as SeriesConfig[],
+      [String(trainingDay)]: autoSeries,
     };
 
     const { data, error } = await supabase
-      .from('user_assets')
+      .from('user_exercise_config')
       .insert({
         user_id: userId,
-        asset_type: 'gym_exercise',
-        name: typedTemplate.name,
-        asset_url: typedTemplate.image_url,
+        exercise_id: exercise.id,
         training_days: [trainingDay],
-        metadata: {
-          ...typedTemplate.default_metadata,
+        display_order: 0,
+        config: {
+          sets: `${autoSeries.length}x10`,
+          rest: '90s',
           series_by_day: seriesByDay,
-          custom_series: defaultSeries, // Compatibilidad legacy
-          category: typedTemplate.category,
-          difficulty: typedTemplate.difficulty,
+          custom_series: autoSeries,
         },
       })
       .select()
@@ -248,8 +341,8 @@ export async function gymAddExercise(
 
     return {
       success: true,
-      message: `✅ ${typedTemplate.name} agregado al día ${trainingDay + 1}`,
-      data: { exerciseId: (data as UserAsset).id },
+      message: `✅ ${exercise.name} agregado al día ${trainingDay + 1} con ${autoSeries.length} series`,
+      data: { exerciseId: data.id, exerciseName: exercise.name },
       affectedRecords: 1,
     };
   } catch (error) {
@@ -259,7 +352,7 @@ export async function gymAddExercise(
 }
 
 // ============================================================================
-// GYM TOOL: Eliminar Ejercicio
+// GYM TOOL: Eliminar Ejercicio (NUEVA ARQUITECTURA)
 // ============================================================================
 export async function gymRemoveExercise(
   userId: string,
@@ -268,72 +361,85 @@ export async function gymRemoveExercise(
   deleteCompletely = false
 ): Promise<HankToolResult> {
   try {
-    const { data: exercise, error } = await supabase
-      .from('user_assets')
-      .select('*')
+    // NUEVA ARQUITECTURA: Buscar en user_exercise_config con join a exercises
+    const { data: config, error } = await supabase
+      .from('user_exercise_config')
+      .select(
+        `
+        id,
+        training_days,
+        exercises!inner (
+          name
+        )
+      `
+      )
       .eq('user_id', userId)
-      .eq('asset_type', 'gym_exercise')
-      .ilike('name', `%${exerciseName}%`)
-      .is('deleted_at', null)
+      .ilike('exercises.name', `%${exerciseName}%`)
       .limit(1)
       .single();
 
-    if (error || !exercise) {
+    if (error || !config) {
       return {
         success: false,
         message: `No encontré "${exerciseName}" en tu rutina.`,
       };
     }
 
-    const typedExercise = exercise as UserAsset;
+    const typedConfig = config as unknown as {
+      id: string;
+      training_days: number[];
+      exercises: { name: string };
+    };
+
+    const exerciseRealName = typedConfig.exercises.name;
 
     if (deleteCompletely || trainingDay === undefined) {
-      // Soft delete
+      // Eliminar completamente
       const { error: deleteError } = await supabase
-        .from('user_assets')
-        .update({ deleted_at: new Date().toISOString() })
-        .eq('id', typedExercise.id);
+        .from('user_exercise_config')
+        .delete()
+        .eq('id', typedConfig.id);
 
       if (deleteError) throw deleteError;
 
       return {
         success: true,
-        message: `🗑️ ${typedExercise.name} eliminado de tu rutina`,
-        rollbackId: typedExercise.id,
+        message: `🗑️ ${exerciseRealName} eliminado de tu rutina`,
+        rollbackId: typedConfig.id,
         affectedRecords: 1,
       };
     }
 
     // Solo quitar de un día específico
-    const currentDays = typedExercise.training_days || [];
+    const currentDays = typedConfig.training_days || [];
     const updatedDays = currentDays.filter((d) => d !== trainingDay);
 
     if (updatedDays.length === 0) {
-      // Era el único día, hacer soft delete
+      // Era el único día, eliminar completamente
       const { error: deleteError } = await supabase
-        .from('user_assets')
-        .update({ deleted_at: new Date().toISOString() })
-        .eq('id', typedExercise.id);
+        .from('user_exercise_config')
+        .delete()
+        .eq('id', typedConfig.id);
 
       if (deleteError) throw deleteError;
 
       return {
         success: true,
-        message: `🗑️ ${typedExercise.name} eliminado (era el único día)`,
+        message: `🗑️ ${exerciseRealName} eliminado (era el único día)`,
         affectedRecords: 1,
       };
     }
 
     const { error: updateError } = await supabase
-      .from('user_assets')
+      .from('user_exercise_config')
       .update({ training_days: updatedDays })
-      .eq('id', typedExercise.id);
+      .eq('id', typedConfig.id);
 
     if (updateError) throw updateError;
 
     return {
       success: true,
-      message: `✅ ${typedExercise.name} quitado del día ${trainingDay + 1}`,
+      message: `✅ ${exerciseRealName} quitado del día ${trainingDay + 1}`,
       affectedRecords: 1,
     };
   } catch (error) {
@@ -343,36 +449,51 @@ export async function gymRemoveExercise(
 }
 
 // ============================================================================
-// GYM TOOL: Reemplazar Ejercicio
+// GYM TOOL: Reemplazar Ejercicio (NUEVA ARQUITECTURA)
 // ============================================================================
 export async function gymReplaceExercise(
   userId: string,
   oldExerciseName: string,
   newExerciseName: string,
-  trainingDay?: number
+  trainingDay?: number,
+  userLevel?: string
 ): Promise<HankToolResult> {
   try {
-    // 1. Buscar el ejercicio original para obtener su día y orden
-    const { data: oldExercise, error: findError } = await supabase
-      .from('user_assets')
-      .select('*')
+    // 1. Buscar el ejercicio original en user_exercise_config
+    const { data: oldConfig, error: findError } = await supabase
+      .from('user_exercise_config')
+      .select(
+        `
+        id,
+        training_days,
+        display_order,
+        exercises!inner (
+          name
+        )
+      `
+      )
       .eq('user_id', userId)
-      .eq('asset_type', 'gym_exercise')
-      .ilike('name', `%${oldExerciseName}%`)
-      .is('deleted_at', null)
+      .ilike('exercises.name', `%${oldExerciseName}%`)
       .limit(1)
       .single();
 
-    if (findError || !oldExercise) {
+    if (findError || !oldConfig) {
       return {
         success: false,
         message: `No encontré "${oldExerciseName}" en tu rutina.`,
       };
     }
 
-    const typedOldExercise = oldExercise as UserAsset;
-    const oldTrainingDays = typedOldExercise.training_days || [];
-    const oldOrder = typedOldExercise.order ?? 0;
+    const typedOldConfig = oldConfig as unknown as {
+      id: string;
+      training_days: number[];
+      display_order: number;
+      exercises: { name: string };
+    };
+
+    const oldRealName = typedOldConfig.exercises.name;
+    const oldTrainingDays = typedOldConfig.training_days || [];
+    const oldOrder = typedOldConfig.display_order ?? 0;
 
     // Determinar el día correcto
     const targetDay =
@@ -380,96 +501,82 @@ export async function gymReplaceExercise(
         ? trainingDay
         : (oldTrainingDays[0] ?? 0);
 
-    console.log(
-      `🔄 Reemplazando ${typedOldExercise.name} → ${newExerciseName} en día ${targetDay}, orden ${oldOrder}`
-    );
+    console.log(`🔄 Reemplazando ${oldRealName} → ${newExerciseName} en día ${targetDay}`);
 
-    // 2. Buscar template del nuevo ejercicio
-    const { data: template, error: templateError } = await supabase
-      .from('asset_templates')
+    // 2. Buscar el nuevo ejercicio en el catálogo global
+    const { data: newExercise, error: exerciseError } = await supabase
+      .from('exercises')
       .select('*')
-      .eq('asset_type', 'gym_exercise')
+      .eq('is_active', true)
       .ilike('name', `%${newExerciseName}%`)
       .limit(1)
       .single();
 
-    if (templateError || !template) {
+    if (exerciseError || !newExercise) {
       return {
         success: false,
         message: `No encontré el ejercicio "${newExerciseName}" en el catálogo.`,
       };
     }
 
-    const typedTemplate = template as AssetTemplate;
-
-    // 3. Verificar si el nuevo ejercicio ya existe en la DB del usuario
-    const { data: existingNew } = await supabase
-      .from('user_assets')
-      .select('id, training_days, order')
+    // 3. Verificar si el nuevo ejercicio ya existe en user_exercise_config
+    const { data: existingNewConfig } = await supabase
+      .from('user_exercise_config')
+      .select('id, training_days, display_order')
       .eq('user_id', userId)
-      .eq('name', typedTemplate.name)
-      .is('deleted_at', null)
+      .eq('exercise_id', newExercise.id)
       .maybeSingle();
 
-    // 4. Eliminar el ejercicio viejo
+    // 4. Eliminar/actualizar el ejercicio viejo
     if (oldTrainingDays.length === 1) {
-      // Soft delete completo
-      await supabase
-        .from('user_assets')
-        .update({ deleted_at: new Date().toISOString() })
-        .eq('id', typedOldExercise.id);
+      // Eliminar completamente
+      await supabase.from('user_exercise_config').delete().eq('id', typedOldConfig.id);
     } else {
       // Solo quitar del día específico
       const updatedDays = oldTrainingDays.filter((d) => d !== targetDay);
       await supabase
-        .from('user_assets')
+        .from('user_exercise_config')
         .update({ training_days: updatedDays })
-        .eq('id', typedOldExercise.id);
+        .eq('id', typedOldConfig.id);
     }
 
     // 5. Agregar o actualizar el nuevo ejercicio
-    if (existingNew) {
-      // El ejercicio ya existe, solo agregamos el día y actualizamos el orden
-      const existingAsset = existingNew as UserAsset;
-      const currentDays = existingAsset.training_days || [];
-      const updatedDays = [...new Set([...currentDays, targetDay])];
+    if (existingNewConfig) {
+      // El ejercicio ya existe, agregar el día
+      const currentDays = existingNewConfig.training_days || [];
+      const updatedDays = [...new Set([...currentDays, targetDay])].sort((a, b) => a - b);
 
       await supabase
-        .from('user_assets')
+        .from('user_exercise_config')
         .update({
           training_days: updatedDays,
-          order: oldOrder, // Preservar el orden del ejercicio reemplazado
+          display_order: oldOrder,
         })
-        .eq('id', existingAsset.id);
+        .eq('id', existingNewConfig.id);
     } else {
-      // Crear nuevo ejercicio con el orden del viejo
-      const defaultSeries = getDefaultSeries();
-
-      // Crear estructura series_by_day
+      // Crear nueva configuración
+      const autoSeries = getSeriesByLevel(userLevel);
       const seriesByDay: Record<string, SeriesConfig[]> = {
-        [String(targetDay)]: defaultSeries,
+        [String(targetDay)]: autoSeries,
       };
 
-      await supabase.from('user_assets').insert({
+      await supabase.from('user_exercise_config').insert({
         user_id: userId,
-        asset_type: 'gym_exercise',
-        name: typedTemplate.name,
-        asset_url: typedTemplate.image_url,
+        exercise_id: newExercise.id,
         training_days: [targetDay],
-        order: oldOrder, // Preservar el orden
-        metadata: {
-          ...typedTemplate.default_metadata,
+        display_order: oldOrder,
+        config: {
+          sets: `${autoSeries.length}x10`,
+          rest: '90s',
           series_by_day: seriesByDay,
-          custom_series: defaultSeries, // Compatibilidad legacy
-          category: typedTemplate.category,
-          difficulty: typedTemplate.difficulty,
+          custom_series: autoSeries,
         },
       });
     }
 
     return {
       success: true,
-      message: `✅ Cambiado: ${typedOldExercise.name} → ${typedTemplate.name} (día ${targetDay + 1})`,
+      message: `✅ Cambiado: ${oldRealName} → ${newExercise.name} (día ${targetDay + 1})`,
       affectedRecords: 2,
     };
   } catch (error) {
@@ -1034,7 +1141,7 @@ export async function assetAddSeries(
       id: String(Date.now()),
       reps,
       weight,
-      type: seriesType,
+      type: mapSeriesType(seriesType),
       note: '',
     };
 
@@ -1130,7 +1237,7 @@ export async function assetReplaceSeries(
       id: String(Date.now()),
       reps,
       weight,
-      type: seriesType,
+      type: mapSeriesType(seriesType),
       note: '',
     };
 

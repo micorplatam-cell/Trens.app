@@ -66,6 +66,9 @@ interface UserProfile {
   training_experience?: string;
   metabolic_rate?: string;
   training_days_per_week?: number;
+  // Campos CALCULADOS (vienen de GYM y PLAN)
+  training_frequency?: number;
+  meal_count?: number;
 }
 
 interface Measurement {
@@ -244,7 +247,7 @@ export default function AdnScreen() {
     }
 
     try {
-      // Fetch profile
+      // Fetch profile (desde user_profiles)
       const { data: profileData, error: profileError } = await supabase
         .from('user_profiles')
         .select('*')
@@ -254,6 +257,19 @@ export default function AdnScreen() {
       if (profileError && profileError.code !== 'PGRST116') {
         console.error('Error fetching profile:', profileError);
       }
+
+      // Fetch training_frequency desde profiles (calculado desde GYM)
+      const { data: authProfile } = await supabase
+        .from('profiles')
+        .select('training_frequency')
+        .eq('id', user.id)
+        .single();
+
+      // Fetch meal count desde meals (calculado desde PLAN)
+      const { count: mealCount } = await supabase
+        .from('meals')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id);
 
       // Si no existe perfil, crear uno
       if (!profileData) {
@@ -267,10 +283,20 @@ export default function AdnScreen() {
           .single();
 
         if (!createError) {
-          setProfile(newProfile);
+          // Agregar campos calculados
+          setProfile({
+            ...newProfile,
+            training_frequency: authProfile?.training_frequency || 0,
+            meal_count: mealCount || 0,
+          });
         }
       } else {
-        setProfile(profileData);
+        // Agregar campos calculados desde GYM y PLAN
+        setProfile({
+          ...profileData,
+          training_frequency: authProfile?.training_frequency || 0,
+          meal_count: mealCount || 0,
+        });
       }
 
       // Fetch measurements
@@ -702,6 +728,9 @@ export default function AdnScreen() {
                       training_experience: profile.training_experience,
                       metabolic_rate: profile.metabolic_rate,
                       training_days_per_week: profile.training_days_per_week,
+                      // Campos CALCULADOS (no editables, vienen de GYM y PLAN)
+                      training_frequency: profile.training_frequency,
+                      meal_count: profile.meal_count,
                     }
                   : {
                       // Placeholder data para visitantes
@@ -718,6 +747,8 @@ export default function AdnScreen() {
                       training_experience: undefined,
                       metabolic_rate: undefined,
                       training_days_per_week: undefined,
+                      training_frequency: undefined,
+                      meal_count: undefined,
                     }
               }
               measurements={measurements}
