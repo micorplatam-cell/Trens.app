@@ -93,3 +93,39 @@ Authorization: Bearer {{$dotenv CF_API_TOKEN}}
 GET https://httpbin.org/get
 
 ###
+
+# ============================================================================
+# SPORTS SYSTEM - Verificar migración
+# ============================================================================
+
+### Check if sports table exists
+# @name check-sports
+GET {{$dotenv EXPO_PUBLIC_SUPABASE_URL}}/rest/v1/sports?select=code,name,color_primary
+apikey: {{$dotenv SUPABASE_SERVICE_ROLE_KEY}}
+Authorization: Bearer {{$dotenv SUPABASE_SERVICE_ROLE_KEY}}
+
+###
+
+### Get all sports details
+# @name get-all-sports
+GET {{$dotenv EXPO_PUBLIC_SUPABASE_URL}}/rest/v1/sports?select=*
+apikey: {{$dotenv SUPABASE_SERVICE_ROLE_KEY}}
+Authorization: Bearer {{$dotenv SUPABASE_SERVICE_ROLE_KEY}}
+
+###
+
+### Check user_sports table
+# @name check-user-sports
+GET {{$dotenv EXPO_PUBLIC_SUPABASE_URL}}/rest/v1/user_sports?select=*&limit=5
+apikey: {{$dotenv SUPABASE_SERVICE_ROLE_KEY}}
+Authorization: Bearer {{$dotenv SUPABASE_SERVICE_ROLE_KEY}}
+
+###
+
+### Check inventory_items table
+# @name check-inventory
+GET {{$dotenv EXPO_PUBLIC_SUPABASE_URL}}/rest/v1/inventory_items?select=*&limit=5
+apikey: {{$dotenv SUPABASE_SERVICE_ROLE_KEY}}
+Authorization: Bearer {{$dotenv SUPABASE_SERVICE_ROLE_KEY}}
+
+###

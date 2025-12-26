@@ -8,6 +8,8 @@ import {
   TextInput,
   ActivityIndicator,
   Dimensions,
+  Alert,
+  PanResponder,
 } from 'react-native';
 import { Image } from 'expo-image';
 import Slider from '@react-native-community/slider';
@@ -459,6 +461,45 @@ export default function SpotifyModal({
   const [togglingLike, setTogglingLike] = useState(false);
 
   // -------------------------------------------------------------------------
+  // PAN RESPONDER - Cerrar deslizando hacia abajo desde el header
+  // -------------------------------------------------------------------------
+  const translateY = useSharedValue(0);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 5,
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0) {
+          translateY.value = gestureState.dy;
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 150) {
+          // Cerrar directamente sin animar de vuelta
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          onClose();
+        } else {
+          // Volver arriba
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          translateY.value = withTiming(0, { duration: 200 });
+        }
+      },
+    })
+  ).current;
+
+  // Resetear translateY cuando el modal se abre
+  useEffect(() => {
+    if (visible) {
+      translateY.value = 0;
+    }
+  }, [visible, translateY]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+  }));
+
+  // -------------------------------------------------------------------------
   // VERIFICAR SI EL TRACK ACTUAL ESTÁ EN FAVORITOS
   // -------------------------------------------------------------------------
   useEffect(() => {
@@ -574,33 +615,57 @@ export default function SpotifyModal({
   // -------------------------------------------------------------------------
   // CARGAR PLAYLISTS
   // -------------------------------------------------------------------------
-  const loadPlaylists = useCallback(async () => {
-    if (playlists.length > 0) return; // Ya cargadas
-    setLoading(true);
-    try {
-      const data = await spotify.getMyPlaylists(50, 0);
-      setPlaylists(data);
-    } catch (error) {
-      console.error('Error loading playlists:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, [playlists.length]);
+  const loadPlaylists = useCallback(
+    async (reset = false) => {
+      if (!reset && playlists.length > 0) return; // Ya cargadas y no se forzó refresh
+      setLoading(true);
+      try {
+        const data = await spotify.getMyPlaylists(50, 0);
+        setPlaylists(data);
+      } catch (error) {
+        console.error('Error loading playlists:', error);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [playlists.length]
+  );
 
   // -------------------------------------------------------------------------
   // CARGAR LIKED SONGS (con paginación)
   // -------------------------------------------------------------------------
   const loadLikedSongs = useCallback(
     async (reset = false) => {
-      if (!reset && likedSongs.length > 0) return; // Ya cargadas
+      console.log(
+        '🎵 loadLikedSongs llamado, reset=',
+        reset,
+        'likedSongs.length=',
+        likedSongs.length
+      );
+
+      // Solo skip si ya hay canciones y no es un reset forzado
+      if (!reset && likedSongs.length > 0) {
+        console.log('🎵 loadLikedSongs: SKIP - ya hay canciones y no es reset');
+        return;
+      }
 
       setLoading(true);
       setLikedOffset(0);
       likedOffsetRef.current = 0;
       setHasMoreLiked(true);
 
+      // IMPORTANTE: Limpiar canciones anteriores cuando es reset
+      if (reset) {
+        setLikedSongs([]);
+      }
+
       try {
+        console.log('🎵 loadLikedSongs: Llamando API con offset=0, limit=20');
         const data = await spotify.getLikedSongs(20, 0);
+        console.log('🎵 loadLikedSongs: Recibidas', data.length, 'canciones');
+        if (data[0]) {
+          console.log('🎵 Primera canción recibida:', data[0].name);
+        }
         setLikedSongs(data);
         setHasMoreLiked(data.length === 20);
         setLikedOffset(20);
@@ -883,15 +948,32 @@ export default function SpotifyModal({
   // -------------------------------------------------------------------------
   // EFECTOS
   // -------------------------------------------------------------------------
+  // Track si el modal estaba visible antes (para detectar cuando SE ABRE)
+  const wasVisibleRef = useRef(false);
+
+  // Recargar datos SOLO cuando el modal SE ABRE (transición de invisible a visible)
+  useEffect(() => {
+    if (visible && spotifyConnected && !wasVisibleRef.current) {
+      // Modal acaba de abrirse - refrescar la tab activa
+      if (activeTab === 'playlists') {
+        loadPlaylists(true);
+      } else if (activeTab === 'liked') {
+        loadLikedSongs(true);
+      }
+    }
+    wasVisibleRef.current = visible;
+  }, [visible, spotifyConnected]); // SIN activeTab para evitar recargas al cambiar de tab
+
+  // Cargar datos al cambiar de tab (solo si no hay datos)
   useEffect(() => {
     if (visible && spotifyConnected) {
       if (activeTab === 'playlists') {
-        loadPlaylists();
+        loadPlaylists(); // Sin reset - solo carga si no hay datos
       } else if (activeTab === 'liked') {
-        loadLikedSongs();
+        loadLikedSongs(); // Sin reset - solo carga si no hay datos
       }
     }
-  }, [visible, spotifyConnected, activeTab, loadPlaylists, loadLikedSongs]);
+  }, [activeTab, visible, spotifyConnected, loadPlaylists, loadLikedSongs]);
 
   // NO reseteamos el estado al cerrar para mantener la navegación
   // El usuario verá exactamente donde se quedó cuando vuelva a abrir el modal
@@ -1425,57 +1507,78 @@ export default function SpotifyModal({
   // RENDER PRINCIPAL
   // -------------------------------------------------------------------------
   return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      presentationStyle="fullScreen"
-      onRequestClose={onClose}
-    >
-      <View className="flex-1 bg-black">
-        {/* Header */}
-        <View className="flex-row items-center justify-between px-4 pt-14 pb-4 border-b border-zinc-900">
-          <TouchableOpacity
-            onPress={onClose}
-            className="w-10 h-10 bg-zinc-900 rounded-full items-center justify-center"
+    <Modal visible={visible} animationType="slide" transparent={true} onRequestClose={onClose}>
+      <View className="flex-1 bg-transparent justify-end">
+        <Animated.View
+          className="bg-black rounded-t-3xl"
+          style={[{ height: '95%' }, animatedStyle]}
+        >
+          {/* Header - Draggable para cerrar */}
+          <View
+            {...panResponder.panHandlers}
+            className="flex-row items-center justify-between px-4 pt-6 pb-4 border-b border-zinc-900"
           >
-            <ChevronDown size={22} color="#fff" />
-          </TouchableOpacity>
-
-          <View className="flex-row items-center">
-            <View className="w-8 h-8 bg-[#1DB954] rounded-full items-center justify-center mr-2">
-              <Music size={16} color="#000" />
+            {/* Indicador de drag centrado arriba */}
+            <View className="absolute top-2 left-0 right-0 items-center">
+              <View className="w-10 h-1 bg-zinc-600 rounded-full" />
             </View>
-            <Text className="text-white font-bold text-lg">Spotify</Text>
+
+            <TouchableOpacity
+              onPress={onClose}
+              className="w-10 h-10 bg-zinc-900 rounded-full items-center justify-center"
+            >
+              <ChevronDown size={22} color="#fff" />
+            </TouchableOpacity>
+
+            <View className="flex-row items-center">
+              <View className="w-8 h-8 bg-[#1DB954] rounded-full items-center justify-center mr-2">
+                <Music size={16} color="#000" />
+              </View>
+              <Text className="text-white font-bold text-lg">Spotify</Text>
+            </View>
+
+            {spotifyConnected ? (
+              <TouchableOpacity
+                onPress={() => {
+                  Alert.alert(
+                    '🔄 RECONECTAR SPOTIFY',
+                    'Si no ves tus canciones recientes en "Me Gusta", reconecta para refrescar los permisos.',
+                    [
+                      { text: 'Cancelar', style: 'cancel' },
+                      {
+                        text: 'Reconectar',
+                        style: 'destructive',
+                        onPress: onSpotifyDisconnect,
+                      },
+                    ]
+                  );
+                }}
+                className="px-3 py-2 bg-zinc-900 rounded-full flex-row items-center"
+              >
+                <Wifi size={14} color="#1DB954" />
+                <Text className="text-zinc-400 text-xs ml-1.5">Reconectar</Text>
+              </TouchableOpacity>
+            ) : (
+              <View className="w-10" />
+            )}
           </View>
 
           {spotifyConnected ? (
-            <TouchableOpacity
-              onPress={onSpotifyDisconnect}
-              className="px-3 py-2 bg-zinc-900 rounded-full flex-row items-center"
-            >
-              <Wifi size={14} color="#1DB954" />
-              <Text className="text-zinc-400 text-xs ml-1.5">On</Text>
-            </TouchableOpacity>
+            <>
+              {/* Tab Bar - Solo si está conectado */}
+              <View className="flex-row px-4 py-3 bg-black border-b border-zinc-900">
+                <TabButton tab="now-playing" icon={Disc3} label="Ahora" />
+                <TabButton tab="playlists" icon={Library} label="Playlists" />
+                <TabButton tab="liked" icon={Heart} label="Liked" />
+                <TabButton tab="search" icon={Search} label="Buscar" />
+              </View>
+
+              {renderConnectedView()}
+            </>
           ) : (
-            <View className="w-10" />
+            renderNotConnectedView()
           )}
-        </View>
-
-        {spotifyConnected ? (
-          <>
-            {/* Tab Bar - Solo si está conectado */}
-            <View className="flex-row px-4 py-3 bg-black border-b border-zinc-900">
-              <TabButton tab="now-playing" icon={Disc3} label="Ahora" />
-              <TabButton tab="playlists" icon={Library} label="Playlists" />
-              <TabButton tab="liked" icon={Heart} label="Liked" />
-              <TabButton tab="search" icon={Search} label="Buscar" />
-            </View>
-
-            {renderConnectedView()}
-          </>
-        ) : (
-          renderNotConnectedView()
-        )}
+        </Animated.View>
       </View>
     </Modal>
   );

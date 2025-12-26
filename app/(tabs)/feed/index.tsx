@@ -19,6 +19,7 @@ import { VideoView, useVideoPlayer } from 'expo-video';
 import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '../../../lib/supabase';
 import { useUserRoleContext } from '../../../context/UserRoleContext';
+import { useHank } from '../../../context/HankContext';
 import spotify from '../../../services/spotify/spotify';
 
 // ============================================================================
@@ -103,7 +104,7 @@ const FeedVideoItem = memo(
     // =====================================================================
     // 3 ESTADOS DE AUDIO (NUNCA SE MEZCLAN):
     // Estado 1: Spotify conectado + SYNC ON → Video MUTE, reproduce canción del video
-    // Estado 2: Spotify conectado + SYNC OFF → Video MUTE, usuario escucha su propia música
+    // Estado 2: Spotify conectado + SYNC OFF → Video con AUDIO AMBIENTE
     // Estado 3: Sin Spotify → Video con AUDIO AMBIENTE
     // =====================================================================
 
@@ -117,17 +118,14 @@ const FeedVideoItem = memo(
       spotifySyncEnabled
     );
 
-    // ¿Video debe estar muteado? → SI hay Spotify conectado, SIEMPRE mute
-    const shouldMuteVideo = spotifyConnected;
+    // ¿Video debe estar muteado? → SOLO si SYNC está activado y puede sincronizar
+    // Si SYNC está OFF o no hay Spotify → escuchar audio ambiente del video
+    const shouldMuteVideo = canSyncTrack;
 
     // Debug log
     console.log('🎵 Feed Audio State:', {
       videoId: item.id.substring(0, 8),
-      state: !spotifyConnected
-        ? '🔊 Estado 3: Audio Ambiente'
-        : spotifySyncEnabled
-          ? '🎵 Estado 1: SYNC (canción del video)'
-          : '🎧 Estado 2: Tu música',
+      state: canSyncTrack ? '🎵 Estado 1: SYNC (canción del video)' : '🔊 Audio Ambiente',
       spotifyConnected,
       spotifySyncEnabled,
       canSyncTrack,
@@ -337,13 +335,29 @@ const FeedVideoItem = memo(
             </View>
           </TouchableOpacity>
 
-          {/* Ejercicio y métricas */}
+          {/* Ejercicio y métricas - ED HARDY FIRE STYLE */}
           {item.exercise_name && (
             <View className="mb-2">
-              <Text className="text-white text-lg font-bold">{item.exercise_name}</Text>
+              <Text
+                className="text-white text-lg font-bold"
+                style={{
+                  textShadowColor: '#F97316',
+                  textShadowOffset: { width: 0, height: 0 },
+                  textShadowRadius: 8,
+                }}
+              >
+                {item.exercise_name}
+              </Text>
               {item.weight_kg && item.reps && (
-                <Text className="text-savage-red text-2xl font-bold font-mono">
-                  {item.weight_kg}kg × {item.reps}
+                <Text
+                  className="text-fire-orange text-2xl font-bold font-mono"
+                  style={{
+                    textShadowColor: '#DC2626',
+                    textShadowOffset: { width: 0, height: 0 },
+                    textShadowRadius: 15,
+                  }}
+                >
+                  {item.weight_kg}kg × {item.reps} 🔥
                 </Text>
               )}
             </View>
@@ -354,7 +368,7 @@ const FeedVideoItem = memo(
             <Text className="text-white text-base mb-2">{item.free_text}</Text>
           )}
 
-          {/* Spotify info */}
+          {/* Spotify info - Ed Hardy style */}
           {item.spotify?.enabled && (
             <TouchableOpacity
               onPress={async () => {
@@ -368,21 +382,26 @@ const FeedVideoItem = memo(
                   onSpotifyUpgrade();
                 }
               }}
-              className="flex-row items-center bg-black/50 rounded-full px-3 py-1.5 self-start"
+              className="flex-row items-center rounded-full px-3 py-1.5 self-start"
+              style={{
+                backgroundColor: 'rgba(30, 215, 96, 0.15)',
+                borderWidth: 1,
+                borderColor: '#1DB954',
+              }}
             >
               <Music size={14} color="#1DB954" />
               <Text className="text-white text-xs ml-2" numberOfLines={1}>
                 {item.spotify.trackName} – {item.spotify.artist}
               </Text>
               {/* Indicador de lock para FREE */}
-              {!isPro && <Lock size={12} color="#71717a" className="ml-2" />}
+              {!isPro && <Lock size={12} color="#F97316" className="ml-2" />}
             </TouchableOpacity>
           )}
         </View>
 
-        {/* Acciones laterales */}
+        {/* Acciones laterales - ED HARDY FIRE GLOW */}
         <View className="absolute right-3 bottom-20 items-center gap-5">
-          {/* Like */}
+          {/* Like - Fire Heart */}
           <TouchableOpacity
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -391,17 +410,31 @@ const FeedVideoItem = memo(
             className="items-center"
           >
             <View
-              className={`w-12 h-12 rounded-full items-center justify-center ${
-                item.is_liked ? 'bg-savage-red' : 'bg-black/50'
-              }`}
+              className={`w-12 h-12 rounded-full items-center justify-center`}
+              style={
+                item.is_liked
+                  ? {
+                      backgroundColor: '#DC2626',
+                      shadowColor: '#DC2626',
+                      shadowOffset: { width: 0, height: 0 },
+                      shadowOpacity: 1,
+                      shadowRadius: 15,
+                      elevation: 10,
+                    }
+                  : {
+                      backgroundColor: 'rgba(0,0,0,0.5)',
+                      borderWidth: 1,
+                      borderColor: 'rgba(249,115,22,0.3)',
+                    }
+              }
             >
               <Heart
                 size={24}
-                color={item.is_liked ? '#FFFFFF' : '#FFFFFF'}
+                color={item.is_liked ? '#FFFFFF' : '#F97316'}
                 fill={item.is_liked ? '#FFFFFF' : 'transparent'}
               />
             </View>
-            <Text className="text-white text-xs mt-1">{item.likes_count}</Text>
+            <Text className="text-fire-orange text-xs mt-1 font-mono">{item.likes_count}</Text>
           </TouchableOpacity>
 
           {/* Comentar */}
@@ -412,10 +445,17 @@ const FeedVideoItem = memo(
             }}
             className="items-center"
           >
-            <View className="w-12 h-12 rounded-full bg-black/50 items-center justify-center">
-              <MessageCircle size={24} color="#FFFFFF" />
+            <View
+              className="w-12 h-12 rounded-full items-center justify-center"
+              style={{
+                backgroundColor: 'rgba(0,0,0,0.5)',
+                borderWidth: 1,
+                borderColor: 'rgba(249,115,22,0.3)',
+              }}
+            >
+              <MessageCircle size={24} color="#F97316" />
             </View>
-            <Text className="text-white text-xs mt-1">{item.comments_count}</Text>
+            <Text className="text-zinc-400 text-xs mt-1 font-mono">{item.comments_count}</Text>
           </TouchableOpacity>
 
           {/* Guardar */}
@@ -427,13 +467,26 @@ const FeedVideoItem = memo(
             className="items-center"
           >
             <View
-              className={`w-12 h-12 rounded-full items-center justify-center ${
-                item.is_saved ? 'bg-white' : 'bg-black/50'
-              }`}
+              className={`w-12 h-12 rounded-full items-center justify-center`}
+              style={
+                item.is_saved
+                  ? {
+                      backgroundColor: '#F97316',
+                      shadowColor: '#F97316',
+                      shadowOffset: { width: 0, height: 0 },
+                      shadowOpacity: 0.8,
+                      shadowRadius: 10,
+                    }
+                  : {
+                      backgroundColor: 'rgba(0,0,0,0.5)',
+                      borderWidth: 1,
+                      borderColor: 'rgba(249,115,22,0.3)',
+                    }
+              }
             >
               <Bookmark
                 size={24}
-                color={item.is_saved ? '#000000' : '#FFFFFF'}
+                color={item.is_saved ? '#000000' : '#F97316'}
                 fill={item.is_saved ? '#000000' : 'transparent'}
               />
             </View>
@@ -447,8 +500,15 @@ const FeedVideoItem = memo(
             }}
             className="items-center"
           >
-            <View className="w-12 h-12 rounded-full bg-black/50 items-center justify-center">
-              <Share2 size={24} color="#FFFFFF" />
+            <View
+              className="w-12 h-12 rounded-full items-center justify-center"
+              style={{
+                backgroundColor: 'rgba(0,0,0,0.5)',
+                borderWidth: 1,
+                borderColor: 'rgba(249,115,22,0.3)',
+              }}
+            >
+              <Share2 size={24} color="#F97316" />
             </View>
           </TouchableOpacity>
         </View>
@@ -462,6 +522,7 @@ const FeedVideoItem = memo(
 // ============================================================================
 export default function FeedScreen() {
   const { user, spotifyPremium, spotifyConnected, isPro } = useUserRoleContext();
+  const { setScreenContext } = useHank();
 
   const [videos, setVideos] = useState<FeedVideo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -499,6 +560,14 @@ export default function FeedScreen() {
     useCallback(() => {
       // Al entrar al Feed, marcar como enfocado
       setIsFeedFocused(true);
+
+      // Sincronizar contexto con HANK
+      setScreenContext({
+        module: 'nucleo',
+        viewMode: null,
+        currentExerciseIndex: null,
+        currentTrainingDay: 0,
+      });
 
       return () => {
         // Al salir del Feed, marcar como no enfocado (pausará videos)

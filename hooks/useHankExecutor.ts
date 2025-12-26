@@ -29,6 +29,8 @@ import {
   planUpdateMealTime,
   planUpdateIngredients,
   planGetMeals,
+  planGetNextMeal,
+  spotifyGetCurrentTrack,
   planAddSupplement,
   planRemoveSupplement,
   planUpdateSupplementTime,
@@ -40,6 +42,28 @@ import {
   hankClearHistory,
   TOOL_DEFINITIONS,
 } from '../services/hank/tools';
+import {
+  // Inventory Tools
+  inventoryAddItem,
+  inventoryUpdateItem,
+  inventoryRemoveItem,
+  inventoryListItems,
+  // Maintenance Tools
+  maintenanceLog,
+  maintenanceGetHistory,
+  maintenanceGetAlerts,
+  // Event Tools
+  eventCreate,
+  eventUpdate,
+  eventDelete,
+  eventList,
+  // Surf Tools
+  surfLogSession,
+  surfGetSessions,
+  surfFavoriteSpot,
+  surfGetSpots,
+  SPORT_TOOL_DEFINITIONS,
+} from '../services/hank/sportTools';
 import { calculateMacrosWithAI, analyzeDailyNutrition } from '../services/hank/nutrition';
 import type { HankToolCall, HankToolResult, ToolDefinition } from '../types/hank';
 
@@ -400,6 +424,14 @@ export const useHankExecutor = (
             result = await planGetMeals(userId);
             break;
 
+          case 'PLAN_GET_NEXT_MEAL':
+            result = await planGetNextMeal(userId);
+            break;
+
+          case 'SPOTIFY_GET_CURRENT_TRACK':
+            result = await spotifyGetCurrentTrack();
+            break;
+
           case 'PLAN_ADD_SUPPLEMENT':
             result = await planAddSupplement(userId, p.name as string, p.dose as string, {
               type: p.type as 'pill' | 'powder' | 'liquid' | 'syringe' | undefined,
@@ -462,6 +494,139 @@ ${analysis.recommendations.map((r) => `• ${r}`).join('\n')}`,
             result = await hankClearHistory(userId);
             break;
 
+          // =========================================================================
+          // INVENTORY TOOLS (MOTO/AUTO/SURF)
+          // =========================================================================
+          case 'INVENTORY_ADD_ITEM':
+            result = await inventoryAddItem(
+              userId,
+              p.sportCode as string,
+              p.category as string,
+              p.name as string,
+              p.metadata as Record<string, unknown> | undefined
+            );
+            break;
+
+          case 'INVENTORY_UPDATE_ITEM':
+            result = await inventoryUpdateItem(
+              userId,
+              p.itemId as string,
+              p.updates as Record<string, unknown>
+            );
+            break;
+
+          case 'INVENTORY_REMOVE_ITEM':
+            result = await inventoryRemoveItem(userId, p.itemId as string);
+            break;
+
+          case 'INVENTORY_LIST_ITEMS':
+            result = await inventoryListItems(
+              userId,
+              p.sportCode as string | undefined,
+              p.category as string | undefined
+            );
+            break;
+
+          // =========================================================================
+          // MAINTENANCE TOOLS (MOTO/AUTO)
+          // =========================================================================
+          case 'MAINTENANCE_LOG':
+            result = await maintenanceLog(
+              userId,
+              p.itemId as string,
+              p.maintenanceType as string,
+              p.description as string | undefined,
+              p.cost as number | undefined,
+              p.mileageKm as number | undefined,
+              p.nextDueDate as string | undefined,
+              p.nextDueMileage as number | undefined
+            );
+            break;
+
+          case 'MAINTENANCE_GET_HISTORY':
+            result = await maintenanceGetHistory(userId, p.itemId as string | undefined);
+            break;
+
+          case 'MAINTENANCE_GET_ALERTS':
+            result = await maintenanceGetAlerts(userId);
+            break;
+
+          // =========================================================================
+          // EVENT TOOLS (MOTO/AUTO)
+          // =========================================================================
+          case 'EVENT_CREATE':
+            result = await eventCreate(
+              userId,
+              p.sportCode as string,
+              p.name as string,
+              p.eventType as string,
+              p.eventDate as string,
+              p.location as string | undefined,
+              p.notes as string | undefined
+            );
+            break;
+
+          case 'EVENT_UPDATE':
+            result = await eventUpdate(
+              userId,
+              p.eventId as string,
+              p.updates as Record<string, unknown>
+            );
+            break;
+
+          case 'EVENT_DELETE':
+            result = await eventDelete(userId, p.eventId as string);
+            break;
+
+          case 'EVENT_LIST':
+            result = await eventList(
+              userId,
+              p.sportCode as string | undefined,
+              p.upcoming as boolean | undefined
+            );
+            break;
+
+          // =========================================================================
+          // SURF SESSION TOOLS
+          // =========================================================================
+          case 'SURF_LOG_SESSION':
+            result = await surfLogSession(
+              userId,
+              p.spotName as string,
+              p.waveSizeFt as number | undefined,
+              p.wavePeriodS as number | undefined,
+              p.windDirection as string | undefined,
+              p.windSpeedKts as number | undefined,
+              p.tide as 'HIGH' | 'MID' | 'LOW' | undefined,
+              p.waterTempC as number | undefined,
+              p.durationMin as number | undefined,
+              p.sessionRating as number | undefined,
+              p.notes as string | undefined,
+              p.boardId as string | undefined
+            );
+            break;
+
+          case 'SURF_GET_SESSIONS':
+            result = await surfGetSessions(
+              userId,
+              p.spotName as string | undefined,
+              p.limit as number | undefined
+            );
+            break;
+
+          case 'SURF_FAVORITE_SPOT':
+            result = await surfFavoriteSpot(
+              userId,
+              p.spotName as string,
+              p.latitude as number | undefined,
+              p.longitude as number | undefined
+            );
+            break;
+
+          case 'SURF_GET_SPOTS':
+            result = await surfGetSpots(userId);
+            break;
+
           default:
             console.warn(`Herramienta no implementada: ${toolCall.tool}`);
             result = { success: false, message: `Herramienta "${toolCall.tool}" no reconocida.` };
@@ -504,9 +669,10 @@ ${analysis.recommendations.map((r) => `• ${r}`).join('\n')}`,
 
   /**
    * Obtiene las definiciones de herramientas para el LLM
+   * Incluye herramientas base + herramientas de deporte
    */
   const getToolDefinitions = useCallback((): ToolDefinition[] => {
-    return TOOL_DEFINITIONS;
+    return [...TOOL_DEFINITIONS, ...SPORT_TOOL_DEFINITIONS];
   }, []);
 
   return {

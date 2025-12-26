@@ -4,7 +4,7 @@
 // Vista previa en tiempo real: video + música sincronizados
 // =============================================================================
 
-import React, { useState, useRef, useEffect, useCallback, memo } from 'react';
+import React, { useState, useRef, useEffect, useCallback, memo, useMemo } from 'react';
 import {
   View,
   Text,
@@ -175,6 +175,7 @@ export function FullscreenVideoEditor({
   // -------------------------------------------------------------------------
   const videoTimelineRef = useRef<View>(null);
   const spotifyTimelineRef = useRef<View>(null);
+  const spotifyTimelineLayoutRef = useRef({ x: 0, y: 0, width: 0, height: 0 });
   const videoPlayerRef = useRef<any>(null);
   const currentValuesRef = useRef({
     videoTrimStart: 0,
@@ -182,6 +183,8 @@ export function FullscreenVideoEditor({
     videoDurationMs: 30000,
     spotifyPositionPercent: 0,
     spotifyDurationMs: 240000,
+    spotifyPositionMs: 0,
+    spotifyTrackUri: '',
   });
 
   // -------------------------------------------------------------------------
@@ -220,6 +223,8 @@ export function FullscreenVideoEditor({
         ? (selectedTrack.positionMs / (selectedTrack.durationMs || 240000)) * 100
         : 0,
       spotifyDurationMs: selectedTrack?.durationMs || 240000,
+      spotifyPositionMs: selectedTrack?.positionMs || 0,
+      spotifyTrackUri: selectedTrack?.trackUri || '',
     };
   }, [videoTrimStart, videoTrimEnd, videoDurationMs, selectedTrack]);
 
@@ -240,9 +245,14 @@ export function FullscreenVideoEditor({
     return () => clearInterval(interval);
   }, [visible, isPlaying, videoData, videoTrimStartMs, videoTrimEndMs]);
 
-  // Reset on open
+  // Reset on open + iniciar Spotify sincronizado
   useEffect(() => {
     if (visible) {
+      console.log(
+        '📽️ Editor opened, spotifyMetadata:',
+        spotifyMetadata ? `${spotifyMetadata.trackName} at ${spotifyMetadata.positionMs}ms` : 'null'
+      );
+
       setVideoTrimStart(0);
       setVideoTrimEnd(100);
       setSelectedTrack(spotifyMetadata);
@@ -252,8 +262,35 @@ export function FullscreenVideoEditor({
       setShowSpotifyBrowser(false);
       setSearchQuery('');
       setSearchResults([]);
+
+      // Actualizar ref inmediatamente para que esté disponible
+      if (spotifyMetadata) {
+        currentValuesRef.current.spotifyTrackUri = spotifyMetadata.trackUri;
+        currentValuesRef.current.spotifyPositionMs = spotifyMetadata.positionMs;
+        currentValuesRef.current.spotifyPositionPercent =
+          (spotifyMetadata.positionMs / (spotifyMetadata.durationMs || 240000)) * 100;
+        currentValuesRef.current.spotifyDurationMs = spotifyMetadata.durationMs || 240000;
+
+        // Iniciar Spotify al abrir el editor
+        console.log(
+          '🎵 Iniciando Spotify al abrir editor:',
+          spotifyMetadata.trackUri,
+          'at',
+          spotifyMetadata.positionMs
+        );
+        spotify.play(spotifyMetadata.trackUri, spotifyMetadata.positionMs).catch((e) => {
+          console.warn('Error starting Spotify on editor open:', e);
+        });
+      }
     }
   }, [visible, spotifyMetadata]);
+
+  // Pausar Spotify al cerrar editor
+  useEffect(() => {
+    if (!visible) {
+      spotify.pause().catch(() => {});
+    }
+  }, [visible]);
 
   // Load liked songs when browser opens
   useEffect(() => {
@@ -314,12 +351,14 @@ export function FullscreenVideoEditor({
   }, [searchQuery]);
 
   const handleSelectTrack = useCallback(
-    (track: SpotifyTrack) => {
+    async (track: SpotifyTrack) => {
       // La posición de inicio de Spotify = proporción del trim de video
       // Si el video empieza en 20%, la canción empieza en 20% de su duración
       const syncedPositionMs = Math.floor((videoTrimStart / 100) * track.durationMs);
 
-      setSelectedTrack({
+      console.log('🎵 Track selected:', track.name, 'starting at', syncedPositionMs, 'ms');
+
+      const newTrack: SpotifyMetadata = {
         enabled: true,
         trackUri: track.uri,
         positionMs: syncedPositionMs,
@@ -327,9 +366,26 @@ export function FullscreenVideoEditor({
         artist: track.artist,
         albumArt: track.albumArt,
         durationMs: track.durationMs,
-      });
+      };
+
+      setSelectedTrack(newTrack);
       setSpotifyEnabled(true);
       setShowSpotifyBrowser(false);
+
+      // Actualizar ref inmediatamente
+      currentValuesRef.current.spotifyTrackUri = track.uri;
+      currentValuesRef.current.spotifyPositionMs = syncedPositionMs;
+      currentValuesRef.current.spotifyPositionPercent = (syncedPositionMs / track.durationMs) * 100;
+      currentValuesRef.current.spotifyDurationMs = track.durationMs;
+
+      // Iniciar reproducción inmediatamente
+      try {
+        console.log('🎵 Starting playback after track selection');
+        await spotify.play(track.uri, syncedPositionMs);
+      } catch (e) {
+        console.warn('Error playing selected track:', e);
+      }
+
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     },
     [videoTrimStart]
@@ -344,35 +400,72 @@ export function FullscreenVideoEditor({
   // Cambiar la posición de inicio de Spotify manualmente
   const updateSpotifyPosition = useCallback(
     (positionMs: number) => {
-      if (!selectedTrack) return;
+      if (!selectedTrack) {
+        console.log('⚠️ updateSpotifyPosition: no selectedTrack');
+        return;
+      }
+
+      console.log('🎚️ Spotify position updated to:', positionMs, 'ms');
+
+      // Actualizar ref inmediatamente para que esté disponible en onPanResponderRelease
+      currentValuesRef.current.spotifyPositionMs = positionMs;
+      currentValuesRef.current.spotifyPositionPercent =
+        (positionMs / (selectedTrack.durationMs || 240000)) * 100;
 
       setSelectedTrack((prev) => (prev ? { ...prev, positionMs } : null));
     },
     [selectedTrack]
   );
 
-  // SYNC PREVIEW: Reproducir video + Spotify sincronizados
-  const startSyncPreview = useCallback(async () => {
-    if (!selectedTrack || !spotifyEnabled) return;
+  // RESTART SYNCED PLAYBACK: Reiniciar video + Spotify desde el inicio (trim start / spotify position)
+  // Cuando se mueve el trim del video, Spotify se sincroniza proporcionalmente
+  const restartSyncedPlayback = useCallback(
+    async (syncSpotifyToVideo: boolean = false) => {
+      try {
+        console.log('🔄 restartSyncedPlayback called, syncSpotifyToVideo:', syncSpotifyToVideo);
 
-    try {
-      // Reiniciar video desde el punto de trim
-      if (videoPlayerRef.current) {
-        videoPlayerRef.current.currentTime = videoTrimStartMs / 1000;
-        videoPlayerRef.current.play();
+        // Reiniciar video desde el punto de trim
+        if (videoPlayerRef.current) {
+          const trimStartSeconds =
+            (currentValuesRef.current.videoTrimStart / 100) * (videoData?.duration || 30);
+          console.log('🎬 Video seek to:', trimStartSeconds, 'seconds');
+          videoPlayerRef.current.currentTime = trimStartSeconds;
+          videoPlayerRef.current.play();
+        }
+
+        // Si hay Spotify habilitado, iniciar desde la posición correspondiente
+        const trackUri = currentValuesRef.current.spotifyTrackUri;
+        let positionMs = currentValuesRef.current.spotifyPositionMs;
+
+        // Si syncSpotifyToVideo, calcular posición proporcional al trim del video
+        if (syncSpotifyToVideo && trackUri) {
+          const spotifyDurationMs = currentValuesRef.current.spotifyDurationMs;
+          positionMs = Math.floor(
+            (currentValuesRef.current.videoTrimStart / 100) * spotifyDurationMs
+          );
+          console.log('🎵 Sincronizando Spotify al trim del video:', positionMs, 'ms');
+
+          // Actualizar refs y estado
+          currentValuesRef.current.spotifyPositionMs = positionMs;
+          currentValuesRef.current.spotifyPositionPercent = currentValuesRef.current.videoTrimStart;
+          setSelectedTrack((prev) => (prev ? { ...prev, positionMs } : null));
+        }
+
+        if (trackUri && spotifyEnabled) {
+          console.log('🎵 Spotify play:', trackUri, 'at', positionMs, 'ms');
+          await spotify.play(trackUri, positionMs);
+        }
+
+        setIsPlaying(true);
+        setCurrentVideoTime(
+          (currentValuesRef.current.videoTrimStart / 100) * ((videoData?.duration || 30) * 1000)
+        );
+      } catch (error) {
+        console.warn('Error restarting synced playback:', error);
       }
-
-      // Iniciar Spotify desde la posición seleccionada
-      await spotify.play(selectedTrack.trackUri, selectedTrack.positionMs);
-
-      setIsPlaying(true);
-      setCurrentVideoTime(videoTrimStartMs);
-
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch (error) {
-      console.warn('Error starting sync preview:', error);
-    }
-  }, [selectedTrack, spotifyEnabled, videoTrimStartMs]);
+    },
+    [spotifyEnabled, videoData]
+  );
 
   // Sync Spotify position when video trim changes (OPCIONAL - desactivado para control manual)
   // useEffect(() => {
@@ -416,95 +509,127 @@ export function FullscreenVideoEditor({
   }, [isPlaying, spotifyEnabled, selectedTrack, videoTrimStartMs]);
 
   // -------------------------------------------------------------------------
-  // PAN RESPONDERS - Video Trim
+  // PAN RESPONDERS - Video Trim (useMemo para tener acceso a restartSyncedPlayback actualizado)
   // -------------------------------------------------------------------------
-  const videoTrimStartPanResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onStartShouldSetPanResponderCapture: () => true,
-      onPanResponderGrant: () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      },
-      onPanResponderMove: (evt: GestureResponderEvent) => {
-        if (!videoTimelineRef.current) return;
-        videoTimelineRef.current.measure((_x, _y, width, _h, pageX) => {
-          const relativeX = evt.nativeEvent.pageX - pageX;
-          const percentage = Math.max(
-            0,
-            Math.min(currentValuesRef.current.videoTrimEnd - 10, (relativeX / width) * 100)
-          );
-          setVideoTrimStart(percentage);
-        });
-      },
-      onPanResponderRelease: () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      },
-    })
-  ).current;
+  const videoTrimStartPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onStartShouldSetPanResponderCapture: () => true,
+        onPanResponderGrant: () => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        },
+        onPanResponderMove: (evt: GestureResponderEvent) => {
+          if (!videoTimelineRef.current) return;
+          videoTimelineRef.current.measure((_x, _y, width, _h, pageX) => {
+            const relativeX = evt.nativeEvent.pageX - pageX;
+            const percentage = Math.max(
+              0,
+              Math.min(currentValuesRef.current.videoTrimEnd - 10, (relativeX / width) * 100)
+            );
+            setVideoTrimStart(percentage);
+            // Actualizar ref inmediatamente
+            currentValuesRef.current.videoTrimStart = percentage;
+          });
+        },
+        onPanResponderRelease: async () => {
+          console.log('🎬 Video trim START released');
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          // Auto-reproducir: video desde trim start, Spotify desde su posición actual
+          await restartSyncedPlayback(false);
+        },
+      }),
+    [restartSyncedPlayback]
+  );
 
-  const videoTrimEndPanResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onStartShouldSetPanResponderCapture: () => true,
-      onPanResponderGrant: () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      },
-      onPanResponderMove: (evt: GestureResponderEvent) => {
-        if (!videoTimelineRef.current) return;
-        videoTimelineRef.current.measure((_x, _y, width, _h, pageX) => {
-          const relativeX = evt.nativeEvent.pageX - pageX;
-          const percentage = Math.max(
-            currentValuesRef.current.videoTrimStart + 10,
-            Math.min(100, (relativeX / width) * 100)
-          );
-          setVideoTrimEnd(percentage);
-        });
-      },
-      onPanResponderRelease: () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      },
-    })
-  ).current;
+  const videoTrimEndPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onStartShouldSetPanResponderCapture: () => true,
+        onPanResponderGrant: () => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        },
+        onPanResponderMove: (evt: GestureResponderEvent) => {
+          if (!videoTimelineRef.current) return;
+          videoTimelineRef.current.measure((_x, _y, width, _h, pageX) => {
+            const relativeX = evt.nativeEvent.pageX - pageX;
+            const percentage = Math.max(
+              currentValuesRef.current.videoTrimStart + 10,
+              Math.min(100, (relativeX / width) * 100)
+            );
+            setVideoTrimEnd(percentage);
+            // Actualizar ref inmediatamente
+            currentValuesRef.current.videoTrimEnd = percentage;
+          });
+        },
+        onPanResponderRelease: async () => {
+          console.log('🎬 Video trim END released');
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          // Auto-reproducir desde el inicio
+          await restartSyncedPlayback(false);
+        },
+      }),
+    [restartSyncedPlayback]
+  );
 
   // -------------------------------------------------------------------------
-  // PAN RESPONDER - Spotify Position Picker
+  // PAN RESPONDER - Spotify Position Picker (useMemo para recrear cuando selectedTrack cambie)
   // -------------------------------------------------------------------------
-  const spotifyPositionPanResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onStartShouldSetPanResponderCapture: () => true,
-      onPanResponderGrant: () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        // Pausar durante el ajuste
-        try {
-          videoPlayerRef.current?.pause();
-        } catch (e) {
-          console.warn('Error pausing video:', e);
-        }
-        spotify.pause().catch(() => {});
-        setIsPlaying(false);
-      },
-      onPanResponderMove: (evt: GestureResponderEvent) => {
-        if (!spotifyTimelineRef.current || !selectedTrack) return;
-        spotifyTimelineRef.current.measure((_x, _y, width, _h, pageX) => {
-          const relativeX = evt.nativeEvent.pageX - pageX;
-          const percentage = Math.max(0, Math.min(100, (relativeX / width) * 100));
-          const positionMs = Math.floor(
-            (percentage / 100) * currentValuesRef.current.spotifyDurationMs
-          );
-          updateSpotifyPosition(positionMs);
-        });
-      },
-      onPanResponderRelease: async () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        // Auto-reproducir sincronizado cuando sueltas
-        await startSyncPreview();
-      },
-    })
-  ).current;
+  const spotifyPositionPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onStartShouldSetPanResponderCapture: () => true,
+        onPanResponderGrant: () => {
+          console.log('🎚️ Spotify timeline: PanResponder GRANT');
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          // Pausar durante el ajuste
+          try {
+            videoPlayerRef.current?.pause();
+          } catch (e) {
+            console.warn('Error pausing video:', e);
+          }
+          spotify.pause().catch(() => {});
+          setIsPlaying(false);
+        },
+        onPanResponderMove: (evt: GestureResponderEvent) => {
+          if (!spotifyTimelineRef.current) {
+            console.log('⚠️ spotifyTimelineRef.current is null');
+            return;
+          }
+          spotifyTimelineRef.current.measure((_x, _y, width, _h, pageX) => {
+            if (width === 0) {
+              console.log('⚠️ Timeline width is 0');
+              return;
+            }
+            const relativeX = evt.nativeEvent.pageX - pageX;
+            const percentage = Math.max(0, Math.min(100, (relativeX / width) * 100));
+            const positionMs = Math.floor(
+              (percentage / 100) * currentValuesRef.current.spotifyDurationMs
+            );
+            console.log('🎚️ Moving to:', positionMs, 'ms', '(', percentage.toFixed(1), '%)');
+
+            // Actualizar ref inmediatamente
+            currentValuesRef.current.spotifyPositionMs = positionMs;
+            currentValuesRef.current.spotifyPositionPercent = percentage;
+
+            // Actualizar estado
+            setSelectedTrack((prev) => (prev ? { ...prev, positionMs } : null));
+          });
+        },
+        onPanResponderRelease: async () => {
+          console.log('🎚️ Spotify timeline: PanResponder RELEASE');
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          // Auto-reproducir sincronizado cuando sueltas (no sync video->spotify)
+          await restartSyncedPlayback(false);
+        },
+      }),
+    [restartSyncedPlayback]
+  );
 
   // -------------------------------------------------------------------------
   // SAVE HANDLER
@@ -716,14 +841,20 @@ export function FullscreenVideoEditor({
                           </Text>
                         </View>
 
-                        {/* Timeline arrastrable */}
+                        {/* Timeline arrastrable - panHandlers en todo el contenedor */}
                         <View
                           ref={spotifyTimelineRef}
-                          className="h-10 rounded-lg overflow-hidden relative"
-                          style={{ backgroundColor: 'rgba(29, 185, 84, 0.15)' }}
+                          onLayout={(e) => {
+                            const { x, y, width, height } = e.nativeEvent.layout;
+                            console.log('📏 Spotify timeline layout:', { x, y, width, height });
+                            spotifyTimelineLayoutRef.current = { x, y, width, height };
+                          }}
+                          {...spotifyPositionPanResponder.panHandlers}
+                          className="h-12 rounded-lg overflow-hidden relative"
+                          style={{ backgroundColor: 'rgba(29, 185, 84, 0.2)' }}
                         >
                           {/* Track base */}
-                          <View className="absolute inset-0 flex-row">
+                          <View className="absolute inset-0 flex-row" pointerEvents="none">
                             {/* Waveform visual (simulada) */}
                             {Array.from({ length: 30 }).map((_, i) => (
                               <View key={i} className="flex-1 mx-px justify-center items-center">
@@ -745,9 +876,9 @@ export function FullscreenVideoEditor({
                             ))}
                           </View>
 
-                          {/* Position handle */}
+                          {/* Position handle - visual only, panHandlers are on the timeline */}
                           <View
-                            {...spotifyPositionPanResponder.panHandlers}
+                            pointerEvents="none"
                             style={{
                               position: 'absolute',
                               left: `${(selectedTrack.positionMs / (selectedTrack.durationMs || 240000)) * 100}%`,
@@ -793,18 +924,6 @@ export function FullscreenVideoEditor({
                             {formatTime(selectedTrack.durationMs || 240000)}
                           </Text>
                         </View>
-
-                        {/* Preview button */}
-                        <TouchableOpacity
-                          onPress={startSyncPreview}
-                          className="mt-3 py-2 rounded-lg flex-row items-center justify-center"
-                          style={{ backgroundColor: 'rgba(29, 185, 84, 0.2)' }}
-                        >
-                          <Play color="#1DB954" size={14} />
-                          <Text className="text-green-500 text-xs font-bold ml-2">
-                            PREVIEW SINCRONIZADO
-                          </Text>
-                        </TouchableOpacity>
                       </View>
                     )}
                   </View>

@@ -276,8 +276,23 @@ class CloudflareStreamService {
         headers: this.headers,
       });
 
-      const data = await response.json();
-      return data.success === true;
+      // Cloudflare puede retornar 200 con JSON o 204 sin contenido
+      if (response.status === 204 || response.ok) {
+        // Éxito - video eliminado
+        return true;
+      }
+
+      // Si hay error, intentar leer el body
+      const text = await response.text();
+      if (text) {
+        try {
+          const data = JSON.parse(text);
+          console.error('Error de Cloudflare:', data.errors);
+        } catch {
+          console.error('Respuesta de Cloudflare:', text);
+        }
+      }
+      return false;
     } catch (error) {
       console.error('Error eliminando video:', error);
       return false;

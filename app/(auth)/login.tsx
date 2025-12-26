@@ -38,7 +38,7 @@ export default function LoginScreen() {
       if (authError) throw authError;
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      router.replace('/(tabs)/nucleo');
+      router.replace('/(tabs)/feed');
     } catch (err: any) {
       setError(err.message || 'Error al iniciar sesión');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);

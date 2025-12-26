@@ -8,6 +8,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, PanResponder, Dimensions, GestureResponderEvent } from 'react-native';
 import { Image } from 'expo-image';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -28,6 +29,7 @@ import SpotifyModal from './SpotifyModal';
 import { useUserRoleContext } from '../../context/UserRoleContext';
 import { useHank } from '../../context/HankContext';
 import { useSaveGuard } from '../../context/SaveGuardContext';
+import { calculateFabPositions } from '../../constants/floatingTools';
 
 // Dimensiones de pantalla
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -47,6 +49,7 @@ interface HankInsightToastProps {
   albumArt?: string | null;
   artistImage?: string | null; // Imagen del artista (prioritaria)
   onDismiss: () => void;
+  bottomOffset: number; // Offset desde abajo para posicionar arriba del FAB
 }
 
 const HankInsightToast: React.FC<HankInsightToastProps> = ({
@@ -57,6 +60,7 @@ const HankInsightToast: React.FC<HankInsightToastProps> = ({
   albumArt,
   artistImage,
   onDismiss,
+  bottomOffset,
 }) => {
   // Animaciones
   const pulseAnim = useSharedValue(1);
@@ -180,7 +184,7 @@ const HankInsightToast: React.FC<HankInsightToastProps> = ({
     <View
       style={{
         position: 'absolute',
-        bottom: 260,
+        bottom: bottomOffset + 80, // Arriba del FAB de Spotify
         left: 16,
         right: 16,
         zIndex: 9999,
@@ -342,6 +346,8 @@ export function SpotifyOverlay() {
     // Si falla usePathname, el contexto de navegación no está disponible
     return null;
   }
+
+  const insets = useSafeAreaInsets();
 
   const {
     isPro,
@@ -833,14 +839,17 @@ export function SpotifyOverlay() {
   // -------------------------------------------------------------------------
   // RENDER
   // -------------------------------------------------------------------------
+  // Usar sistema centralizado de posicionamiento
+  const fabPositions = calculateFabPositions(insets.bottom);
+
   return (
     <>
       {/* FAB FLOTANTE */}
       <View
         style={{
           position: 'absolute',
-          bottom: 180,
-          right: 16,
+          bottom: fabPositions.spotify,
+          right: fabPositions.right,
           zIndex: 9998,
         }}
       >
@@ -1037,6 +1046,7 @@ export function SpotifyOverlay() {
         albumArt={albumArtUrl}
         artistImage={hankInsight.artistImage}
         onDismiss={() => setHankInsight((prev) => ({ ...prev, visible: false }))}
+        bottomOffset={fabPositions.spotify}
       />
     </>
   );

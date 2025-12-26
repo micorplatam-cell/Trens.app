@@ -6,22 +6,60 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // TRENS CORE (SAVAGE MODE)
+        // ============================================
+        // TRENS "ED HARDY" PALETTE - SAVAGE TATTOO MODE
+        // ============================================
+
+        // CORE BLACKS (Fondo absoluto)
         'savage-black': '#000000',
-        'savage-dark': '#111111',
-        'savage-darker': '#0A0A0A',
+        'savage-dark': '#0A0A0A',
+        'savage-darker': '#050505',
+
+        // 🔥 FIRE SPECTRUM (Tigre/Dragón flames)
+        'fire-red': '#DC2626', // Rojo sangre
+        'fire-orange': '#F97316', // Naranja llama
+        'fire-gold': '#FBBF24', // Oro intenso
+        'fire-yellow': '#FDE047', // Amarillo fuego
+
+        // 🐉 DRAGON SPECTRUM (Escamas del dragón)
+        'dragon-green': '#22C55E', // Verde esmeralda
+        'dragon-teal': '#14B8A6', // Teal dragón
+        'dragon-cyan': '#06B6D4', // Cyan eléctrico
+        'dragon-blue': '#0EA5E9', // Azul océano
+
+        // 💀 SKULL SPECTRUM (Elementos oscuros)
+        'skull-bone': '#FEF3C7', // Hueso/crema
+        'skull-purple': '#A855F7', // Púrpura veneno
+        'skull-magenta': '#EC4899', // Magenta vibrante
+
+        // ⚡ NEON ACCENTS (Bordes brillantes)
+        'neon-red': '#FF3B3B',
+        'neon-orange': '#FF8C00',
+        'neon-green': '#39FF14',
+        'neon-cyan': '#00FFFF',
+        'neon-pink': '#FF10F0',
+
+        // SPORT COLORS (Heredados pero más vibrantes)
+        'sport-gym': '#DC2626', // Rojo tigre
+        'sport-moto': '#F97316', // Naranja llama
+        'sport-auto': '#EAB308', // Oro metálico
+        'sport-surf': '#0EA5E9', // Azul dragón
+
+        // LEGACY (Mantener compatibilidad)
         'savage-red': '#DC2626',
         'savage-red-dark': '#B91C1C',
         'savage-text': '#FFFFFF',
-        'savage-steel': '#333333',
+        'savage-steel': '#1A1A1A',
 
-        // GLASS LAYERS (INDUSTRIAL TRANSPARENCY)
+        // GLASS LAYERS (Industrial con tinte de color)
         'glass-light': 'rgba(255, 255, 255, 0.03)',
-        'glass-medium': 'rgba(255, 255, 255, 0.05)',
-        'glass-strong': 'rgba(255, 255, 255, 0.1)',
-        'glass-border': 'rgba(255, 255, 255, 0.2)',
+        'glass-medium': 'rgba(255, 255, 255, 0.06)',
+        'glass-strong': 'rgba(255, 255, 255, 0.12)',
+        'glass-border': 'rgba(255, 255, 255, 0.15)',
+        'glass-fire': 'rgba(249, 115, 22, 0.1)',
+        'glass-dragon': 'rgba(34, 197, 94, 0.1)',
 
-        // ZINC PALETTE (SECONDARY)
+        // ZINC PALETTE (Secondary grays)
         zinc: {
           400: '#A1A1AA',
           500: '#71717A',
@@ -29,15 +67,16 @@ module.exports = {
           700: '#3F3F46',
           800: '#27272A',
           900: '#18181B',
+          950: '#0F0F10',
         },
 
-        // MACRO COLORS (NUTRITION MODULE)
+        // MACRO COLORS (Nutrition - más vibrantes)
         'macro-protein': '#A855F7',
-        'macro-protein-bg': 'rgba(168, 85, 247, 0.2)',
+        'macro-protein-bg': 'rgba(168, 85, 247, 0.25)',
         'macro-carbs': '#3B82F6',
-        'macro-carbs-bg': 'rgba(59, 130, 246, 0.2)',
+        'macro-carbs-bg': 'rgba(59, 130, 246, 0.25)',
         'macro-fats': '#FBBF24',
-        'macro-fats-bg': 'rgba(251, 191, 36, 0.2)',
+        'macro-fats-bg': 'rgba(251, 191, 36, 0.25)',
       },
       fontFamily: {
         // TRENS TYPEFACES
@@ -49,6 +88,14 @@ module.exports = {
       },
       backdropBlur: {
         savage: '25px',
+      },
+      // ED HARDY SHADOWS (Glow effects)
+      boxShadow: {
+        fire: '0 0 20px rgba(249, 115, 22, 0.4)',
+        'fire-intense': '0 0 30px rgba(220, 38, 38, 0.5)',
+        dragon: '0 0 20px rgba(34, 197, 94, 0.4)',
+        'neon-red': '0 0 15px rgba(255, 59, 59, 0.6)',
+        'neon-cyan': '0 0 15px rgba(0, 255, 255, 0.6)',
       },
     },
   },

@@ -429,6 +429,7 @@ class SpotifyService {
         headers: {
           Authorization: `Bearer ${this.accessToken}`,
           'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache, no-store',
         },
         body: body ? JSON.stringify(body) : undefined,
       });
@@ -566,37 +567,18 @@ class SpotifyService {
     trackUris?: string[]
   ): Promise<boolean> {
     try {
-      console.log('🎵 Spotify play() called:', {
-        trackUri,
-        positionMs,
-        contextUri,
-        trackUrisCount: trackUris?.length,
-      });
-
       // Verificar si hay dispositivo activo
       const state = await this.getPlaybackState();
       let deviceId = state?.deviceId;
 
-      console.log('🎵 Spotify play() - deviceId inicial:', deviceId);
-
       if (!deviceId) {
         // Buscar un dispositivo disponible
         const devices = await this.getDevices();
-        console.log(
-          '🎵 Spotify play() - dispositivos encontrados:',
-          devices.length,
-          devices.map((d) => d.name)
-        );
-
         const availableDevice = devices.find((d) => !d.is_restricted) || devices[0];
 
-        if (!availableDevice) {
-          console.warn('🎵 Spotify play(): No hay dispositivos disponibles');
-          return false;
-        }
+        if (!availableDevice) return false;
 
         deviceId = availableDevice.id as string;
-        console.log('🎵 Spotify play() - usando dispositivo:', availableDevice.name);
 
         // Transferir reproducción al dispositivo
         await this.transferPlayback(deviceId);
@@ -622,12 +604,6 @@ class SpotifyService {
 
         body.uris = limitedUris;
         body.offset = { position: newOffset };
-        console.log(
-          '🎵 Spotify play() - tracks limitados:',
-          limitedUris.length,
-          'offset:',
-          newOffset
-        );
       } else if (trackUri) {
         // Reproducir solo un track (sin contexto - next/prev no funcionará)
         body.uris = [trackUri];
@@ -637,15 +613,11 @@ class SpotifyService {
         body.position_ms = positionMs;
       }
 
-      const endpoint = `/me/player/play?device_id=${deviceId}`;
-      console.log(
-        '🎵 Spotify play() - enviando request:',
-        endpoint,
-        JSON.stringify(body).substring(0, 200)
+      await this.apiCall(
+        `/me/player/play?device_id=${deviceId}`,
+        'PUT',
+        Object.keys(body).length > 0 ? body : undefined
       );
-
-      await this.apiCall(endpoint, 'PUT', Object.keys(body).length > 0 ? body : undefined);
-      console.log('🎵 Spotify play() - SUCCESS');
       return true;
     } catch (error) {
       console.error('🎵 Spotify play() - ERROR:', error);
@@ -1097,6 +1069,7 @@ class SpotifyService {
   /**
    * Obtener los "Liked Songs" del usuario
    * OPTIMIZADO: Usa thumbnails pequeños (64x64) para listas
+   * Las canciones se devuelven ordenadas por fecha de agregado (más recientes primero)
    */
   async getLikedSongs(limit: number = 20, offset: number = 0): Promise<SpotifyPlaylistTrack[]> {
     const data = await this.apiCall<any>(`/me/tracks?limit=${limit}&offset=${offset}`);
@@ -1256,7 +1229,7 @@ class SpotifyService {
       await this.apiCall(`/me/tracks?ids=${trackId}`, 'PUT');
       return true;
     } catch (error) {
-      console.warn('Error saving track:', error);
+      console.warn('🎵 Error guardando track:', error);
       return false;
     }
   }

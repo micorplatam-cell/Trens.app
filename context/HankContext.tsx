@@ -16,6 +16,8 @@ import React, {
 import { useHankExecutor } from '../hooks/useHankExecutor';
 import { supabase } from '../lib/supabase';
 import { callGemini, continueAfterToolExecution } from '../services/hank/gemini';
+import { useSport } from './SportContext';
+import { hankLogger, syncLogger } from '../lib/logger';
 import type {
   HankContextState,
   HankToolResult,
@@ -128,6 +130,10 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
   // Verificar si el userId es válido para operaciones de DB
   const isValidUser = isValidUUID(userId);
 
+  // Obtener deporte activo del SportContext
+  const sportContext = useSport();
+  const activeSportCode = sportContext?.activeSport?.code || 'GYM';
+
   // -------------------------------------------------------------------------
   // STATE
   // -------------------------------------------------------------------------
@@ -145,7 +151,7 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
 
   // Método para disparar refresh desde otros módulos
   const triggerRefresh = useCallback(() => {
-    console.log('🔄 triggerRefresh llamado externamente');
+    syncLogger.debug('triggerRefresh llamado externamente');
     setRefreshTrigger((prev) => prev + 1);
   }, []);
 
@@ -155,8 +161,15 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
   // Dynamic Context
   const [screenContext, setScreenContext] = useState<ScreenContext>(defaultScreenContext);
   const [activeAsset, setActiveAssetState] = useState<ActiveAsset | null>(null);
-  const [sportMode, setSportMode] = useState<SportMode>('BODYBUILDING');
+  const [sportMode, setSportMode] = useState<SportMode>(activeSportCode as SportMode);
   const [userProfile] = useState<UserProfile>(defaultUserProfile);
+
+  // Sincronizar sportMode con el deporte activo del SportContext
+  useEffect(() => {
+    if (activeSportCode) {
+      setSportMode(activeSportCode as SportMode);
+    }
+  }, [activeSportCode]);
 
   // Aliases
   const [aliases, setAliases] = useState<UserAlias[]>(
@@ -336,7 +349,7 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
 
   /**
    * Carga un asset activo desde Supabase
-   * @param assetId - ID del asset
+   * @param assetId - ID del asset (user_exercise_config.id)
    * @param alternativeInfo - Info si es una alternativa
    */
   const setActiveAsset = useCallback(
@@ -351,26 +364,94 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
       }
 
       try {
+        // 🔧 FIX: Si es alternativa, cargar desde la tabla exercises directamente
+        if (alternativeInfo?.isAlternative) {
+          console.log('🔄 setActiveAsset: Cargando ALTERNATIVA:', assetId);
+
+          const { data: altData, error: altError } = await supabase
+            .from('exercises')
+            .select('id, name, muscle_group, equipment, difficulty')
+            .eq('id', assetId)
+            .single();
+
+          if (altError || !altData) {
+            console.warn('⚠️ setActiveAsset: No se encontró la alternativa:', assetId);
+            setActiveAssetState(null);
+            return;
+          }
+
+          console.log(
+            '✅ setActiveAsset: Alternativa cargada:',
+            altData.name,
+            '(de',
+            alternativeInfo.parentExerciseName,
+            ')'
+          );
+
+          setActiveAssetState({
+            id: altData.id,
+            type: 'exercise',
+            name: altData.name,
+            liquidData: {}, // Las alternativas no tienen config personalizada aún
+            trainingDays: [],
+            isAlternative: true,
+            parentExerciseName: alternativeInfo.parentExerciseName,
+          });
+          return;
+        }
+
+        // Cargar desde user_exercise_config (nueva arquitectura) - EJERCICIO PRINCIPAL
         const { data, error } = await supabase
-          .from('user_assets')
-          .select('*')
+          .from('user_exercise_config')
+          .select(
+            `
+            id,
+            exercise_id,
+            training_days,
+            display_order,
+            config,
+            exercises (
+              name,
+              muscle_group,
+              equipment,
+              difficulty
+            )
+          `
+          )
           .eq('id', assetId)
           .eq('user_id', userId)
           .single();
 
         if (error || !data) {
+          console.warn('⚠️ setActiveAsset: No se encontró el ejercicio:', assetId, error?.message);
           setActiveAssetState(null);
           return;
         }
 
+        const exerciseData = data as unknown as {
+          id: string;
+          exercise_id: string;
+          training_days: number[];
+          display_order: number;
+          config: Record<string, unknown>;
+          exercises: {
+            name: string;
+            muscle_group: string;
+            equipment: string[];
+            difficulty: string;
+          } | null;
+        };
+
+        console.log('✅ setActiveAsset: Ejercicio cargado:', exerciseData.exercises?.name);
+
         setActiveAssetState({
-          id: data.id as string,
-          type: data.asset_type as string,
-          name: data.name as string,
-          liquidData: (data.metadata || {}) as Record<string, unknown>,
-          trainingDays: data.training_days as number[] | undefined,
-          isAlternative: alternativeInfo?.isAlternative || false,
-          parentExerciseName: alternativeInfo?.parentExerciseName,
+          id: exerciseData.id,
+          type: 'exercise',
+          name: exerciseData.exercises?.name || 'Sin nombre',
+          liquidData: exerciseData.config || {},
+          trainingDays: exerciseData.training_days,
+          isAlternative: false,
+          parentExerciseName: undefined,
         });
       } catch (e) {
         console.error('Error loading active asset:', e);
@@ -443,11 +524,17 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
   // BUILD GEMINI CONTEXT
   // -------------------------------------------------------------------------
   const buildGeminiContext = useCallback(() => {
+    // 🐛 FIX: Usar screenContext.currentTrainingDay (real) en lugar de userProfile.currentTrainingDay (siempre 0)
+    const realTrainingDay = screenContext.currentTrainingDay ?? 0;
+    console.warn(
+      `📝 buildGeminiContext: día=${realTrainingDay}, ejercicio=${activeAsset?.name || 'NINGUNO'}`
+    );
+
     return {
       screenModule: screenContext.module,
       sportMode: sportMode,
       userLevel: userProfile.level,
-      currentTrainingDay: userProfile.currentTrainingDay,
+      currentTrainingDay: realTrainingDay,
       activeAsset: activeAsset
         ? {
             name: activeAsset.name,
@@ -536,16 +623,30 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
         const geminiContext = buildGeminiContext();
         console.warn('🤖 Llamando a Gemini...');
         console.warn('📝 Contexto activeAsset:', geminiContext.activeAsset?.name || 'NINGUNO');
+        console.warn('📜 Historial de conversación:', conversationHistory.length, 'mensajes');
+
+        // 🔧 FIX: Limitar historial a últimos 10 mensajes para evitar confusión
+        const recentHistory = conversationHistory.slice(-10);
 
         const geminiResponse = await callGemini(
           userText,
           geminiContext,
           GEMINI_API_KEY,
-          conversationHistory
+          recentHistory
         );
 
-        console.warn('🤖 Gemini respondió:', geminiResponse.message);
+        console.warn('🤖 Gemini respondió:', geminiResponse.message?.substring(0, 100));
         console.warn('🔧 Tool calls:', geminiResponse.toolCalls.length);
+        if (geminiResponse.toolCalls.length > 0) {
+          console.warn(
+            '🔧 Tools:',
+            geminiResponse.toolCalls
+              .map((tc) => `${tc.tool}(${JSON.stringify(tc.parameters)})`)
+              .join(', ')
+          );
+        } else {
+          console.warn('⚠️ GEMINI NO LLAMÓ NINGUNA HERRAMIENTA - solo texto');
+        }
 
         // Variable para almacenar la respuesta final
         let finalResponseText = geminiResponse.message;
@@ -911,22 +1012,63 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
   // -------------------------------------------------------------------------
 
   /**
+   * Genera instrucciones específicas por deporte
+   */
+  const getSportInstructions = useCallback((sport: SportMode): string => {
+    switch (sport) {
+      case 'GYM':
+        return `MODO GYM:
+- Puedes gestionar ejercicios, series, repeticiones y pesos
+- Herramientas: GYM_ADD_EXERCISE, GYM_REMOVE_EXERCISE, GYM_MODIFY_SERIES, GYM_REPLACE_EXERCISE
+- Ayuda con técnica, nutrición (PLAN), y progresión de cargas
+- Vocabulario: ejercicios, series, reps, PR, fallo muscular, descanso`;
+
+      case 'MOTO':
+        return `MODO MOTO:
+- Gestiona vehículos, mantenimientos y eventos/carreras
+- Herramientas: INVENTORY_ADD, INVENTORY_UPDATE, EVENT_CREATE, MAINTENANCE_LOG
+- Ayuda con setup de moto, telemetría, y preparación pre-carrera
+- Vocabulario: circuito, vuelta rápida, presión neumáticos, suspensión, frenada`;
+
+      case 'AUTO':
+        return `MODO AUTO:
+- Similar a MOTO pero para automóviles
+- Gestiona vehículos, mantenimientos y eventos/track days
+- Herramientas: INVENTORY_ADD, INVENTORY_UPDATE, EVENT_CREATE, MAINTENANCE_LOG
+- Vocabulario: track day, stint, pit stop, setup, telemetría`;
+
+      case 'SURF':
+        return `MODO SURF:
+- Gestiona tablas (quiver), gear y sesiones de surf
+- Herramientas: INVENTORY_ADD, SESSION_LOG, SPOT_FAVORITE
+- Ayuda con condiciones, forecast, y elección de tabla
+- Vocabulario: swell, periodo, marea, offshore, quiver, spot`;
+
+      default:
+        return 'Deporte no especificado. Pregunta al usuario qué tipo de actividad realiza.';
+    }
+  }, []);
+
+  /**
    * Genera el System Prompt con contexto actual
    */
   const getSystemPrompt = useCallback((): string => {
     // Usar el día del contexto de pantalla (UI) si está disponible, sino el del perfil
     const currentDay = screenContext.currentTrainingDay ?? userProfile.currentTrainingDay;
+    const sportName = sportContext?.activeSport?.name || 'No definido';
 
-    return `Eres HANK, el asistente de IA de TRENS (High-Performance Fitness App).
+    return `Eres HANK, el asistente de IA de TRENS (High-Performance Multi-Sport App).
 
 CONTEXTO ACTUAL:
 - Módulo activo: ${screenContext.module.toUpperCase()}
 - Vista: ${screenContext.viewMode || 'principal'}
-- Deporte: ${sportMode || 'No definido'}
+- Deporte activo: ${sportMode} (${sportName})
 - Nivel del usuario: ${userProfile.level}
-- Día de entrenamiento actual: ${currentDay + 1} (índice: ${currentDay})
+${sportMode === 'GYM' ? `- Día de entrenamiento: ${currentDay + 1} (índice: ${currentDay})` : ''}
 
-IMPORTANTE: Cuando el usuario pida modificar series de un ejercicio, usa trainingDay: ${currentDay}
+${getSportInstructions(sportMode)}
+
+${sportMode === 'GYM' ? `IMPORTANTE: Cuando el usuario pida modificar series de un ejercicio, usa trainingDay: ${currentDay}` : ''}
 
 ${
   activeAsset
@@ -948,15 +1090,23 @@ ${aliases.map((a) => `- "${a.trigger}": ${a.description || a.actions.map((ac) =>
     : ''
 }
 
-INSTRUCCIONES:
-1. Responde de forma concisa y directa. Estilo "savage", sin rodeos.
-2. Si el usuario pide cambiar algo, USA las herramientas disponibles.
-3. Confirma SIEMPRE después de ejecutar una acción.
-4. Si no entiendes algo, pregunta claramente.
-5. Respeta el RLS: solo puedes modificar datos del usuario actual.
+PERSONALIDAD:
+1. Eres directo, conciso y motivador. Estilo "savage", sin rodeos.
+2. Adapta tu vocabulario al deporte activo.
+3. Si el usuario pide cambiar algo, USA las herramientas disponibles.
+4. Confirma SIEMPRE después de ejecutar una acción.
+5. Si no entiendes algo, pregunta claramente.
 
 IMPORTANTE: Puedes ejecutar múltiples herramientas si la solicitud lo requiere.`;
-  }, [screenContext, sportMode, userProfile, activeAsset, aliases]);
+  }, [
+    screenContext,
+    sportMode,
+    sportContext?.activeSport?.name,
+    userProfile,
+    activeAsset,
+    aliases,
+    getSportInstructions,
+  ]);
 
   // -------------------------------------------------------------------------
   // CONTEXT VALUE

@@ -6,6 +6,7 @@
 import { supabase } from '../../lib/supabase';
 import type { HankToolResult, ToolDefinition } from '../../types/hank';
 import { calculateMacrosWithAI } from './nutrition';
+import { spotify } from '../spotify/spotify';
 
 // ============================================================================
 // TIPOS INTERNOS
@@ -39,6 +40,59 @@ interface SeriesConfig {
   weight: number;
   type: 'WARMUP' | 'APPROACH' | 'EFFECTIVE' | 'FAILURE';
   note?: string;
+}
+
+// Tipo para resultado de búsqueda de ejercicio
+interface ExerciseConfigResult {
+  id: string;
+  exerciseId: string;
+  name: string;
+  config: Record<string, unknown>;
+  trainingDays: number[];
+}
+
+// ============================================================================
+// HELPER: Buscar ejercicio en user_exercise_config
+// ============================================================================
+async function findExerciseConfig(
+  userId: string,
+  assetName: string
+): Promise<ExerciseConfigResult | null> {
+  const { data, error } = await supabase
+    .from('user_exercise_config')
+    .select(
+      `
+      id,
+      exercise_id,
+      training_days,
+      config,
+      exercises!inner (
+        name
+      )
+    `
+    )
+    .eq('user_id', userId)
+    .ilike('exercises.name', `%${assetName}%`)
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !data) return null;
+
+  const result = data as unknown as {
+    id: string;
+    exercise_id: string;
+    training_days: number[];
+    config: Record<string, unknown>;
+    exercises: { name: string };
+  };
+
+  return {
+    id: result.id,
+    exerciseId: result.exercise_id,
+    name: result.exercises.name,
+    config: result.config || {},
+    trainingDays: result.training_days || [],
+  };
 }
 
 // ============================================================================
@@ -481,20 +535,30 @@ export async function gymGetTodayRoutine(
     const routineNames = (profile?.training_routine_names || {}) as Record<string, string>;
     const routineName = routineNames[String(trainingDay)] || null;
 
-    // 2. Obtener ejercicios del día
-    const { data: exercises, error: exercisesError } = await supabase
-      .from('user_assets')
-      .select('name, metadata')
+    // 2. Obtener ejercicios del día desde user_exercise_config
+    const { data: userConfigs, error: configError } = await supabase
+      .from('user_exercise_config')
+      .select(
+        `
+        id,
+        exercise_id,
+        training_days,
+        display_order,
+        exercises (
+          name
+        )
+      `
+      )
       .eq('user_id', userId)
-      .eq('asset_type', 'gym_exercise')
-      .is('deleted_at', null)
       .contains('training_days', [trainingDay])
-      .order('order', { ascending: true });
+      .order('display_order', { ascending: true });
 
-    if (exercisesError) throw exercisesError;
+    if (configError) throw configError;
 
-    const exerciseCount = exercises?.length || 0;
-    const exerciseNames = (exercises || []).map((ex) => ex.name);
+    const exerciseCount = userConfigs?.length || 0;
+    const exerciseNames = (userConfigs || []).map(
+      (cfg: any) => cfg.exercises?.name || 'Sin nombre'
+    );
 
     // 3. Construir mensaje
     let message = '';
@@ -537,17 +601,34 @@ export async function gymListExercises(
   trainingDay?: number
 ): Promise<HankToolResult> {
   try {
-    const { data, error } = await supabase
-      .from('user_assets')
-      .select('*')
+    // Usar user_exercise_config (nueva arquitectura)
+    const { data: userConfigs, error } = await supabase
+      .from('user_exercise_config')
+      .select(
+        `
+        id,
+        exercise_id,
+        training_days,
+        display_order,
+        config,
+        exercises (
+          name
+        )
+      `
+      )
       .eq('user_id', userId)
-      .eq('asset_type', 'gym_exercise')
-      .is('deleted_at', null)
-      .order('order', { ascending: true });
+      .order('display_order', { ascending: true });
 
     if (error) throw error;
 
-    let exercises = (data || []) as UserAsset[];
+    let exercises = (userConfigs || []) as unknown as Array<{
+      id: string;
+      exercise_id: string;
+      training_days: number[];
+      display_order: number;
+      config: { custom_series?: Array<{ reps: number; weight: number; type: string }> };
+      exercises: { name: string } | null;
+    }>;
 
     if (trainingDay !== undefined) {
       exercises = exercises.filter((ex) => (ex.training_days || []).includes(trainingDay));
@@ -566,15 +647,14 @@ export async function gymListExercises(
 
     // Crear lista legible de ejercicios con sus series
     const exerciseList = exercises.map((ex, index) => {
-      const series = (ex.metadata as Record<string, unknown>)?.custom_series as
-        | Array<{ reps: number; weight: number; type: string }>
-        | undefined;
+      const series = ex.config?.custom_series;
       const seriesCount = series?.length || 0;
       const seriesInfo =
         series && series.length > 0
           ? series.map((s) => `${s.reps}×${s.weight}kg`).join(', ')
           : 'sin series';
-      return `${index + 1}. ${ex.name} (${seriesCount} series: ${seriesInfo})`;
+      const name = ex.exercises?.name || 'Sin nombre';
+      return `${index + 1}. ${name} (${seriesCount} series: ${seriesInfo})`;
     });
 
     const message =
@@ -587,10 +667,8 @@ export async function gymListExercises(
       message,
       data: {
         exercises: exercises.map((ex) => ({
-          name: ex.name,
-          series: (ex.metadata as Record<string, unknown>)?.custom_series
-            ? ((ex.metadata as Record<string, unknown>).custom_series as unknown[]).length
-            : 0,
+          name: ex.exercises?.name || 'Sin nombre',
+          series: ex.config?.custom_series?.length || 0,
         })),
       },
     };
@@ -652,133 +730,195 @@ export async function assetUpdateField(
   operation: 'set' | 'increment' | 'decrement' = 'set'
 ): Promise<HankToolResult> {
   try {
-    // Buscar asset
+    // Buscar ejercicio en user_exercise_config (nueva arquitectura)
     let query = supabase
-      .from('user_assets')
-      .select('*')
-      .eq('user_id', userId)
-      .is('deleted_at', null);
+      .from('user_exercise_config')
+      .select(
+        `
+        id,
+        config,
+        exercises (
+          name
+        )
+      `
+      )
+      .eq('user_id', userId);
 
     if (assetId) {
       query = query.eq('id', assetId);
     } else if (assetName) {
-      query = query.ilike('name', `%${assetName}%`);
-    } else {
-      return { success: false, message: 'Necesito assetId o assetName.' };
+      // Buscar por nombre del ejercicio (join con exercises)
+      const { data: configs, error: searchError } = await supabase
+        .from('user_exercise_config')
+        .select(
+          `
+          id,
+          config,
+          exercises!inner (
+            name
+          )
+        `
+        )
+        .eq('user_id', userId)
+        .ilike('exercises.name', `%${assetName}%`)
+        .limit(1)
+        .single();
+
+      if (searchError || !configs) {
+        return { success: false, message: `No encontré el ejercicio "${assetName}".` };
+      }
+
+      const exerciseConfig = configs as unknown as {
+        id: string;
+        config: Record<string, unknown>;
+        exercises: { name: string };
+      };
+
+      // Continuar con este ejercicio
+      return await updateExerciseConfig(
+        userId,
+        exerciseConfig.id,
+        exerciseConfig.exercises.name,
+        exerciseConfig.config,
+        fieldPath,
+        newValue,
+        operation
+      );
     }
 
     const { data: asset, error } = await query.limit(1).single();
 
     if (error || !asset) {
-      return { success: false, message: 'Asset no encontrado.' };
+      return { success: false, message: 'Ejercicio no encontrado.' };
     }
 
-    const typedAsset = asset as UserAsset;
-    const currentMetadata = JSON.parse(JSON.stringify(typedAsset.metadata || {})) as Record<
-      string,
-      unknown
-    >;
-
-    // Navegar al campo usando lodash-style path: "custom_series.0.weight"
-    const pathParts = fieldPath.split('.');
-
-    // Navegar hasta el penúltimo nivel
-    let target: unknown = currentMetadata;
-    for (let i = 0; i < pathParts.length - 1; i++) {
-      const key = pathParts[i];
-      const isIndex = /^\d+$/.test(key);
-
-      if (isIndex) {
-        // Es un índice de array
-        const idx = parseInt(key, 10);
-        if (!Array.isArray(target)) {
-          return {
-            success: false,
-            message: `Se esperaba un array en "${pathParts.slice(0, i).join('.')}"`,
-          };
-        }
-        if (idx >= (target as unknown[]).length) {
-          return {
-            success: false,
-            message: `Índice ${idx} fuera de rango. Hay ${(target as unknown[]).length} elementos (0-${(target as unknown[]).length - 1}).`,
-          };
-        }
-        target = (target as unknown[])[idx];
-      } else {
-        // Es una key de objeto
-        const obj = target as Record<string, unknown>;
-        if (obj[key] === undefined) {
-          obj[key] = {};
-        }
-        target = obj[key];
-      }
-    }
-
-    // Aplicar cambio en el último nivel
-    const finalKey = pathParts[pathParts.length - 1];
-    const isIndexFinal = /^\d+$/.test(finalKey);
-
-    let finalTarget: Record<string, unknown> | unknown[];
-    let actualKey: string | number;
-
-    if (isIndexFinal) {
-      if (!Array.isArray(target)) {
-        return { success: false, message: `Se esperaba un array para índice ${finalKey}` };
-      }
-      finalTarget = target as unknown[];
-      actualKey = parseInt(finalKey, 10);
-      if (actualKey >= finalTarget.length) {
-        return {
-          success: false,
-          message: `Índice ${actualKey} fuera de rango. Hay ${finalTarget.length} elementos.`,
-        };
-      }
-    } else {
-      finalTarget = target as Record<string, unknown>;
-      actualKey = finalKey;
-    }
-
-    const currentValue = (finalTarget as Record<string | number, unknown>)[actualKey];
-
-    // Aplicar operación
-    switch (operation) {
-      case 'set':
-        (finalTarget as Record<string | number, unknown>)[actualKey] = newValue;
-        break;
-      case 'increment':
-        (finalTarget as Record<string | number, unknown>)[actualKey] =
-          (Number(currentValue) || 0) + Number(newValue);
-        break;
-      case 'decrement':
-        (finalTarget as Record<string | number, unknown>)[actualKey] =
-          (Number(currentValue) || 0) - Number(newValue);
-        break;
-    }
-
-    const { error: updateError } = await supabase
-      .from('user_assets')
-      .update({ metadata: currentMetadata })
-      .eq('id', typedAsset.id);
-
-    if (updateError) throw updateError;
-
-    const finalValue = (finalTarget as Record<string | number, unknown>)[actualKey];
-
-    return {
-      success: true,
-      message: `✅ ${typedAsset.name}: ${fieldPath} = ${String(finalValue)}`,
-      data: {
-        assetId: typedAsset.id,
-        field: fieldPath,
-        oldValue: currentValue,
-        newValue: finalValue,
-      },
-      affectedRecords: 1,
+    const exerciseConfig = asset as unknown as {
+      id: string;
+      config: Record<string, unknown>;
+      exercises: { name: string } | null;
     };
+
+    return await updateExerciseConfig(
+      userId,
+      exerciseConfig.id,
+      exerciseConfig.exercises?.name || 'Ejercicio',
+      exerciseConfig.config,
+      fieldPath,
+      newValue,
+      operation
+    );
   } catch (error) {
     console.error('assetUpdateField error:', error);
     return { success: false, message: 'Error actualizando campo.' };
   }
+}
+
+// Helper para actualizar config de ejercicio
+async function updateExerciseConfig(
+  userId: string,
+  configId: string,
+  exerciseName: string,
+  currentConfig: Record<string, unknown>,
+  fieldPath: string,
+  newValue: unknown,
+  operation: 'set' | 'increment' | 'decrement'
+): Promise<HankToolResult> {
+  const configCopy = JSON.parse(JSON.stringify(currentConfig || {})) as Record<string, unknown>;
+
+  // Navegar al campo usando lodash-style path: "custom_series.0.weight"
+  const pathParts = fieldPath.split('.');
+
+  // Navegar hasta el penúltimo nivel
+  let target: unknown = configCopy;
+  for (let i = 0; i < pathParts.length - 1; i++) {
+    const key = pathParts[i];
+    const isIndex = /^\d+$/.test(key);
+
+    if (isIndex) {
+      const idx = parseInt(key, 10);
+      if (!Array.isArray(target)) {
+        return {
+          success: false,
+          message: `Se esperaba un array en "${pathParts.slice(0, i).join('.')}"`,
+        };
+      }
+      if (idx >= (target as unknown[]).length) {
+        return {
+          success: false,
+          message: `Índice ${idx} fuera de rango. Hay ${(target as unknown[]).length} elementos (0-${(target as unknown[]).length - 1}).`,
+        };
+      }
+      target = (target as unknown[])[idx];
+    } else {
+      const obj = target as Record<string, unknown>;
+      if (obj[key] === undefined) {
+        obj[key] = {};
+      }
+      target = obj[key];
+    }
+  }
+
+  // Aplicar cambio en el último nivel
+  const finalKey = pathParts[pathParts.length - 1];
+  const isIndexFinal = /^\d+$/.test(finalKey);
+
+  let finalTarget: Record<string, unknown> | unknown[];
+  let actualKey: string | number;
+
+  if (isIndexFinal) {
+    if (!Array.isArray(target)) {
+      return { success: false, message: `Se esperaba un array para índice ${finalKey}` };
+    }
+    finalTarget = target as unknown[];
+    actualKey = parseInt(finalKey, 10);
+    if (actualKey >= finalTarget.length) {
+      return {
+        success: false,
+        message: `Índice ${actualKey} fuera de rango. Hay ${finalTarget.length} elementos.`,
+      };
+    }
+  } else {
+    finalTarget = target as Record<string, unknown>;
+    actualKey = finalKey;
+  }
+
+  const currentValue = (finalTarget as Record<string | number, unknown>)[actualKey];
+
+  // Aplicar operación
+  switch (operation) {
+    case 'set':
+      (finalTarget as Record<string | number, unknown>)[actualKey] = newValue;
+      break;
+    case 'increment':
+      (finalTarget as Record<string | number, unknown>)[actualKey] =
+        (Number(currentValue) || 0) + Number(newValue);
+      break;
+    case 'decrement':
+      (finalTarget as Record<string | number, unknown>)[actualKey] =
+        (Number(currentValue) || 0) - Number(newValue);
+      break;
+  }
+
+  const { error: updateError } = await supabase
+    .from('user_exercise_config')
+    .update({ config: configCopy })
+    .eq('id', configId);
+
+  if (updateError) throw updateError;
+
+  const finalValue = (finalTarget as Record<string | number, unknown>)[actualKey];
+
+  return {
+    success: true,
+    message: `✅ ${exerciseName}: ${fieldPath} = ${String(finalValue)}`,
+    data: {
+      assetId: configId,
+      field: fieldPath,
+      oldValue: currentValue,
+      newValue: finalValue,
+    },
+    affectedRecords: 1,
+  };
 }
 
 // ============================================================================
@@ -791,40 +931,29 @@ export async function assetRemoveSeries(
   trainingDay: number = 0
 ): Promise<HankToolResult> {
   try {
-    // Buscar el asset
-    const { data: asset, error: assetError } = await supabase
-      .from('user_assets')
-      .select('id, name, metadata, training_days')
-      .eq('user_id', userId)
-      .ilike('name', `%${assetName}%`)
-      .is('deleted_at', null)
-      .limit(1)
-      .maybeSingle();
+    // Buscar el ejercicio en user_exercise_config
+    const exercise = await findExerciseConfig(userId, assetName);
 
-    if (assetError || !asset) {
+    if (!exercise) {
       return { success: false, message: `No encontré el ejercicio "${assetName}".` };
     }
 
-    const typedAsset = asset as UserAsset;
-    const currentMetadata = JSON.parse(JSON.stringify(typedAsset.metadata || {})) as Record<
-      string,
-      unknown
-    >;
+    const currentConfig = JSON.parse(JSON.stringify(exercise.config)) as Record<string, unknown>;
 
     // Obtener series del día específico
-    const customSeries = getSeriesForDay(currentMetadata, trainingDay);
+    const customSeries = getSeriesForDay(currentConfig, trainingDay);
 
     if (customSeries.length === 0) {
       return {
         success: false,
-        message: `${typedAsset.name} no tiene series para quitar en día ${trainingDay + 1}.`,
+        message: `${exercise.name} no tiene series para quitar en día ${trainingDay + 1}.`,
       };
     }
 
     if (customSeries.length === 1) {
       return {
         success: false,
-        message: `${typedAsset.name} solo tiene 1 serie en día ${trainingDay + 1}. No puedo dejarla sin series.`,
+        message: `${exercise.name} solo tiene 1 serie en día ${trainingDay + 1}. No puedo dejarla sin series.`,
       };
     }
 
@@ -850,20 +979,20 @@ export async function assetRemoveSeries(
     customSeries.splice(indexToRemove, 1);
 
     // Guardar en estructura por día
-    setSeriesForDay(currentMetadata, trainingDay, customSeries);
+    setSeriesForDay(currentConfig, trainingDay, customSeries);
 
     const { error: updateError } = await supabase
-      .from('user_assets')
-      .update({ metadata: currentMetadata })
-      .eq('id', typedAsset.id);
+      .from('user_exercise_config')
+      .update({ config: currentConfig })
+      .eq('id', exercise.id);
 
     if (updateError) throw updateError;
 
     return {
       success: true,
-      message: `✅ ${typedAsset.name}: Serie ${indexToRemove + 1} eliminada. Quedan ${customSeries.length} series.`,
+      message: `✅ ${exercise.name}: Serie ${indexToRemove + 1} eliminada. Quedan ${customSeries.length} series.`,
       data: {
-        assetId: typedAsset.id,
+        assetId: exercise.id,
         removedSeries,
         remainingSeries: customSeries.length,
       },
@@ -888,28 +1017,17 @@ export async function assetAddSeries(
   trainingDay: number = 0
 ): Promise<HankToolResult> {
   try {
-    // Buscar el asset
-    const { data: asset, error: assetError } = await supabase
-      .from('user_assets')
-      .select('id, name, metadata, training_days')
-      .eq('user_id', userId)
-      .ilike('name', `%${assetName}%`)
-      .is('deleted_at', null)
-      .limit(1)
-      .maybeSingle();
+    // Buscar el ejercicio en user_exercise_config
+    const exercise = await findExerciseConfig(userId, assetName);
 
-    if (assetError || !asset) {
+    if (!exercise) {
       return { success: false, message: `No encontré el ejercicio "${assetName}".` };
     }
 
-    const typedAsset = asset as UserAsset;
-    const currentMetadata = JSON.parse(JSON.stringify(typedAsset.metadata || {})) as Record<
-      string,
-      unknown
-    >;
+    const currentConfig = JSON.parse(JSON.stringify(exercise.config)) as Record<string, unknown>;
 
     // Obtener series del día específico
-    const customSeries = getSeriesForDay(currentMetadata, trainingDay);
+    const customSeries = getSeriesForDay(currentConfig, trainingDay);
 
     // Crear nueva serie
     const newSeries: SeriesConfig = {
@@ -932,20 +1050,20 @@ export async function assetAddSeries(
     }
 
     // Guardar en estructura por día
-    setSeriesForDay(currentMetadata, trainingDay, customSeries);
+    setSeriesForDay(currentConfig, trainingDay, customSeries);
 
     const { error: updateError } = await supabase
-      .from('user_assets')
-      .update({ metadata: currentMetadata })
-      .eq('id', typedAsset.id);
+      .from('user_exercise_config')
+      .update({ config: currentConfig })
+      .eq('id', exercise.id);
 
     if (updateError) throw updateError;
 
     return {
       success: true,
-      message: `✅ ${typedAsset.name} (día ${trainingDay + 1}): Nueva serie añadida (${reps} reps × ${weight}kg, tipo: ${seriesType}). Total: ${customSeries.length} series.`,
+      message: `✅ ${exercise.name} (día ${trainingDay + 1}): Nueva serie añadida (${reps} reps × ${weight}kg, tipo: ${seriesType}). Total: ${customSeries.length} series.`,
       data: {
-        assetId: typedAsset.id,
+        assetId: exercise.id,
         newSeries,
         totalSeries: customSeries.length,
       },
@@ -970,33 +1088,22 @@ export async function assetReplaceSeries(
   trainingDay: number = 0
 ): Promise<HankToolResult> {
   try {
-    // Buscar el asset
-    const { data: asset, error: assetError } = await supabase
-      .from('user_assets')
-      .select('id, name, metadata, training_days')
-      .eq('user_id', userId)
-      .ilike('name', `%${assetName}%`)
-      .is('deleted_at', null)
-      .limit(1)
-      .maybeSingle();
+    // Buscar el ejercicio en user_exercise_config
+    const exercise = await findExerciseConfig(userId, assetName);
 
-    if (assetError || !asset) {
+    if (!exercise) {
       return { success: false, message: `No encontré el ejercicio "${assetName}".` };
     }
 
-    const typedAsset = asset as UserAsset;
-    const currentMetadata = JSON.parse(JSON.stringify(typedAsset.metadata || {})) as Record<
-      string,
-      unknown
-    >;
+    const currentConfig = JSON.parse(JSON.stringify(exercise.config)) as Record<string, unknown>;
 
     // Obtener series del día específico
-    const customSeries = getSeriesForDay(currentMetadata, trainingDay);
+    const customSeries = getSeriesForDay(currentConfig, trainingDay);
 
     if (customSeries.length === 0) {
       return {
         success: false,
-        message: `${typedAsset.name} no tiene series para reemplazar en día ${trainingDay + 1}.`,
+        message: `${exercise.name} no tiene series para reemplazar en día ${trainingDay + 1}.`,
       };
     }
 
@@ -1031,20 +1138,20 @@ export async function assetReplaceSeries(
     customSeries[indexToReplace] = newSeries;
 
     // Guardar en estructura por día
-    setSeriesForDay(currentMetadata, trainingDay, customSeries);
+    setSeriesForDay(currentConfig, trainingDay, customSeries);
 
     const { error: updateError } = await supabase
-      .from('user_assets')
-      .update({ metadata: currentMetadata })
-      .eq('id', typedAsset.id);
+      .from('user_exercise_config')
+      .update({ config: currentConfig })
+      .eq('id', exercise.id);
 
     if (updateError) throw updateError;
 
     return {
       success: true,
-      message: `✅ ${typedAsset.name} (día ${trainingDay + 1}): Serie ${indexToReplace + 1} reemplazada. Antes: ${oldSeries.reps} reps × ${oldSeries.weight}kg (${oldSeries.type}). Ahora: ${reps} reps × ${weight}kg (${seriesType}).`,
+      message: `✅ ${exercise.name} (día ${trainingDay + 1}): Serie ${indexToReplace + 1} reemplazada. Antes: ${oldSeries.reps} reps × ${oldSeries.weight}kg (${oldSeries.type}). Ahora: ${reps} reps × ${weight}kg (${seriesType}).`,
       data: {
-        assetId: typedAsset.id,
+        assetId: exercise.id,
         oldSeries,
         newSeries,
         seriesIndex: indexToReplace,
@@ -1072,25 +1179,14 @@ export async function assetSetSeries(
       return { success: false, message: 'Debes proporcionar al menos una serie.' };
     }
 
-    // Buscar el asset
-    const { data: asset, error: assetError } = await supabase
-      .from('user_assets')
-      .select('id, name, metadata, training_days')
-      .eq('user_id', userId)
-      .ilike('name', `%${assetName}%`)
-      .is('deleted_at', null)
-      .limit(1)
-      .maybeSingle();
+    // Buscar el ejercicio en user_exercise_config
+    const exercise = await findExerciseConfig(userId, assetName);
 
-    if (assetError || !asset) {
+    if (!exercise) {
       return { success: false, message: `No encontré el ejercicio "${assetName}".` };
     }
 
-    const typedAsset = asset as UserAsset;
-    const currentMetadata = JSON.parse(JSON.stringify(typedAsset.metadata || {})) as Record<
-      string,
-      unknown
-    >;
+    const currentConfig = JSON.parse(JSON.stringify(exercise.config)) as Record<string, unknown>;
 
     // Crear nuevas series con IDs únicos
     const newSeries: SeriesConfig[] = series.map((s, index) => ({
@@ -1102,12 +1198,12 @@ export async function assetSetSeries(
     }));
 
     // Guardar en estructura por día
-    setSeriesForDay(currentMetadata, trainingDay, newSeries);
+    setSeriesForDay(currentConfig, trainingDay, newSeries);
 
     const { error: updateError } = await supabase
-      .from('user_assets')
-      .update({ metadata: currentMetadata })
-      .eq('id', typedAsset.id);
+      .from('user_exercise_config')
+      .update({ config: currentConfig })
+      .eq('id', exercise.id);
 
     if (updateError) throw updateError;
 
@@ -1118,9 +1214,9 @@ export async function assetSetSeries(
 
     return {
       success: true,
-      message: `✅ ${typedAsset.name} (día ${trainingDay + 1}): ${newSeries.length} series configuradas:\n${seriesSummary}`,
+      message: `✅ ${exercise.name} (día ${trainingDay + 1}): ${newSeries.length} series configuradas:\n${seriesSummary}`,
       data: {
-        assetId: typedAsset.id,
+        assetId: exercise.id,
         series: newSeries,
         totalSeries: newSeries.length,
       },
@@ -1854,7 +1950,7 @@ export async function getFullUserContext(userId: string): Promise<HankToolResult
     const routinesContext = Object.entries(routineNames)
       .map(([day, name]) => {
         const exs = exercisesByDay[parseInt(day)] || [];
-        return `DÍA ${parseInt(day) + 1} - ${name}: ${exs.join(', ') || 'Sin ejercicios'}`;
+        return `${name}: ${exs.join(', ') || 'Sin ejercicios'}`;
       })
       .join('\n');
 
@@ -1865,8 +1961,7 @@ export async function getFullUserContext(userId: string): Promise<HankToolResult
 📊 CONTEXTO COMPLETO DEL USUARIO:
 
 🏋️ ENTRENAMIENTO:
-- Día actual: ${currentDay + 1} de ${frequency}
-- Rutina de hoy: ${routineNames[currentDay] || 'Sin nombre'}
+- Rutina de hoy: ${routineNames[currentDay] || 'Sin rutina configurada'}
 ${routinesContext}
 
 🍽️ COMIDAS:
@@ -2100,6 +2195,8 @@ export async function planGetMeals(userId: string): Promise<HankToolResult> {
       };
     }
 
+    const totalMeals = meals.length;
+
     // Format response con macros
     const formatTime = (t: string | null) => {
       if (!t) return '??:??';
@@ -2148,7 +2245,11 @@ export async function planGetMeals(userId: string): Promise<HankToolResult> {
             ? ` | ${Math.round(mealCals)}kcal ${Math.round(mealP)}P ${Math.round(mealC)}C ${Math.round(mealF)}G`
             : '';
 
-        return `${i + 1}. ${m.name || 'Comida'} (${formatTime(m.scheduled_time)}): ${ings}${macrosStr}`;
+        // Usar nombre inteligente basado en posición
+        const smartName = getSmartMealName(i, totalMeals);
+        const statusIcon = m.is_completed ? '✅' : '⏳';
+
+        return `${statusIcon} ${smartName} (${formatTime(m.scheduled_time)}): ${ings}${macrosStr}`;
       })
       .join('\n');
 
@@ -2165,6 +2266,175 @@ export async function planGetMeals(userId: string): Promise<HankToolResult> {
   } catch (error) {
     console.error('planGetMeals error:', error);
     return { success: false, message: 'Error al obtener comidas.' };
+  }
+}
+
+/**
+ * Helper: Genera nombre inteligente de comida basado en posición y total
+ */
+function getSmartMealName(index: number, total: number): string {
+  if (total === 1) return 'COMIDA ÚNICA';
+  if (total === 2) return index === 0 ? 'DESAYUNO' : 'CENA';
+  if (total === 3) return ['DESAYUNO', 'ALMUERZO', 'CENA'][index] || `COMIDA ${index + 1}`;
+  if (total === 4)
+    return ['DESAYUNO', 'ALMUERZO', 'MERIENDA', 'CENA'][index] || `COMIDA ${index + 1}`;
+  if (total === 5) {
+    return (
+      ['DESAYUNO', 'MEDIA MAÑANA', 'ALMUERZO', 'MEDIA TARDE', 'CENA'][index] ||
+      `COMIDA ${index + 1}`
+    );
+  }
+  if (total === 6) {
+    return (
+      ['DESAYUNO', 'MEDIA MAÑANA', 'ALMUERZO', 'MERIENDA', 'CENA', 'SNACK NOCTURNO'][index] ||
+      `COMIDA ${index + 1}`
+    );
+  }
+  return `COMIDA ${index + 1}`;
+}
+
+/**
+ * Obtiene la próxima comida basándose en la hora actual
+ */
+export async function planGetNextMeal(userId: string): Promise<HankToolResult> {
+  try {
+    // Obtener TODAS las comidas para calcular el total y nombres inteligentes
+    const { data: allMeals, error } = await supabase
+      .from('meals')
+      .select(
+        'id, name, scheduled_time, ingredients, calories, protein_g, carbs_g, fat_g, is_completed'
+      )
+      .eq('user_id', userId)
+      .order('scheduled_time', { ascending: true });
+
+    if (error) throw error;
+
+    if (!allMeals || allMeals.length === 0) {
+      return {
+        success: true,
+        message: '🍽️ No tienes comidas configuradas todavía.',
+        data: { nextMeal: null },
+      };
+    }
+
+    const totalMeals = allMeals.length;
+
+    // Obtener hora actual
+    const now = new Date();
+    const currentHour = now.getHours();
+    const currentMinute = now.getMinutes();
+    const currentTimeMinutes = currentHour * 60 + currentMinute;
+
+    // Encontrar la próxima comida (no completada y después de la hora actual)
+    let nextMeal = null;
+    let nextMealIndex = -1;
+
+    for (let i = 0; i < allMeals.length; i++) {
+      const meal = allMeals[i];
+      if (!meal.scheduled_time || meal.is_completed) continue;
+
+      const [h, m] = meal.scheduled_time.split(':').map(Number);
+      const mealTimeMinutes = h * 60 + m;
+
+      // Si la comida es después de la hora actual
+      if (mealTimeMinutes > currentTimeMinutes) {
+        nextMeal = meal;
+        nextMealIndex = i;
+        break;
+      }
+    }
+
+    // Si no hay comida después de la hora actual
+    if (!nextMeal || nextMealIndex === -1) {
+      return {
+        success: true,
+        message: '🌙 Ya no tienes más comidas programadas para hoy. ¡Descansa!',
+        data: { nextMeal: null },
+      };
+    }
+
+    // Obtener nombre inteligente basado en posición
+    const smartName = getSmartMealName(nextMealIndex, totalMeals);
+
+    // Formatear hora
+    const formatTime = (t: string) => {
+      const [h, m] = t.split(':').map(Number);
+      const period = h >= 12 ? 'PM' : 'AM';
+      const h12 = h % 12 || 12;
+      return `${h12}:${m.toString().padStart(2, '0')} ${period}`;
+    };
+
+    // Calcular tiempo restante
+    const [nh, nm] = nextMeal.scheduled_time.split(':').map(Number);
+    const nextMealMinutes = nh * 60 + nm;
+    const minutesUntil = nextMealMinutes - currentTimeMinutes;
+    const hoursUntil = Math.floor(minutesUntil / 60);
+    const minsUntil = minutesUntil % 60;
+    const timeUntilStr = hoursUntil > 0 ? `${hoursUntil}h ${minsUntil}min` : `${minsUntil} minutos`;
+
+    // Ingredientes
+    const ingredients = nextMeal.ingredients || [];
+    const ingsStr =
+      ingredients.length > 0
+        ? ingredients.map((ing: any) => ing.name).join(', ')
+        : 'Sin ingredientes definidos';
+
+    // Macros
+    const macrosStr = nextMeal.calories
+      ? `\n📊 ${Math.round(nextMeal.calories)} kcal | ${Math.round(nextMeal.protein_g || 0)}P | ${Math.round(nextMeal.carbs_g || 0)}C | ${Math.round(nextMeal.fat_g || 0)}G`
+      : '';
+
+    return {
+      success: true,
+      message: `🍽️ TU PRÓXIMA COMIDA:\n\n📍 ${smartName} a las ${formatTime(nextMeal.scheduled_time)}\n⏱️ En ${timeUntilStr}\n🥗 ${ingsStr}${macrosStr}`,
+      data: {
+        nextMeal: { ...nextMeal, smartName },
+        mealIndex: nextMealIndex,
+        totalMeals,
+        timeUntil: { hours: hoursUntil, minutes: minsUntil },
+        currentTime: `${currentHour}:${currentMinute.toString().padStart(2, '0')}`,
+      },
+    };
+  } catch (error) {
+    console.error('planGetNextMeal error:', error);
+    return { success: false, message: 'Error al obtener la próxima comida.' };
+  }
+}
+
+/**
+ * Obtiene la canción actual de Spotify
+ */
+export async function spotifyGetCurrentTrack(): Promise<HankToolResult> {
+  try {
+    const track = await spotify.getCurrentTrack();
+
+    if (!track) {
+      return {
+        success: true,
+        message: '🎵 No estás reproduciendo nada en Spotify ahora mismo.',
+        data: { track: null, isPlaying: false },
+      };
+    }
+
+    return {
+      success: true,
+      message: `🎵 Estás escuchando: "${track.name}" de ${track.artist}\n💿 Álbum: ${track.album}`,
+      data: {
+        track: {
+          name: track.name,
+          artist: track.artist,
+          album: track.album,
+          uri: track.uri,
+        },
+        isPlaying: true,
+      },
+    };
+  } catch (error) {
+    console.error('spotifyGetCurrentTrack error:', error);
+    return {
+      success: false,
+      message: '⚠️ No pude conectar con Spotify. ¿Tienes la app abierta?',
+    };
   }
 }
 
@@ -2848,6 +3118,20 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     name: 'PLAN_GET_MEALS',
     description:
       'Obtiene todas las comidas del día. Usa cuando pregunte "qué tengo de comer hoy", "muéstrame mis comidas", "cuál es mi plan de hoy".',
+    parameters: {},
+    requiredParams: [],
+  },
+  {
+    name: 'PLAN_GET_NEXT_MEAL',
+    description:
+      'Obtiene la PRÓXIMA comida basándose en la hora actual. Usa cuando pregunte "cuál es mi próxima comida", "qué me toca comer", "cuándo como", "a qué hora es mi siguiente comida". SIEMPRE usa esta herramienta para preguntas sobre la próxima comida.',
+    parameters: {},
+    requiredParams: [],
+  },
+  {
+    name: 'SPOTIFY_GET_CURRENT_TRACK',
+    description:
+      'Obtiene la canción que está sonando en Spotify. Usa cuando pregunte "qué canción estoy escuchando", "qué suena", "qué música tengo", "cuál es esta canción".',
     parameters: {},
     requiredParams: [],
   },

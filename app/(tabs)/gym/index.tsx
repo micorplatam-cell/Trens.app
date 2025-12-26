@@ -46,6 +46,7 @@ import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -56,9 +57,16 @@ import Slider from '@react-native-community/slider';
 import { useHank } from '../../../context/HankContext';
 import { LinearGradient } from 'expo-linear-gradient';
 import spotify, { SpotifyVideoMetadata } from '../../../services/spotify/spotify';
+import cloudflareStream from '../../../services/cloudflare/stream';
 import { useUserRoleContext } from '../../../context/UserRoleContext';
 import { useSaveGuard } from '../../_layout';
 import cloudflareR2 from '../../../services/cloudflare/r2';
+import { useSport } from '../../../context/SportContext';
+import { calculateFabPositions } from '../../../constants/floatingTools';
+
+// Import sport-specific screens
+import GarajeScreen from '../garaje';
+import TablaScreen from '../tabla';
 
 // ============================================================================
 // HELPERS
@@ -189,7 +197,6 @@ interface Series {
 
 interface TrainingDay {
   id: string;
-  dayNumber: number; // 1, 2, 3...
   muscleGroups: string; // "Pecho y Tríceps"
   exercises: Exercise[];
 }
@@ -215,6 +222,7 @@ interface VideoRecord {
   video_url?: string;
   videoUrl?: string; // alias para compatibilidad
   thumbnail_url?: string;
+  cloudflare_video_id?: string;
   weight: number;
   reps: number;
   date: string;
@@ -264,11 +272,35 @@ interface AssetTemplate {
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
-// Altura del tab bar (aproximada)
-const TAB_BAR_HEIGHT = 80;
 
-export default function GymScreen() {
+// ============================================================================
+// TAB 4 ROUTER - Renderiza el contenido correcto según el deporte activo
+// ============================================================================
+export default function Tab4Router() {
+  const { activeSport } = useSport();
+  const sportCode = activeSport?.code || 'GYM';
+
+  // Renderizar pantalla según deporte
+  switch (sportCode) {
+    case 'MOTO':
+    case 'AUTO':
+      return <GarajeScreen />;
+    case 'SURF':
+      return <TablaScreen />;
+    case 'GYM':
+    default:
+      return <GymScreen />;
+  }
+}
+
+// ============================================================================
+// GYM SCREEN - Pantalla original de entrenamiento
+// ============================================================================
+function GymScreen() {
   const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  // Tab bar altura: 56px base + safe area bottom
+  const TAB_BAR_HEIGHT = 56 + insets.bottom;
   const CONTENT_HEIGHT = SCREEN_HEIGHT - TAB_BAR_HEIGHT;
   const { user } = useAuth();
   const {
@@ -333,6 +365,27 @@ export default function GymScreen() {
   const videoPlayer = useVideoPlayer(capturedVideoUri || '', (player) => {
     player.loop = true;
   });
+
+  // Editor state - declarado aquí antes de usarlo en editorVideoPlayer
+  const [imageToEdit, setImageToEdit] = useState<string | null>(null);
+  const [editorVisible, setEditorVisible] = useState(false);
+  const [mediaType, setMediaType] = useState<'photo' | 'video'>('photo');
+
+  // Video Player para preview en editor (cuando se selecciona video de galería)
+  const editorVideoPlayer = useVideoPlayer(
+    mediaType === 'video' && imageToEdit ? imageToEdit : '',
+    (player) => {
+      player.loop = true;
+      player.muted = false;
+    }
+  );
+
+  // Auto-play video en editor cuando se abre
+  useEffect(() => {
+    if (editorVisible && mediaType === 'video' && imageToEdit && editorVideoPlayer) {
+      editorVideoPlayer.play();
+    }
+  }, [editorVisible, mediaType, imageToEdit, editorVideoPlayer]);
 
   // Play preview video cuando se captura
   useEffect(() => {
@@ -436,16 +489,14 @@ export default function GymScreen() {
   // Ref para evitar loops en sincronización de contexto
   const lastSyncedExerciseId = useRef<string | null>(null);
 
-  // Editor State
-  const [editorVisible, setEditorVisible] = useState(false);
-  const [imageToEdit, setImageToEdit] = useState<string | null>(null);
+  // Editor State - NOTA: editorVisible, imageToEdit están declarados arriba con editorVideoPlayer
 
   // Series Config Modal State
   const [seriesConfigModalVisible, setSeriesConfigModalVisible] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<AssetTemplate | null>(null);
   const [seriesConfig, setSeriesConfig] = useState<SeriesConfig[]>([]);
   const [userLevel, setUserLevel] = useState<UserLevel>('INTERMEDIATE');
-  const [mediaType, setMediaType] = useState<'photo' | 'video'>('photo');
+  // NOTA: mediaType está declarado arriba con editorVideoPlayer
   const [videoMuted, setVideoMuted] = useState(true);
   const [isPickingFromGallery, setIsPickingFromGallery] = useState(false);
 
@@ -458,9 +509,9 @@ export default function GymScreen() {
   const [trainingProgram, setTrainingProgram] = useState<TrainingProgram>({
     frequency: 3,
     days: [
-      { id: '1', dayNumber: 1, muscleGroups: 'Pecho y Espalda', exercises: [] },
-      { id: '2', dayNumber: 2, muscleGroups: 'Hombros, Bíceps y Tríceps', exercises: [] },
-      { id: '3', dayNumber: 3, muscleGroups: 'Piernas', exercises: [] },
+      { id: '1', muscleGroups: 'Pecho y Espalda', exercises: [] },
+      { id: '2', muscleGroups: 'Hombros, Bíceps y Tríceps', exercises: [] },
+      { id: '3', muscleGroups: 'Piernas', exercises: [] },
     ],
     lastAccessDate: null,
     currentDayIndex: 0,
@@ -532,6 +583,13 @@ export default function GymScreen() {
     if (currentExercise && isFocused && viewMode === 'FOCUS') {
       const altIndex = activeAlternatives[activeExerciseIndex] || 0;
 
+      console.log(
+        '🔍 DEBUG ALTERNATIVAS: exerciseIndex=',
+        activeExerciseIndex,
+        'altIndex=',
+        altIndex
+      );
+
       // Determinar nombre del ejercicio actual (principal o alternativa)
       let exerciseName = currentExercise.name;
       let exerciseId = currentExercise.id;
@@ -547,11 +605,13 @@ export default function GymScreen() {
         const alternativeName = currentExercise.alternatives[altIndex - 1].name;
         exerciseId = alternativeId;
         exerciseName = alternativeName;
+        console.log('🔄 ALTERNATIVA DETECTADA:', alternativeName, 'de', currentExercise.name);
       }
 
       // Solo actualizar si el exerciseId realmente cambió (evitar loops)
       if (lastSyncedExerciseId.current !== exerciseId) {
         lastSyncedExerciseId.current = exerciseId;
+        console.log('🎯 SINCRONIZANDO CON HANK:', exerciseId, exerciseName);
 
         // Actualizar HANK context
         if (altIndex > 0 && currentExercise.alternatives?.[altIndex - 1]) {
@@ -565,10 +625,19 @@ export default function GymScreen() {
         }
 
         // Actualizar ProContext para Smart Trigger (Contexto Táctico)
+        console.log('🏋️ GYM: Estableciendo contexto táctico:', exerciseId, exerciseName);
         setTacticalContext(exerciseId, exerciseName);
       }
     }
-  }, [activeExerciseIndex, exercises, isFocused, activeAlternatives, viewMode, setTacticalContext]);
+  }, [
+    activeExerciseIndex,
+    exercises,
+    isFocused,
+    activeAlternatives,
+    viewMode,
+    setTacticalContext,
+    setActiveAsset,
+  ]);
 
   // Modal drag state
   const translateYHistorial = useSharedValue(0);
@@ -664,6 +733,7 @@ export default function GymScreen() {
           videoUrl: v.video_url,
           video_url: v.video_url,
           thumbnail_url: v.thumbnail_url || v.video_url,
+          cloudflare_video_id: v.cloudflare_video_id,
           spotify: v.spotify,
         }));
 
@@ -699,7 +769,23 @@ export default function GymScreen() {
             try {
               await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
 
-              // Eliminar de la base de datos
+              // 1. Eliminar de Cloudflare Stream si existe
+              if (selectedVideo.cloudflare_video_id) {
+                console.warn(
+                  '🗑️ Eliminando video de Cloudflare Stream:',
+                  selectedVideo.cloudflare_video_id
+                );
+                const deleted = await cloudflareStream.deleteVideo(
+                  selectedVideo.cloudflare_video_id
+                );
+                if (deleted) {
+                  console.warn('✅ Video eliminado de Cloudflare Stream');
+                } else {
+                  console.warn('⚠️ No se pudo eliminar de Cloudflare Stream (continuando con DB)');
+                }
+              }
+
+              // 2. Eliminar de la base de datos
               const { error } = await supabase
                 .from('pro_videos')
                 .delete()
@@ -778,7 +864,25 @@ export default function GymScreen() {
         .single();
 
       // Cargar nombres de rutinas desde la base de datos
-      const routineNames = profile?.training_routine_names || {};
+      let routineNames = profile?.training_routine_names || {};
+
+      // Si no hay nombres guardados, inicializar con los valores por defecto
+      if (Object.keys(routineNames).length === 0) {
+        const defaultNames: Record<string, string> = {};
+        trainingProgram.days.forEach((day, idx) => {
+          defaultNames[String(idx)] = day.muscleGroups;
+        });
+
+        // Guardar los nombres por defecto en la base de datos
+        await supabase
+          .from('profiles')
+          .update({ training_routine_names: defaultNames })
+          .eq('id', user.id);
+
+        routineNames = defaultNames;
+        console.warn('🏋️ GYM: Nombres de rutinas inicializados:', defaultNames);
+      }
+
       if (Object.keys(routineNames).length > 0) {
         setTrainingProgram((prev) => ({
           ...prev,
@@ -1115,6 +1219,9 @@ export default function GymScreen() {
 
         // Cargar los datos de los ejercicios alternativos desde la tabla exercises
         let alternativeExercisesData: any[] = [];
+        // También cargar custom_media_url para alternativas desde user_exercise_config
+        let alternativeCustomMedia: Record<string, string> = {};
+
         if (allAlternativeIds.length > 0) {
           const { data: altData } = await supabase
             .from('exercises')
@@ -1122,11 +1229,74 @@ export default function GymScreen() {
             .in('id', allAlternativeIds);
 
           alternativeExercisesData = altData || [];
+
+          // Cargar imágenes personalizadas de alternativas (si el usuario las ha cambiado)
+          const { data: altConfigs } = await supabase
+            .from('user_exercise_config')
+            .select('exercise_id, custom_media_url')
+            .eq('user_id', user.id)
+            .in('exercise_id', allAlternativeIds)
+            .not('custom_media_url', 'is', null);
+
+          if (altConfigs) {
+            altConfigs.forEach((cfg: any) => {
+              if (cfg.custom_media_url) {
+                alternativeCustomMedia[cfg.exercise_id] = cfg.custom_media_url;
+              }
+            });
+            console.log(
+              '  - Alternativas con imagen personalizada:',
+              Object.keys(alternativeCustomMedia).length
+            );
+          }
+
           console.log('  - Alternativas cargadas:', alternativeExercisesData.length);
           console.log(
             '  - Detalles:',
             alternativeExercisesData.map((a: any) => ({ id: a.id.substring(0, 8), name: a.name }))
           );
+        }
+
+        // Cargar videos de pro_videos para todos los ejercicios del usuario
+        const allExerciseIds = filteredData.map((item: any) => item.id);
+        let exerciseVideosMap: Record<string, VideoRecord[]> = {};
+
+        if (allExerciseIds.length > 0) {
+          const { data: videosData, error: videosError } = await supabase
+            .from('pro_videos')
+            .select(
+              'id, exercise_id, video_url, thumbnail_url, weight_kg, reps, is_public, created_at'
+            )
+            .in('exercise_id', allExerciseIds)
+            .order('created_at', { ascending: false });
+
+          if (!videosError && videosData) {
+            // Agrupar videos por exercise_id
+            videosData.forEach((v: any) => {
+              if (!exerciseVideosMap[v.exercise_id]) {
+                exerciseVideosMap[v.exercise_id] = [];
+              }
+              exerciseVideosMap[v.exercise_id].push({
+                id: v.id,
+                exercise_id: v.exercise_id,
+                video_url: v.video_url,
+                videoUrl: v.video_url,
+                thumbnail_url: v.thumbnail_url || v.video_url,
+                weight: v.weight_kg || 0,
+                reps: v.reps || 0,
+                date: new Date(v.created_at).toLocaleDateString('es-ES', {
+                  day: '2-digit',
+                  month: 'short',
+                }),
+                is_public: v.is_public,
+              });
+            });
+            console.log(
+              '🎥 Videos cargados para',
+              Object.keys(exerciseVideosMap).length,
+              'ejercicios'
+            );
+          }
         }
 
         const mappedExercises: Exercise[] = filteredData.map((item, index) => {
@@ -1168,10 +1338,15 @@ export default function GymScreen() {
                 const altExercise = alternativeExercisesData.find((a: any) => a.id === altId);
                 if (!altExercise) return null;
 
+                // Usar imagen personalizada si existe, sino usar la del catálogo
+                const customImage = alternativeCustomMedia[altId];
+                const imageUrl =
+                  customImage || altExercise.default_media_url || altExercise.thumbnail_url || '';
+
                 return {
                   id: altExercise.id,
                   name: altExercise.name,
-                  image_url: altExercise.default_media_url || altExercise.thumbnail_url || '',
+                  image_url: imageUrl,
                   videos: [],
                   series: seriesForState, // Usar las mismas series del ejercicio principal
                 };
@@ -1186,7 +1361,7 @@ export default function GymScreen() {
               order: item.order || 0,
               series: seriesForState,
               training_days: item.training_days || [0],
-              videos: generateMockVideos(item.id, index),
+              videos: exerciseVideosMap[item.id] || [],
               alternatives,
             };
           } catch (mapError) {
@@ -1642,12 +1817,17 @@ export default function GymScreen() {
 
       // Buscar el ejercicio (puede estar en exercises o en alternatives)
       let currentExercise = exercises.find((ex) => ex.id === exerciseIdToUpdate);
+      let isAlternative = false;
+      let parentExerciseId: string | null = null;
+
       if (!currentExercise) {
         // Buscar en alternativas
         for (const ex of exercises) {
           const found = ex.alternatives?.find((alt) => alt.id === exerciseIdToUpdate);
           if (found) {
             currentExercise = found as any;
+            isAlternative = true;
+            parentExerciseId = ex.id; // El ID del ejercicio padre en user_exercise_config
             break;
           }
         }
@@ -1675,18 +1855,78 @@ export default function GymScreen() {
         throw new Error(result.error || 'Error subiendo a R2');
       }
 
-      console.log('📹 Media uploaded to R2:', { type, url: result.url });
+      console.log('📹 Media uploaded to R2:', { type, url: result.url, isAlternative });
 
-      // Actualizar en la base de datos (user_exercise_config)
-      console.log('💾 Actualizando DB:', { exerciseIdToUpdate, newUrl: result.url });
-      const { error: updateError, data: updateData } = await supabase
-        .from('user_exercise_config')
-        .update({ custom_media_url: result.url })
-        .eq('id', exerciseIdToUpdate)
-        .select();
+      // Actualizar en la base de datos
+      if (isAlternative) {
+        // ALTERNATIVA: Crear o actualizar registro en user_exercise_config para la alternativa
+        console.log('💾 Guardando imagen de ALTERNATIVA:', {
+          exerciseIdToUpdate,
+          parentExerciseId,
+        });
 
-      console.log('✅ DB actualizada:', { error: updateError, data: updateData });
-      if (updateError) throw updateError;
+        // Intentar actualizar primero (si ya existe un registro para esta alternativa)
+        const { data: existingConfig } = await supabase
+          .from('user_exercise_config')
+          .select('id, custom_media_url')
+          .eq('user_id', user.id)
+          .eq('exercise_id', exerciseIdToUpdate)
+          .single();
+
+        if (existingConfig) {
+          // Eliminar archivo anterior de R2 si existe
+          if (
+            existingConfig.custom_media_url &&
+            existingConfig.custom_media_url.includes('media.trens.app')
+          ) {
+            const oldKey = cloudflareR2.getKeyFromUrl(existingConfig.custom_media_url);
+            if (oldKey) {
+              try {
+                await cloudflareR2.deleteFile(oldKey);
+                console.log('🗑️ Archivo anterior de alternativa eliminado de R2');
+              } catch (deleteError) {
+                console.warn('No se pudo eliminar archivo anterior de R2:', deleteError);
+              }
+            }
+          }
+
+          // Actualizar registro existente
+          const { error: updateError } = await supabase
+            .from('user_exercise_config')
+            .update({ custom_media_url: result.url })
+            .eq('id', existingConfig.id);
+
+          if (updateError) throw updateError;
+          console.log('✅ Alternativa actualizada en DB');
+        } else {
+          // Crear nuevo registro para la alternativa
+          const { error: insertError } = await supabase.from('user_exercise_config').insert({
+            user_id: user.id,
+            exercise_id: exerciseIdToUpdate, // ID del ejercicio global (alternativa)
+            custom_media_url: result.url,
+            training_days: [], // No tiene días asignados, solo almacena la imagen
+            display_order: 9999, // Lo ponemos al final para que no aparezca en la lista principal
+            config: {},
+          });
+
+          if (insertError) throw insertError;
+          console.log('✅ Alternativa insertada en DB');
+        }
+      } else {
+        // EJERCICIO PRINCIPAL: Actualizar normalmente
+        console.log('💾 Actualizando DB ejercicio principal:', {
+          exerciseIdToUpdate,
+          newUrl: result.url,
+        });
+        const { error: updateError, data: updateData } = await supabase
+          .from('user_exercise_config')
+          .update({ custom_media_url: result.url })
+          .eq('id', exerciseIdToUpdate)
+          .select();
+
+        console.log('✅ DB actualizada:', { error: updateError, data: updateData });
+        if (updateError) throw updateError;
+      }
 
       // Actualizar estado local - puede ser ejercicio principal o alternativa
       const updatedExercises = exercises.map((ex) => {
@@ -1734,38 +1974,6 @@ export default function GymScreen() {
       console.error('💥 Error uploading media:', error);
       alert('Error al guardar el archivo');
     }
-  };
-
-  // ============================================================================
-  // HELPER: Generate Mock Videos
-  // ============================================================================
-  const generateMockVideos = (exerciseId: string, index: number): VideoRecord[] => {
-    if (index === 0) {
-      // Solo el primer ejercicio tiene historial mock
-      return [
-        {
-          id: '1',
-          exercise_id: exerciseId,
-          video_url: 'https://example.com/video1.mp4',
-          thumbnail_url: 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=400',
-          weight: 140,
-          reps: 10,
-          date: '12 Oct',
-          is_public: true,
-        },
-        {
-          id: '2',
-          exercise_id: exerciseId,
-          video_url: 'https://example.com/video2.mp4',
-          thumbnail_url: 'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=400',
-          weight: 135,
-          reps: 12,
-          date: '5 Oct',
-          is_public: false,
-        },
-      ];
-    }
-    return [];
   };
 
   // ============================================================================
@@ -2469,40 +2677,95 @@ export default function GymScreen() {
   );
 
   // ============================================================================
-  // RENDER STRUCTURE MODE - Estilo ADN
+  // RENDER STRUCTURE MODE - ED HARDY FIRE STYLE
   // ============================================================================
   if (viewMode === 'STRUCTURE') {
     return (
       <View className="flex-1 bg-black">
-        {/* HEADER - Estilo ADN */}
+        {/* HEADER - ED HARDY FIRE STYLE */}
         <View className="relative pt-14 pb-4 px-4">
           <LinearGradient
-            colors={['#1a1a1a', '#000000']}
+            colors={['#1a0a0a', '#0a0000', '#000000']}
             start={{ x: 0.5, y: 0 }}
             end={{ x: 0.5, y: 1 }}
-            className="absolute inset-0 opacity-30"
+            className="absolute inset-0"
+          />
+
+          {/* Fire glow effect */}
+          <View
+            className="absolute top-0 left-0 right-0 h-24"
+            style={{
+              backgroundColor: 'rgba(220, 38, 38, 0.06)',
+            }}
           />
 
           <View className="flex-row items-center justify-between mb-4">
             <View>
-              <Text className="text-white text-2xl font-bold tracking-tight">ESTRUCTURA</Text>
-              <Text className="text-zinc-500 text-xs uppercase tracking-widest">
+              <Text
+                className="text-fire-orange text-2xl font-bold tracking-tight"
+                style={{
+                  textShadowColor: '#F97316',
+                  textShadowOffset: { width: 0, height: 0 },
+                  textShadowRadius: 10,
+                }}
+              >
+                🔥 ESTRUCTURA
+              </Text>
+              <Text className="text-zinc-500 text-xs uppercase tracking-widest font-mono">
                 Configura tu rutina
               </Text>
             </View>
             <TouchableOpacity
-              onPress={() => exercises.length > 0 && setViewMode('FOCUS')}
-              className={`px-4 py-2 rounded-lg ${exercises.length > 0 ? 'bg-savage-red' : 'bg-zinc-800'}`}
+              onPress={async () => {
+                if (exercises.length > 0) {
+                  // Actualizar el día de entrenamiento actual en la BD
+                  if (user && selectedDayIndex !== trainingProgram.currentDayIndex) {
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    const todayISO = today.toISOString();
+
+                    await supabase
+                      .from('profiles')
+                      .update({
+                        training_last_access: todayISO,
+                        training_current_day: selectedDayIndex,
+                      })
+                      .eq('id', user.id);
+
+                    setTrainingProgram((prev) => ({
+                      ...prev,
+                      lastAccessDate: todayISO,
+                      currentDayIndex: selectedDayIndex,
+                    }));
+                    console.log('🏋️ Día de entrenamiento actualizado a:', selectedDayIndex);
+                  }
+                  setViewMode('FOCUS');
+                }
+              }}
+              className={`px-4 py-2 rounded-lg ${exercises.length > 0 ? '' : 'bg-zinc-800'}`}
+              style={
+                exercises.length > 0
+                  ? {
+                      backgroundColor: '#0a0000',
+                      borderWidth: 2,
+                      borderColor: '#F97316',
+                      shadowColor: '#DC2626',
+                      shadowOffset: { width: 0, height: 0 },
+                      shadowOpacity: 0.8,
+                      shadowRadius: 10,
+                    }
+                  : {}
+              }
             >
               <Text
-                className={`font-bold text-sm ${exercises.length > 0 ? 'text-white' : 'text-zinc-500'}`}
+                className={`font-bold text-sm ${exercises.length > 0 ? 'text-fire-orange' : 'text-zinc-500'}`}
               >
-                ENTRENAR
+                ENTRENAR 🔥
               </Text>
             </TouchableOpacity>
           </View>
 
-          {/* WHEEL SELECTOR DÍAS */}
+          {/* WHEEL SELECTOR DÍAS - ED HARDY FIRE */}
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             {trainingProgram.days.map((day, index) => {
               const isActive = selectedDayIndex === index;
@@ -2521,19 +2784,34 @@ export default function GymScreen() {
                     setDayNameModalVisible(true);
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
                   }}
-                  className={`mr-2 px-3 py-2 rounded-lg ${
-                    isActive ? 'bg-savage-red' : 'bg-zinc-900 border border-zinc-800'
-                  }`}
+                  className={`mr-2 px-3 py-2 rounded-lg`}
+                  style={
+                    isActive
+                      ? {
+                          backgroundColor: '#0a0000',
+                          borderWidth: 2,
+                          borderColor: '#F97316',
+                          shadowColor: '#F97316',
+                          shadowOffset: { width: 0, height: 0 },
+                          shadowOpacity: 0.6,
+                          shadowRadius: 8,
+                        }
+                      : {
+                          backgroundColor: '#0a0a0a',
+                          borderWidth: 1,
+                          borderColor: '#27272a',
+                        }
+                  }
                 >
                   <View className="flex-row items-center gap-1.5">
                     {isCurrent && (
                       <View
-                        className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-white' : 'bg-green-500'}`}
+                        className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-fire-gold' : 'bg-green-500'}`}
                       />
                     )}
                     <Text
                       className={`font-bold text-[10px] uppercase tracking-wider ${
-                        isActive ? 'text-white' : 'text-zinc-400'
+                        isActive ? 'text-fire-orange' : 'text-zinc-400'
                       }`}
                       numberOfLines={1}
                     >
@@ -2544,10 +2822,12 @@ export default function GymScreen() {
               );
             })}
           </ScrollView>
-          <Text className="text-zinc-600 text-[10px] mt-1.5">Mantén presionado para renombrar</Text>
+          <Text className="text-zinc-600 text-[10px] mt-1.5 font-mono">
+            Mantén presionado para renombrar
+          </Text>
         </View>
 
-        {/* EXERCISES LIST - Estilo ADN */}
+        {/* EXERCISES LIST - ED HARDY FIRE STYLE */}
         <FlatList
           data={exercises}
           keyExtractor={(item) => item.id}
@@ -2555,18 +2835,34 @@ export default function GymScreen() {
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
             <View className="flex-1 justify-center items-center py-16">
-              <View className="w-16 h-16 rounded-full bg-zinc-900 items-center justify-center mb-4">
-                <Plus size={28} color="#71717A" />
+              <View
+                className="w-16 h-16 rounded-full items-center justify-center mb-4"
+                style={{
+                  backgroundColor: '#0a0500',
+                  borderWidth: 2,
+                  borderColor: '#F97316',
+                }}
+              >
+                <Plus size={28} color="#F97316" />
               </View>
-              <Text className="text-zinc-600 text-center mb-6 text-sm">
+              <Text className="text-zinc-500 text-center mb-6 text-sm">
                 Sin ejercicios configurados
               </Text>
               <TouchableOpacity
                 onPress={() => setModalVisible(true)}
-                className="bg-savage-red px-6 py-3 rounded-lg"
+                className="px-6 py-3 rounded-lg"
+                style={{
+                  backgroundColor: '#0a0000',
+                  borderWidth: 2,
+                  borderColor: '#F97316',
+                  shadowColor: '#DC2626',
+                  shadowOffset: { width: 0, height: 0 },
+                  shadowOpacity: 0.8,
+                  shadowRadius: 12,
+                }}
               >
-                <Text className="text-white font-bold text-sm tracking-wider">
-                  + AGREGAR EJERCICIO
+                <Text className="text-fire-orange font-bold text-sm tracking-wider">
+                  + AGREGAR EJERCICIO 🔥
                 </Text>
               </TouchableOpacity>
             </View>
@@ -2686,14 +2982,19 @@ export default function GymScreen() {
           )}
         />
 
-        {/* FOOTER - Estilo ADN */}
-        <View className="border-t border-zinc-800 p-4 bg-black">
+        {/* FOOTER - ED HARDY FIRE STYLE */}
+        <View className="border-t border-fire-red/20 p-4 bg-black">
           <TouchableOpacity
             onPress={() => setModalVisible(true)}
-            className="border border-zinc-700 p-3 rounded-lg items-center flex-row justify-center gap-2"
+            className="p-3 rounded-lg items-center flex-row justify-center gap-2"
+            style={{
+              borderWidth: 1,
+              borderColor: '#F97316',
+              backgroundColor: '#0a0500',
+            }}
           >
-            <Plus color="#DC2626" size={18} />
-            <Text className="text-zinc-300 font-bold text-sm tracking-wider">
+            <Plus color="#F97316" size={18} />
+            <Text className="text-fire-orange font-bold text-sm tracking-wider">
               AGREGAR EJERCICIO
             </Text>
           </TouchableOpacity>
@@ -2718,9 +3019,7 @@ export default function GymScreen() {
               className="bg-zinc-900 rounded-xl p-5 w-full border border-zinc-800"
               onPress={(e) => e.stopPropagation()}
             >
-              <Text className="text-white text-lg font-bold mb-3">
-                Renombrar día {editingDayIndex !== null ? editingDayIndex + 1 : ''}
-              </Text>
+              <Text className="text-white text-lg font-bold mb-3">Renombrar rutina</Text>
               <TextInput
                 value={editingDayName}
                 onChangeText={setEditingDayName}
@@ -2858,11 +3157,22 @@ export default function GymScreen() {
         <View className="flex-1 justify-center items-center px-4">
           {imageToEdit && (
             <View className="w-full aspect-square max-w-[90%]">
-              <Image
-                source={{ uri: imageToEdit }}
-                className="w-full h-full rounded-lg"
-                contentFit="cover"
-              />
+              {mediaType === 'video' ? (
+                // Para videos, usar VideoView
+                <VideoView
+                  player={editorVideoPlayer}
+                  style={{ width: '100%', height: '100%', borderRadius: 8 }}
+                  contentFit="cover"
+                  nativeControls={false}
+                />
+              ) : (
+                // Para fotos, usar Image con style explícito
+                <Image
+                  source={{ uri: imageToEdit }}
+                  style={{ width: '100%', height: '100%', borderRadius: 8 }}
+                  contentFit="cover"
+                />
+              )}
               {/* Overlay con guías de recorte */}
               <View className="absolute inset-0 border-2 border-dashed border-savage-red rounded-lg" />
             </View>
@@ -3551,37 +3861,59 @@ export default function GymScreen() {
   // ============================================================================
   return (
     <GestureHandlerRootView className="flex-1 bg-black">
-      {/* HEADER FIJO - Estilo ADN */}
+      {/* HEADER FIJO - ED HARDY FIRE STYLE */}
       <View className="absolute top-0 left-0 right-0 z-50">
         <LinearGradient
-          colors={['rgba(0,0,0,0.95)', 'rgba(0,0,0,0.8)', 'transparent']}
+          colors={['rgba(10,0,0,0.98)', 'rgba(10,0,0,0.85)', 'transparent']}
           className="px-4 pt-14 pb-6"
         >
           <View className="flex-row items-center justify-between">
             <View className="flex-1">
-              <Text className="text-white text-lg font-bold tracking-wider uppercase">
-                {trainingProgram.days[selectedDayIndex]?.muscleGroups || 'ENTRENAMIENTO'}
+              <Text
+                className="text-fire-orange text-lg font-bold tracking-wider uppercase"
+                style={{
+                  textShadowColor: '#F97316',
+                  textShadowOffset: { width: 0, height: 0 },
+                  textShadowRadius: 8,
+                }}
+              >
+                🔥 {trainingProgram.days[selectedDayIndex]?.muscleGroups || 'ENTRENAMIENTO'}
               </Text>
               <Text className="text-zinc-500 text-xs font-mono mt-0.5">{getCurrentTime()}</Text>
             </View>
             <TouchableOpacity
               onPress={() => setViewMode('STRUCTURE')}
-              className="bg-zinc-900/80 p-2.5 rounded-lg border border-zinc-800"
+              className="p-2.5 rounded-lg"
+              style={{
+                backgroundColor: '#0a0000',
+                borderWidth: 1,
+                borderColor: '#F97316',
+              }}
             >
-              <Sliders color="#DC2626" size={18} />
+              <Sliders color="#F97316" size={18} />
             </TouchableOpacity>
           </View>
         </LinearGradient>
       </View>
 
-      {/* HUD TÁCTICO (Flotante Derecha - Arriba de Hank) */}
-      <View className="absolute right-4 bottom-24 z-40 gap-2">
-        {/* TIMER */}
+      {/* HUD TÁCTICO - Timer justo encima de Spotify (12px gap) */}
+      <View
+        style={{
+          position: 'absolute',
+          right: 16,
+          bottom: 130 + insets.bottom, // Ajustado
+          zIndex: 40,
+        }}
+      >
+        {/* TIMER - Mismo tamaño que Spotify (56x56) */}
         <View>
           {timerActive ? (
             // Cuenta regresiva activa
-            <View className="bg-black/90 p-3 rounded-full border-2 border-savage-red items-center justify-center">
-              <Text className="text-savage-red font-mono font-bold text-xs">
+            <View
+              className="bg-black/90 rounded-full border-2 border-savage-red items-center justify-center"
+              style={{ width: 56, height: 56 }}
+            >
+              <Text className="text-savage-red font-mono font-bold text-sm">
                 {formatTime(timeRemaining)}
               </Text>
             </View>
@@ -3614,12 +3946,13 @@ export default function GymScreen() {
               </TouchableOpacity>
             </View>
           ) : (
-            // Icono normal
+            // Icono normal - 56x56 como Spotify
             <TouchableOpacity
               onPress={() => setTimerExpanded(true)}
-              className="bg-black/80 p-3 rounded-full border border-zinc-800"
+              className="bg-zinc-900 rounded-full border border-zinc-700 items-center justify-center"
+              style={{ width: 56, height: 56 }}
             >
-              <Timer color="#FFFFFF" size={20} />
+              <Timer color="#FFFFFF" size={24} />
             </TouchableOpacity>
           )}
         </View>

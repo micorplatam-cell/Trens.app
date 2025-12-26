@@ -19,7 +19,7 @@ export default function CoachAccessScreen() {
   const handleAccess = () => {
     if (code.toUpperCase() === 'SAVAGE') {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      router.replace('/(tabs)/nucleo');
+      router.replace('/(tabs)/feed');
     } else {
       setError('Código inválido');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);

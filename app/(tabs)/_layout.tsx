@@ -1,6 +1,19 @@
 import { Tabs, usePathname } from 'expo-router';
 import { View, Text } from 'react-native';
-import { Play, User, Crosshair, Dumbbell, Utensils } from 'lucide-react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  Play,
+  User,
+  Crosshair,
+  Dumbbell,
+  Utensils,
+  Warehouse,
+  Flag,
+  Sailboat,
+  Waves,
+  LucideIcon,
+} from 'lucide-react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -12,12 +25,47 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useEffect, useRef } from 'react';
 import { useAuth } from '../_layout';
+import { useSport } from '../../context/SportContext';
 import FloatingLoginButton from '../../components/auth/FloatingLoginButton';
 import { HankOverlay } from '../../components/hank/HankOverlay';
 import { SpotifyOverlay } from '../../components/spotify/SpotifyOverlay';
 
+// ============================================================================
+// ED HARDY COLORS
+// ============================================================================
+const ED_HARDY = {
+  black: '#000000',
+  fireRed: '#DC2626',
+  fireOrange: '#F97316',
+  fireGold: '#FBBF24',
+  dragonGreen: '#22C55E',
+  dragonBlue: '#0EA5E9',
+  neonRed: '#FF3B3B',
+  zinc800: '#27272a',
+  zinc600: '#52525b',
+};
+
+// ============================================================================
+// MAPA DE ICONOS POR NOMBRE
+// ============================================================================
+const ICON_MAP: Record<string, LucideIcon> = {
+  Play,
+  User,
+  Crosshair,
+  Dumbbell,
+  Utensils,
+  Warehouse,
+  Flag,
+  Sailboat,
+  Waves,
+};
+
+const getIconComponent = (iconName: string): LucideIcon => {
+  return ICON_MAP[iconName] || Dumbbell;
+};
+
 // Hook para detectar módulo anterior y si PRO está activo
-function useProContext() {
+function useProNavigation() {
   const pathname = usePathname();
   const previousModuleRef = useRef<string | null>(null);
   const isProActive = pathname === '/pro' || pathname === '/pro/index';
@@ -41,12 +89,14 @@ function SyncedGlowIcon({
   size,
   isSource,
   fill,
+  accentColor = '#DC2626',
 }: {
   Icon: any;
   color: string;
   size: number;
   isSource: boolean;
   fill?: string;
+  accentColor?: string;
 }) {
   const glowOpacity = useSharedValue(0);
   const glowScale = useSharedValue(1);
@@ -81,7 +131,7 @@ function SyncedGlowIcon({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#DC2626',
+    backgroundColor: accentColor,
     opacity: glowOpacity.value * 0.5,
     transform: [{ scale: glowScale.value }],
   }));
@@ -89,7 +139,11 @@ function SyncedGlowIcon({
   return (
     <View style={{ alignItems: 'center', justifyContent: 'center' }}>
       <Animated.View style={glowStyle} />
-      <Icon color={isSource ? '#DC2626' : color} size={size} fill={isSource ? '#DC2626' : fill} />
+      <Icon
+        color={isSource ? accentColor : color}
+        size={size}
+        fill={isSource ? accentColor : fill}
+      />
     </View>
   );
 }
@@ -206,9 +260,19 @@ function ConnectionLine({
 }
 
 export default function TabsLayout() {
-  const { isProActive, previousModule } = useProContext();
+  const { isProActive, previousModule } = useProNavigation();
   const { user, loading } = useAuth();
   const pathname = usePathname();
+  const insets = useSafeAreaInsets();
+
+  // Obtener configuración de tabs según deporte activo
+  const { activeSport, getTabConfig } = useSport();
+  const tabConfig = getTabConfig();
+
+  // Iconos dinámicos para tabs 4 y 5
+  const Tab4Icon = getIconComponent(tabConfig.tab4.icon);
+  const Tab5Icon = getIconComponent(tabConfig.tab5.icon);
+  const sportColor = tabConfig.color;
 
   // Determinar si mostrar el botón flotante de login
   // Solo mostrar si: NO hay usuario autenticado Y NO estamos en Feed o PRO
@@ -228,39 +292,54 @@ export default function TabsLayout() {
     return previousModule.includes(routeName);
   };
 
+  // Altura dinámica del tab bar basada en safe area
+  const tabBarHeight = 56 + insets.bottom;
+
   return (
     <>
       <Tabs
         screenOptions={{
           headerShown: false,
           tabBarStyle: {
-            backgroundColor: '#000000',
-            borderTopColor: '#27272a',
+            backgroundColor: ED_HARDY.black,
+            borderTopColor: ED_HARDY.zinc800,
             borderTopWidth: 1,
-            height: 85,
-            paddingBottom: 25,
-            paddingTop: 10,
+            height: tabBarHeight,
+            paddingBottom: insets.bottom + 4,
+            paddingTop: 8,
             overflow: 'visible',
+            // ED HARDY: Subtle fire glow from bottom
+            shadowColor: ED_HARDY.fireOrange,
+            shadowOffset: { width: 0, height: -2 },
+            shadowOpacity: 0.15,
+            shadowRadius: 10,
+            elevation: 10,
           },
-          tabBarActiveTintColor: '#DC2626',
-          tabBarInactiveTintColor: '#71717a',
+          tabBarActiveTintColor: sportColor,
+          tabBarInactiveTintColor: ED_HARDY.zinc600,
           tabBarLabelStyle: {
             fontSize: 10,
-            fontWeight: '600',
-            letterSpacing: 1,
+            fontWeight: '700',
+            letterSpacing: 1.5,
+            textTransform: 'uppercase',
           },
           tabBarBackground: () => (
-            <View style={{ flex: 1, backgroundColor: '#000000' }}>
+            <LinearGradient
+              colors={['#0a0505', '#000000', '#000000']}
+              start={{ x: 0.5, y: 0 }}
+              end={{ x: 0.5, y: 1 }}
+              style={{ flex: 1 }}
+            >
               <ConnectionLine isVisible={isProActive} sourceIndex={getSourceIndex()} />
-            </View>
+            </LinearGradient>
           ),
         }}
       >
-        {/* FEED - Pantalla principal (TikTok-style) */}
+        {/* TRENS - Pantalla principal (TikTok-style feed) */}
         <Tabs.Screen
           name="feed/index"
           options={{
-            title: 'FEED',
+            title: 'TRENS',
             tabBarIcon: ({ color }) => (
               <SyncedGlowIcon
                 Icon={Play}
@@ -289,7 +368,7 @@ export default function TabsLayout() {
           }}
         />
 
-        {/* PRO - Botón central de cámara (sin efecto pulsante) */}
+        {/* PRO - Botón central de cámara con FIRE GLOW */}
         <Tabs.Screen
           name="pro/index"
           options={{
@@ -299,56 +378,80 @@ export default function TabsLayout() {
                 style={{
                   padding: 16,
                   borderRadius: 999,
-                  backgroundColor: focused ? '#DC2626' : '#27272a',
+                  backgroundColor: focused ? ED_HARDY.fireRed : ED_HARDY.zinc800,
                   marginBottom: 20,
-                  shadowColor: focused ? '#DC2626' : 'transparent',
-                  shadowOffset: { width: 0, height: 4 },
-                  shadowOpacity: focused ? 0.5 : 0,
-                  shadowRadius: 8,
-                  elevation: focused ? 8 : 0,
+                  // ED HARDY: Intense fire glow when active
+                  shadowColor: focused ? ED_HARDY.neonRed : 'transparent',
+                  shadowOffset: { width: 0, height: 0 },
+                  shadowOpacity: focused ? 0.8 : 0,
+                  shadowRadius: 15,
+                  elevation: focused ? 15 : 0,
+                  // Fire border
+                  borderWidth: focused ? 2 : 0,
+                  borderColor: ED_HARDY.fireOrange,
                 }}
               >
-                <Crosshair color="#FFFFFF" size={28} />
+                <Crosshair color="#FFFFFF" size={28} strokeWidth={2.5} />
               </View>
             ),
           }}
         />
 
-        {/* GYM - Ejercicios */}
+        {/* GYM/GARAGE/QUIVER - Dinámico según deporte */}
         <Tabs.Screen
           name="gym/index"
           options={{
-            title: 'GYM',
+            title: tabConfig.tab4.name,
             tabBarIcon: ({ color }) => (
               <SyncedGlowIcon
-                Icon={Dumbbell}
+                Icon={Tab4Icon}
                 color={color}
                 size={26}
                 isSource={isSourceModule('gym')}
+                accentColor={sportColor}
               />
             ),
           }}
         />
 
-        {/* PLAN - Nutrición */}
+        {/* PLAN/TRACK/WAVES - Dinámico según deporte */}
         <Tabs.Screen
           name="plan/index"
           options={{
-            title: 'PLAN',
+            title: tabConfig.tab5.name,
             tabBarIcon: ({ color }) => (
               <SyncedGlowIcon
-                Icon={Utensils}
+                Icon={Tab5Icon}
                 color={color}
                 size={26}
                 isSource={isSourceModule('plan')}
+                accentColor={sportColor}
               />
             ),
           }}
         />
 
-        {/* NUCLEO - Oculto (integrado en ADN) */}
+        {/* Rutas ocultas - Se renderizan condicionalmente desde gym/plan */}
         <Tabs.Screen
-          name="nucleo/index"
+          name="garaje/index"
+          options={{
+            href: null,
+          }}
+        />
+        <Tabs.Screen
+          name="race/index"
+          options={{
+            href: null,
+          }}
+        />
+        <Tabs.Screen
+          name="tabla/index"
+          options={{
+            href: null,
+          }}
+        />
+        <Tabs.Screen
+          name="spot/index"
           options={{
             href: null,
           }}

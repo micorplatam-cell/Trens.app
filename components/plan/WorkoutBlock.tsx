@@ -85,7 +85,7 @@ const getTypeIcon = (type: string, color: string) => {
 };
 
 // ============================================================================
-// EXERCISE CARD - Muestra imagen o primer frame del video
+// EXERCISE CARD - Muestra imagen o primer frame del video con nombre
 // ============================================================================
 interface ExerciseCardProps {
   exercise: Exercise;
@@ -103,7 +103,8 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, onPress })
 
   return (
     <Pressable onPress={onPress} className="mr-3 items-center active:scale-95">
-      <View className="w-20 h-20 bg-zinc-800 rounded-xl items-center justify-center border border-zinc-700 overflow-hidden">
+      {/* Thumbnail */}
+      <View className="w-20 h-20 bg-zinc-900 rounded-xl items-center justify-center border-2 border-red-500/30 overflow-hidden">
         {exercise.imageUrl ? (
           <Image source={{ uri: exercise.imageUrl }} className="w-full h-full" resizeMode="cover" />
         ) : exercise.videoUrl ? (
@@ -115,17 +116,18 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, onPress })
             allowsFullscreen={false}
           />
         ) : (
-          <View className="items-center justify-center p-1">
-            <Dumbbell size={24} color="#DC2626" />
-            <Text
-              className="text-zinc-400 text-[9px] text-center mt-1 font-medium"
-              numberOfLines={2}
-            >
-              {exercise.name}
-            </Text>
+          <View className="items-center justify-center">
+            <Dumbbell size={28} color="#DC2626" />
           </View>
         )}
       </View>
+      {/* Exercise Name */}
+      <Text
+        className="text-zinc-400 text-[10px] text-center mt-1.5 font-medium w-20"
+        numberOfLines={2}
+      >
+        {exercise.name}
+      </Text>
     </Pressable>
   );
 };
@@ -175,25 +177,40 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
   }));
 
   // ============================================================================
-  // MODO COMPRIMIDO - Para drag & drop
+  // MODO COMPRIMIDO - Para drag & drop - ED HARDY FIRE
   // ============================================================================
   if (isCompressed) {
     return (
       <View className="mb-3">
-        <View className="bg-[#1a1a1a] border-2 border-red-500/40 rounded-xl px-4 py-4 flex-row items-center justify-between shadow-lg">
+        <View
+          className="rounded-xl px-4 py-4 flex-row items-center justify-between"
+          style={{
+            backgroundColor: '#0a0505',
+            borderWidth: 2,
+            borderColor: '#DC262660',
+            shadowColor: '#DC2626',
+            shadowOffset: { width: 0, height: 0 },
+            shadowOpacity: 0.3,
+            shadowRadius: 10,
+            elevation: 5,
+          }}
+        >
           <View className="flex-row items-center gap-3">
-            <View className="bg-red-500/20 p-2 rounded-lg">
-              <GripHorizontal size={18} color="#DC2626" />
+            <View className="p-2 rounded-lg" style={{ backgroundColor: '#DC262630' }}>
+              <GripHorizontal size={18} color="#F97316" />
             </View>
             <View>
-              <Text className="text-red-500 text-xs font-bold tracking-widest uppercase">
-                BLOQUE ENTRENO
+              <Text
+                style={{ color: '#F97316' }}
+                className="text-xs font-bold tracking-widest uppercase"
+              >
+                🔥 BLOQUE ENTRENO
               </Text>
               <Text className="text-white font-bold text-base mt-0.5">{data.routineName}</Text>
             </View>
           </View>
-          <View className="bg-red-500/20 px-3 py-1.5 rounded-lg">
-            <Text className="text-red-400 text-sm font-mono">
+          <View className="px-3 py-1.5 rounded-lg" style={{ backgroundColor: '#F9731620' }}>
+            <Text style={{ color: '#F97316' }} className="text-sm font-mono font-bold">
               {data.exercises?.length || 0} ejercicios
             </Text>
           </View>
@@ -318,12 +335,22 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
           {/* ============================================ */}
           {/* ROUTINE - Slider de ejercicios */}
           {/* ============================================ */}
-          <View className="my-4 py-4 border-y border-white/10 bg-[#111111] -mx-4 px-4">
-            <View className="flex-row items-center justify-center gap-2 mb-3">
-              <Dumbbell size={18} color="#DC2626" />
-              <Text className="text-2xl text-white font-black italic uppercase tracking-tighter text-center">
-                {data.routineName || 'DÍA DE DESCANSO'}
-              </Text>
+          <View className="my-4 py-4 border-y border-red-500/20 bg-[#0a0505] -mx-4 px-4">
+            {/* Header con nombre de rutina y contador */}
+            <View className="flex-row items-center justify-between mb-3 px-1">
+              <View className="flex-row items-center gap-2">
+                <Dumbbell size={18} color="#DC2626" />
+                <Text className="text-xl text-white font-black italic uppercase tracking-tight">
+                  {data.routineName || 'DÍA DE DESCANSO'}
+                </Text>
+              </View>
+              {hasExercises && (
+                <View className="bg-red-500/20 px-2 py-1 rounded-lg">
+                  <Text className="text-red-500 text-xs font-mono font-bold">
+                    {data.exercises!.length} ejercicios
+                  </Text>
+                </View>
+              )}
             </View>
 
             {hasExercises ? (
@@ -331,7 +358,7 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 className="mt-2"
-                contentContainerStyle={{ paddingHorizontal: 4 }}
+                contentContainerStyle={{ paddingHorizontal: 4, paddingVertical: 4 }}
               >
                 {data.exercises!.map((ex, index) => (
                   <ExerciseCard key={ex.id} exercise={ex} index={index} onPress={onPressRoutine} />

@@ -12,7 +12,7 @@ import {
   Alert,
   Share,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   Grid,
@@ -32,6 +32,7 @@ import {
 import * as Haptics from 'expo-haptics';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { supabase } from '../../../lib/supabase';
+import cloudflareStream from '../../../services/cloudflare/stream';
 import { useUserRoleContext } from '../../../context/UserRoleContext';
 import { useHank } from '../../../context/HankContext';
 import { useSaveGuard } from '../../_layout';
@@ -39,6 +40,7 @@ import spotify from '../../../services/spotify/spotify';
 import TrensID from '../../../components/adn/TrensID';
 import RecordCard from '../../../components/adn/RecordCard';
 import AddRecordModal from '../../../components/adn/AddRecordModal';
+import { SportSwitcher } from '../../../components/adn/SportSwitcher';
 import { ProUpgradeModal } from '../../../components/pro/ProUpgradeModal';
 import { ShareModal } from '../../../components/share/ShareModal';
 
@@ -88,6 +90,7 @@ interface Video {
   title: string;
   thumbnail_url: string;
   video_url?: string;
+  cloudflare_video_id?: string;
   is_public: boolean;
   views?: number;
   created_at: string;
@@ -129,7 +132,7 @@ const VideoThumbnail = ({ videoUrl, size }: { videoUrl: string; size: number }) 
 // ============================================================================
 export default function AdnScreen() {
   const { user, isPro, isAuthenticated, spotifyPremium } = useUserRoleContext();
-  const { refreshTrigger } = useHank();
+  const { refreshTrigger, setScreenContext } = useHank();
   const { canSave } = useSaveGuard();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -150,6 +153,18 @@ export default function AdnScreen() {
 
   // Share modal state
   const [shareModalVisible, setShareModalVisible] = useState(false);
+
+  // Sincronizar contexto con HANK
+  useFocusEffect(
+    useCallback(() => {
+      setScreenContext({
+        module: 'adn',
+        viewMode: activeTab,
+        currentExerciseIndex: null,
+        currentTrainingDay: 0,
+      });
+    }, [activeTab, setScreenContext])
+  );
 
   // Video player para el viewer
   const videoSource = selectedVideo?.video_url || '';
@@ -315,6 +330,7 @@ export default function AdnScreen() {
         title: video.exercise_name || video.free_text || 'Video PRO',
         thumbnail_url: video.thumbnail_url || video.video_url,
         video_url: video.video_url,
+        cloudflare_video_id: video.cloudflare_video_id,
         is_public: video.is_public,
         created_at: video.created_at,
         source: 'pro' as const,
@@ -423,6 +439,21 @@ export default function AdnScreen() {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
 
             try {
+              // 1. Eliminar de Cloudflare Stream si existe
+              if (video.cloudflare_video_id) {
+                console.warn(
+                  '🗑️ Eliminando video de Cloudflare Stream:',
+                  video.cloudflare_video_id
+                );
+                const deleted = await cloudflareStream.deleteVideo(video.cloudflare_video_id);
+                if (deleted) {
+                  console.warn('✅ Video eliminado de Cloudflare Stream');
+                } else {
+                  console.warn('⚠️ No se pudo eliminar de Cloudflare Stream');
+                }
+              }
+
+              // 2. Eliminar de la base de datos
               if (video.source === 'pro') {
                 const { error } = await supabase.from('pro_videos').delete().eq('id', video.id);
 
@@ -437,7 +468,7 @@ export default function AdnScreen() {
                 if (error) throw error;
               }
 
-              // Eliminar de personal_records si está vinculado
+              // 3. Eliminar de personal_records si está vinculado
               await supabase.from('personal_records').delete().eq('video_id', video.id);
 
               setVideos((prev) => prev.filter((v) => v.id !== video.id));
@@ -546,49 +577,106 @@ export default function AdnScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#DC2626" />
         }
       >
-        {/* HEADER (PÚBLICO) */}
+        {/* HEADER (PÚBLICO) - ED HARDY FIRE STYLE */}
         <View className="relative pt-16 pb-20 px-6 items-center">
+          {/* Fire Gradient Background */}
           <LinearGradient
-            colors={['#1a1a1a', '#000000']}
+            colors={['#1a0a0a', '#0a0000', '#000000']}
             start={{ x: 0.5, y: 0 }}
             end={{ x: 0.5, y: 1 }}
-            className="absolute inset-0 opacity-30"
+            className="absolute inset-0"
           />
 
-          {/* Avatar */}
-          <View className="w-24 h-24 rounded-full bg-zinc-900 mb-4 overflow-hidden">
-            {profile?.avatar_url ? (
-              <Image
-                source={{ uri: profile.avatar_url }}
-                className="w-full h-full"
-                resizeMode="cover"
-              />
-            ) : (
-              <View className="w-full h-full bg-savage-red items-center justify-center">
-                <Text className="text-white text-4xl font-black">
-                  {profile?.display_name?.charAt(0) || 'A'}
-                </Text>
-              </View>
-            )}
+          {/* Subtle fire glow at top */}
+          <View
+            className="absolute top-0 left-0 right-0 h-32"
+            style={{
+              backgroundColor: 'rgba(220, 38, 38, 0.08)',
+              shadowColor: '#DC2626',
+              shadowOffset: { width: 0, height: 10 },
+              shadowOpacity: 0.3,
+              shadowRadius: 30,
+            }}
+          />
+
+          {/* Avatar con Fire Ring */}
+          <View
+            className="w-28 h-28 rounded-full mb-4 items-center justify-center"
+            style={{
+              borderWidth: 3,
+              borderColor: '#F97316',
+              shadowColor: '#F97316',
+              shadowOffset: { width: 0, height: 0 },
+              shadowOpacity: 0.8,
+              shadowRadius: 15,
+              elevation: 10,
+            }}
+          >
+            <View className="w-24 h-24 rounded-full bg-zinc-900 overflow-hidden">
+              {profile?.avatar_url ? (
+                <Image
+                  source={{ uri: profile.avatar_url }}
+                  className="w-full h-full"
+                  resizeMode="cover"
+                />
+              ) : (
+                <LinearGradient
+                  colors={['#DC2626', '#F97316']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  className="w-full h-full items-center justify-center"
+                >
+                  <Text className="text-white text-4xl font-black">
+                    {profile?.display_name?.charAt(0) || 'A'}
+                  </Text>
+                </LinearGradient>
+              )}
+            </View>
           </View>
 
-          {/* Nombre */}
-          <Text className="text-3xl font-black text-white uppercase tracking-tight mb-1">
+          {/* Nombre con Fire Glow */}
+          <Text
+            className="text-3xl font-black text-white uppercase tracking-tight mb-1"
+            style={{
+              textShadowColor: '#F97316',
+              textShadowOffset: { width: 0, height: 0 },
+              textShadowRadius: 10,
+            }}
+          >
             {profile?.display_name || 'ATLETA'}
           </Text>
 
           {/* Seguidores */}
           <Text className="text-xs font-bold text-zinc-500 uppercase tracking-widest">
-            SEGUIDORES: <Text className="text-zinc-300">{formatFollowers(followersCount)}</Text>
+            SEGUIDORES:{' '}
+            <Text className="text-fire-orange font-mono">{formatFollowers(followersCount)}</Text>
           </Text>
 
-          {/* Badge PRO/FREE */}
+          {/* Badge PRO/FREE con Fire Style */}
           <View
-            className={`mt-3 px-3 py-1 rounded-full ${isPro ? 'bg-savage-red' : 'bg-zinc-800'}`}
+            className={`mt-3 px-4 py-1.5 rounded-full ${isPro ? '' : 'bg-zinc-800'}`}
+            style={
+              isPro
+                ? {
+                    backgroundColor: '#0a0000',
+                    borderWidth: 2,
+                    borderColor: '#F97316',
+                    shadowColor: '#DC2626',
+                    shadowOffset: { width: 0, height: 0 },
+                    shadowOpacity: 0.8,
+                    shadowRadius: 10,
+                  }
+                : {}
+            }
           >
-            <Text className={`text-xs font-bold ${isPro ? 'text-white' : 'text-zinc-500'}`}>
-              {isPro ? '⚡ PRO' : '🔒 FREE'}
+            <Text className={`text-xs font-bold ${isPro ? 'text-fire-orange' : 'text-zinc-500'}`}>
+              {isPro ? '🔥 PRO' : '🔒 FREE'}
             </Text>
+          </View>
+
+          {/* Sport Switcher */}
+          <View className="mt-4">
+            <SportSwitcher />
           </View>
         </View>
 
@@ -638,16 +726,23 @@ export default function AdnScreen() {
           )}
         </View>
 
-        {/* RECORDS (PÚBLICO) - Solo de videos públicos según MASTER */}
+        {/* RECORDS (PÚBLICO) - ED HARDY FIRE STYLE */}
         <View className={`px-4 ${!isOwner ? 'mt-8' : ''}`}>
-          <View className="flex-row justify-between items-center mb-3 border-b border-zinc-900 pb-2">
+          <View className="flex-row justify-between items-center mb-3 border-b border-fire-red/30 pb-2">
             <View className="flex-row items-center gap-2">
-              <View className="w-1.5 h-1.5 bg-savage-red rounded-sm" />
-              <Text className="text-white font-bold uppercase tracking-widest text-xs">
+              <Text className="text-fire-orange text-sm">🔥</Text>
+              <Text
+                className="text-fire-orange font-bold uppercase tracking-widest text-xs"
+                style={{
+                  textShadowColor: '#F97316',
+                  textShadowOffset: { width: 0, height: 0 },
+                  textShadowRadius: 5,
+                }}
+              >
                 Top 3 Récords
               </Text>
             </View>
-            <Text className="text-zinc-600 text-xs">Solo videos públicos</Text>
+            <Text className="text-zinc-600 text-xs font-mono">VIDEOS PÚBLICOS</Text>
           </View>
 
           <View className="flex-row gap-2">
@@ -669,12 +764,25 @@ export default function AdnScreen() {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                   setShowAddModal(true);
                 }}
-                className="flex-1 min-h-[160px] border border-dashed border-zinc-800 rounded items-center justify-center"
+                className="flex-1 min-h-[160px] rounded items-center justify-center"
+                style={{
+                  borderWidth: 1,
+                  borderColor: '#F97316',
+                  borderStyle: 'dashed',
+                  backgroundColor: '#0a0500',
+                }}
               >
-                <View className="w-10 h-10 rounded-full bg-[#111] items-center justify-center mb-2">
-                  <Plus size={18} color="#71717a" />
+                <View
+                  className="w-10 h-10 rounded-full items-center justify-center mb-2"
+                  style={{
+                    backgroundColor: '#1a0a00',
+                    borderWidth: 1,
+                    borderColor: '#F97316',
+                  }}
+                >
+                  <Plus size={18} color="#F97316" />
                 </View>
-                <Text className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest">
+                <Text className="text-[10px] font-bold text-fire-orange uppercase tracking-widest">
                   Elegir
                 </Text>
               </TouchableOpacity>
@@ -682,8 +790,8 @@ export default function AdnScreen() {
           </View>
         </View>
 
-        {/* TABS */}
-        <View className="mt-12 border-t border-zinc-900">
+        {/* TABS - ED HARDY FIRE STYLE */}
+        <View className="mt-12 border-t border-fire-red/20">
           <View className="flex-row">
             {/* LEGADO (Videos públicos) */}
             <TouchableOpacity
@@ -692,19 +800,32 @@ export default function AdnScreen() {
                 setActiveTab('legacy');
               }}
               className={`flex-1 py-4 flex-row items-center justify-center gap-2 ${
-                activeTab === 'legacy' ? 'border-t-2 border-white bg-zinc-900/20' : ''
+                activeTab === 'legacy' ? 'border-t-2 border-fire-orange' : ''
               }`}
+              style={
+                activeTab === 'legacy'
+                  ? {
+                      backgroundColor: 'rgba(249, 115, 22, 0.1)',
+                    }
+                  : {}
+              }
             >
-              <Grid size={14} color={activeTab === 'legacy' ? '#fff' : '#52525b'} />
+              <Grid size={14} color={activeTab === 'legacy' ? '#F97316' : '#52525b'} />
               <Text
                 className={`text-[10px] font-bold uppercase tracking-[0.2em] ${
-                  activeTab === 'legacy' ? 'text-white' : 'text-zinc-600'
+                  activeTab === 'legacy' ? 'text-fire-orange' : 'text-zinc-600'
                 }`}
               >
                 Legado
               </Text>
-              <View className="bg-zinc-800 px-1.5 py-0.5 rounded">
-                <Text className="text-zinc-500 text-[9px] font-bold">{publicVideos.length}</Text>
+              <View
+                className={`px-1.5 py-0.5 rounded ${activeTab === 'legacy' ? 'bg-fire-red/30' : 'bg-zinc-800'}`}
+              >
+                <Text
+                  className={`text-[9px] font-bold font-mono ${activeTab === 'legacy' ? 'text-fire-orange' : 'text-zinc-500'}`}
+                >
+                  {publicVideos.length}
+                </Text>
               </View>
             </TouchableOpacity>
 
@@ -720,26 +841,39 @@ export default function AdnScreen() {
                   setActiveTab('vault');
                 }}
                 className={`flex-1 py-4 flex-row items-center justify-center gap-2 ${
-                  activeTab === 'vault' ? 'border-t-2 border-savage-red bg-red-900/10' : ''
+                  activeTab === 'vault' ? 'border-t-2 border-fire-red' : ''
                 }`}
+                style={
+                  activeTab === 'vault'
+                    ? {
+                        backgroundColor: 'rgba(220, 38, 38, 0.1)',
+                      }
+                    : {}
+                }
               >
                 <Lock size={14} color={activeTab === 'vault' ? '#DC2626' : '#52525b'} />
                 <Text
                   className={`text-[10px] font-bold uppercase tracking-[0.2em] ${
-                    activeTab === 'vault' ? 'text-white' : 'text-zinc-600'
+                    activeTab === 'vault' ? 'text-fire-red' : 'text-zinc-600'
                   }`}
                 >
                   Bóveda
                 </Text>
-                <View className="bg-zinc-800 px-1.5 py-0.5 rounded">
-                  <Text className="text-zinc-500 text-[9px] font-bold">{vaultVideos.length}</Text>
+                <View
+                  className={`px-1.5 py-0.5 rounded ${activeTab === 'vault' ? 'bg-fire-red/30' : 'bg-zinc-800'}`}
+                >
+                  <Text
+                    className={`text-[9px] font-bold font-mono ${activeTab === 'vault' ? 'text-fire-red' : 'text-zinc-500'}`}
+                  >
+                    {vaultVideos.length}
+                  </Text>
                 </View>
               </TouchableOpacity>
             )}
           </View>
 
           {/* CONTENIDO TABS */}
-          <View className="bg-[#050505] min-h-[300px]">
+          <View className="bg-[#030000] min-h-[300px]">
             {/* LEGADO - Grid de videos públicos */}
             {activeTab === 'legacy' && (
               <View className="flex-row flex-wrap">

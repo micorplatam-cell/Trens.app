@@ -44,6 +44,9 @@ export type HankToolName =
   | 'PLAN_UPDATE_SUPPLEMENT_TIME'
   | 'PLAN_GET_STACK'
   | 'PLAN_ANALYZE_NUTRITION'
+  | 'PLAN_GET_NEXT_MEAL'
+  // Spotify Tools
+  | 'SPOTIFY_GET_CURRENT_TRACK'
   // Diet Tools (Legacy)
   | 'DIET_UPDATE_MEAL'
   | 'DIET_ADD_CALORIES'
@@ -52,7 +55,27 @@ export type HankToolName =
   // Context Tools
   | 'GET_USER_CONTEXT'
   // System Tools
-  | 'HANK_CLEAR_HISTORY';
+  | 'HANK_CLEAR_HISTORY'
+  // INVENTORY Tools (MOTO/AUTO/SURF)
+  | 'INVENTORY_ADD_ITEM'
+  | 'INVENTORY_UPDATE_ITEM'
+  | 'INVENTORY_REMOVE_ITEM'
+  | 'INVENTORY_LIST_ITEMS'
+  // MAINTENANCE Tools (MOTO/AUTO)
+  | 'MAINTENANCE_LOG'
+  | 'MAINTENANCE_GET_ALERTS'
+  | 'MAINTENANCE_GET_HISTORY'
+  // EVENT Tools (MOTO/AUTO)
+  | 'EVENT_CREATE'
+  | 'EVENT_UPDATE'
+  | 'EVENT_DELETE'
+  | 'EVENT_LIST'
+  // SURF Tools
+  | 'SURF_LOG_SESSION'
+  | 'SURF_GET_SESSIONS'
+  | 'SURF_GET_CONDITIONS'
+  | 'SURF_FAVORITE_SPOT'
+  | 'SURF_GET_SPOTS';
 
 // ============================================================================
 // TOOL PARAMETER DEFINITIONS (Para Function Calling del LLM)
@@ -91,8 +114,17 @@ export interface HankToolResult {
 // ============================================================================
 // CONTEXT TYPES - El cerebro de HANK
 // ============================================================================
-export type ScreenModule = 'nucleo' | 'gym' | 'plan' | 'pro' | 'adn';
-export type SportMode = 'BODYBUILDING' | 'POWERLIFTING' | 'CROSSFIT' | 'MOTO' | 'SURF' | null;
+export type ScreenModule =
+  | 'nucleo'
+  | 'gym'
+  | 'plan'
+  | 'pro'
+  | 'adn'
+  | 'garaje'
+  | 'race'
+  | 'tabla'
+  | 'spot';
+export type SportMode = 'GYM' | 'MOTO' | 'AUTO' | 'SURF' | null;
 export type UserLevel = 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED' | 'SAVAGE';
 
 export interface ScreenContext {

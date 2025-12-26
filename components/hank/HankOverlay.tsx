@@ -18,6 +18,7 @@ import {
   Pressable,
   PanResponder,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -47,6 +48,7 @@ import { useVoiceInput } from '../../hooks/useVoiceInput';
 import { callGemini } from '../../services/hank/gemini';
 import { supabase } from '../../lib/supabase';
 import { useSaveGuard } from '../../context/SaveGuardContext';
+import { calculateFabPositions } from '../../constants/floatingTools';
 import type { HankToolResult, HankToolCall } from '../../types/hank';
 
 // ============================================================================
@@ -102,7 +104,17 @@ const HankFAB: React.FC<{
   onLongPressEnd: () => void;
   isProcessing: boolean;
   isListening: boolean;
-}> = ({ onPress, onLongPressStart, onLongPressEnd, isProcessing, isListening }) => {
+  bottomOffset: number;
+  rightOffset: number;
+}> = ({
+  onPress,
+  onLongPressStart,
+  onLongPressEnd,
+  isProcessing,
+  isListening,
+  bottomOffset,
+  rightOffset,
+}) => {
   // Breathing animation
   const breathe = useSharedValue(0);
   // Processing spin animation
@@ -211,24 +223,41 @@ const HankFAB: React.FC<{
   }, [onPress, onLongPressEnd]);
 
   return (
-    <View style={{ position: 'absolute', bottom: 100, right: 20, zIndex: 1000 }}>
-      {/* Pulse ring effect when listening */}
+    <View style={{ position: 'absolute', bottom: bottomOffset, right: rightOffset, zIndex: 1000 }}>
+      {/* Pulse ring effect when listening - ED HARDY FIRE RINGS */}
       {isListening && (
-        <Animated.View
-          style={[
-            {
-              position: 'absolute',
-              width: 60,
-              height: 60,
-              borderRadius: 30,
-              borderWidth: 3,
-              borderColor: '#DC2626',
-              left: 0,
-              top: 0,
-            },
-            pulseRingStyle,
-          ]}
-        />
+        <>
+          <Animated.View
+            style={[
+              {
+                position: 'absolute',
+                width: 60,
+                height: 60,
+                borderRadius: 30,
+                borderWidth: 3,
+                borderColor: '#F97316',
+                left: 0,
+                top: 0,
+              },
+              pulseRingStyle,
+            ]}
+          />
+          <Animated.View
+            style={[
+              {
+                position: 'absolute',
+                width: 80,
+                height: 80,
+                borderRadius: 40,
+                borderWidth: 2,
+                borderColor: '#DC262680',
+                left: -10,
+                top: -10,
+              },
+              pulseRingStyle,
+            ]}
+          />
+        </>
       )}
 
       <AnimatedPressable
@@ -239,17 +268,20 @@ const HankFAB: React.FC<{
             width: 60,
             height: 60,
             borderRadius: 30,
-            backgroundColor: isListening ? '#DC2626' : '#000000',
+            backgroundColor: isListening ? '#DC2626' : '#0a0505',
             alignItems: 'center',
             justifyContent: 'center',
-            shadowColor: '#DC2626',
+            // ED HARDY: Intense fire glow
+            shadowColor: isListening ? '#FF3B3B' : '#F97316',
             shadowOffset: { width: 0, height: 0 },
-            elevation: 10,
+            shadowOpacity: isListening ? 0.9 : 0.6,
+            shadowRadius: isListening ? 20 : 15,
+            elevation: 15,
           },
           glowStyle,
         ]}
       >
-        {/* Animated Border */}
+        {/* Animated Border - FIRE GRADIENT EFFECT */}
         <Animated.View
           style={[
             {
@@ -257,25 +289,25 @@ const HankFAB: React.FC<{
               width: 64,
               height: 64,
               borderRadius: 32,
-              borderWidth: 2,
-              borderColor: isListening ? '#FFFFFF' : '#DC2626',
+              borderWidth: isListening ? 3 : 2,
+              borderColor: isListening ? '#FBBF24' : '#F97316',
               borderStyle: 'solid',
-              borderTopColor: isProcessing ? '#DC2626' : isListening ? '#FFFFFF' : '#DC2626',
-              borderRightColor: isProcessing ? 'transparent' : isListening ? '#FFFFFF' : '#DC2626',
-              borderBottomColor: isProcessing ? 'transparent' : isListening ? '#FFFFFF' : '#DC2626',
-              borderLeftColor: isProcessing ? 'transparent' : isListening ? '#FFFFFF' : '#DC2626',
+              borderTopColor: isProcessing ? '#F97316' : isListening ? '#FBBF24' : '#F97316',
+              borderRightColor: isProcessing ? 'transparent' : isListening ? '#F97316' : '#DC2626',
+              borderBottomColor: isProcessing ? 'transparent' : isListening ? '#DC2626' : '#DC2626',
+              borderLeftColor: isProcessing ? 'transparent' : isListening ? '#F97316' : '#F97316',
             },
             borderStyle,
           ]}
         />
 
-        {/* Icon */}
+        {/* Icon - ED HARDY COLORS */}
         {isListening ? (
           <Mic size={28} color="#FFFFFF" />
         ) : isProcessing ? (
-          <Sparkles size={28} color="#DC2626" />
+          <Sparkles size={28} color="#F97316" />
         ) : (
-          <Bot size={28} color="#DC2626" />
+          <Bot size={28} color="#F97316" />
         )}
       </AnimatedPressable>
     </View>
@@ -283,40 +315,46 @@ const HankFAB: React.FC<{
 };
 
 // ============================================================================
-// CHAT MESSAGE BUBBLE
+// CHAT MESSAGE BUBBLE - ED HARDY STYLE
 // ============================================================================
 const MessageBubble: React.FC<{ message: ChatMessage }> = ({ message }) => {
   const isUser = message.role === 'user';
 
   return (
     <View className={`max-w-[85%] mb-3 ${isUser ? 'self-end' : 'self-start'}`}>
-      {/* Label */}
+      {/* Label - ED HARDY FIRE */}
       <Text
-        className={`text-xs font-mono mb-1 ${isUser ? 'text-zinc-500 text-right' : 'text-red-500'}`}
+        className={`text-xs font-mono mb-1 font-bold tracking-wider ${isUser ? 'text-zinc-500 text-right' : ''}`}
+        style={{ color: isUser ? '#71717a' : '#F97316' }}
       >
-        {isUser ? 'TÚ' : 'HANK'}
+        {isUser ? 'TÚ' : '🔥 HANK'}
       </Text>
 
-      {/* Bubble */}
+      {/* Bubble - ED HARDY GLOW */}
       <View
-        className={`px-4 py-3 rounded-2xl ${
-          isUser
-            ? 'bg-zinc-800 rounded-tr-sm'
-            : message.pendingConfirmation
-              ? 'bg-yellow-600/20 border border-yellow-500/50 rounded-tl-sm'
-              : 'bg-red-600/20 border border-red-600/30 rounded-tl-sm'
-        }`}
+        className={`px-4 py-3 rounded-2xl ${isUser ? 'rounded-tr-sm' : 'rounded-tl-sm'}`}
+        style={{
+          backgroundColor: isUser ? '#1a1a1a' : message.pendingConfirmation ? '#2d1a0a' : '#1a0a0a',
+          borderWidth: isUser ? 1 : 2,
+          borderColor: isUser ? '#27272a' : message.pendingConfirmation ? '#F97316' : '#DC262650',
+          shadowColor: isUser ? 'transparent' : '#DC2626',
+          shadowOffset: { width: 0, height: 0 },
+          shadowOpacity: isUser ? 0 : 0.2,
+          shadowRadius: 10,
+          elevation: isUser ? 0 : 3,
+        }}
       >
         <Text className="text-white text-base">{message.content}</Text>
       </View>
 
-      {/* Tool Results */}
+      {/* Tool Results - FIRE ACCENT */}
       {message.results && message.results.length > 0 && (
-        <View className="mt-2 pl-2 border-l-2 border-red-600/50">
+        <View className="mt-2 pl-2" style={{ borderLeftWidth: 3, borderLeftColor: '#F97316' }}>
           {message.results.map((result, idx) => (
             <Text
               key={idx}
-              className={`text-sm font-mono ${result.success ? 'text-green-500' : 'text-red-400'}`}
+              className="text-sm font-mono"
+              style={{ color: result.success ? '#22C55E' : '#DC2626' }}
             >
               {result.message}
             </Text>
@@ -770,6 +808,8 @@ export const HankOverlay: React.FC = () => {
     return null;
   }
 
+  const insets = useSafeAreaInsets();
+
   // Save Guard para verificar si puede usar HANK
   const { canSave } = useSaveGuard();
 
@@ -796,6 +836,10 @@ export const HankOverlay: React.FC = () => {
 
   // Animated value para cierre por gesto
   const translateY = useSharedValue(0);
+
+  const animatedPanelStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+  }));
 
   const {
     executeCommand,
@@ -833,22 +877,24 @@ export const HankOverlay: React.FC = () => {
       },
       onPanResponderRelease: (_, gestureState) => {
         if (gestureState.dy > 150) {
-          // Animar hacia abajo DESDE la posición actual antes de cerrar
-          translateY.value = withTiming(500, { duration: 200 });
+          // Cerrar directamente - el translateY se resetea al abrir
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          setTimeout(() => {
-            setIsOpen(false);
-            // Reset DESPUÉS de cerrar
-            translateY.value = 0;
-          }, 200);
+          setIsOpen(false);
         } else {
-          // Vibración cuando vuelve arriba
+          // Volver arriba
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           translateY.value = withTiming(0, { duration: 200 });
         }
       },
     })
   ).current;
+
+  // Resetear translateY cuando el modal se abre
+  useEffect(() => {
+    if (isOpen) {
+      translateY.value = 0;
+    }
+  }, [isOpen, translateY]);
 
   // -------------------------------------------------------------------------
   // HELPER: Verificar si debe limpiar la UI del chat
@@ -989,15 +1035,16 @@ export const HankOverlay: React.FC = () => {
   // -------------------------------------------------------------------------
   // HANDLERS
   // -------------------------------------------------------------------------
-  const handleOpen = () => {
+  const handleOpen = useCallback(() => {
     // Guard: Verificar si puede hablar con HANK
     if (!canSave('talk_to_hank')) return;
     setIsOpen(true);
-  };
-  const handleClose = () => {
+  }, [canSave]);
+
+  const handleClose = useCallback(() => {
     setIsOpen(false);
     setPendingExecution(null);
-  };
+  }, []);
 
   const handleSend = async () => {
     // Guard: Verificar si puede hablar con HANK
@@ -1207,9 +1254,12 @@ export const HankOverlay: React.FC = () => {
             // PLAN - Tools de lectura
             'PLAN_GET_MEALS',
             'PLAN_GET_MEAL_DETAILS',
+            'PLAN_GET_NEXT_MEAL',
             'PLAN_GET_STACK',
             'PLAN_ANALYZE_NUTRITION',
             'PLAN_CALCULATE_MACROS', // Solo lee y calcula, no modifica
+            // SPOTIFY - Tools de lectura
+            'SPOTIFY_GET_CURRENT_TRACK',
             // Contexto OMNISCIENTE
             'GET_USER_CONTEXT',
             'GET_FULL_USER_CONTEXT',
@@ -1328,23 +1378,8 @@ export const HankOverlay: React.FC = () => {
             await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
           } else if (readResults.length > 0) {
             // Solo había herramientas de lectura - mostrar resultado directamente
-            const toolResultContext = readResults.map((r) => r.message).join('\n\n');
-
-            // Intentar respuesta natural con Gemini, pero con fallback al resultado directo
-            let finalMessage = toolResultContext;
-            try {
-              const naturalResponse = await callGemini(
-                `El usuario preguntó: "${transcription}"\n\nDatos obtenidos:\n${toolResultContext}\n\nResponde de forma BREVE y DIRECTA solo lo que preguntó. No repitas toda la información, solo lo relevante a su pregunta.`,
-                geminiContext,
-                GEMINI_API_KEY,
-                [] // Sin historial para respuesta limpia
-              );
-              if (naturalResponse.message) {
-                finalMessage = naturalResponse.message;
-              }
-            } catch (geminiError) {
-              console.warn('⚠️ Gemini falló para respuesta natural, usando resultado directo');
-            }
+            // 🔧 FIX: Usar resultado directo sin llamar a Gemini de nuevo (evita "Ejecutando...")
+            const finalMessage = readResults.map((r) => r.message).join('\n\n');
 
             const hankMessage: ChatMessage = {
               id: `hank-${Date.now()}`,
@@ -1531,33 +1566,17 @@ export const HankOverlay: React.FC = () => {
           onLongPressEnd={handleLongPressEnd}
           isProcessing={isProcessing || isTranscribing}
           isListening={isListening || isRecording}
+          bottomOffset={calculateFabPositions(insets.bottom).hank}
+          rightOffset={calculateFabPositions(insets.bottom).right}
         />
       )}
 
       {/* Chat Panel Modal */}
-      <Modal visible={isOpen} transparent animationType="none" onRequestClose={handleClose}>
-        <View className="flex-1 justify-end">
-          {/* Backdrop - Semi-transparent dark overlay */}
-          <TouchableOpacity
-            activeOpacity={1}
-            onPress={handleClose}
-            className="absolute inset-0 bg-black/70"
-          />
-
-          {/* Panel */}
+      <Modal visible={isOpen} transparent={true} animationType="slide" onRequestClose={handleClose}>
+        <View className="flex-1 bg-transparent justify-end">
           <Animated.View
-            style={[
-              {
-                height: PANEL_HEIGHT,
-                backgroundColor: 'rgba(0, 0, 0, 0.95)',
-                borderTopLeftRadius: 24,
-                borderTopRightRadius: 24,
-                borderTopWidth: 1,
-                borderColor: 'rgba(220, 38, 38, 0.3)',
-                transform: [{ translateY: translateY }],
-              },
-              panelStyle,
-            ]}
+            className="bg-black rounded-t-3xl"
+            style={[{ height: '92%' }, animatedPanelStyle]}
           >
             <KeyboardAvoidingView
               behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -1566,8 +1585,13 @@ export const HankOverlay: React.FC = () => {
               {/* Header con PanResponder para cerrar deslizando */}
               <View
                 {...panResponder.panHandlers}
-                className="flex-row items-center justify-between px-5 py-4 border-b border-zinc-800"
+                className="flex-row items-center justify-between px-5 pt-6 pb-4 border-b border-zinc-800"
               >
+                {/* Indicador de drag */}
+                <View className="absolute top-2 left-0 right-0 items-center">
+                  <View className="w-10 h-1 bg-zinc-600 rounded-full" />
+                </View>
+
                 <View className="flex-row items-center">
                   <View className="w-10 h-10 rounded-full bg-red-600/20 items-center justify-center mr-3">
                     <Bot size={22} color="#DC2626" />

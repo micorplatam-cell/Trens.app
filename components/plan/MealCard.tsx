@@ -239,27 +239,51 @@ export const MealCard: React.FC<MealCardProps> = ({
   );
 
   // ============================================================================
-  // RENDER
+  // RENDER - ED HARDY STYLE
   // ============================================================================
   return (
     <Animated.View style={animatedStyle} className="mb-6">
-      <View className="bg-[#1a1a1a] border border-white/10 rounded-xl overflow-hidden">
-        {/* Header */}
-        <View className="flex-row justify-between items-center p-4 border-b border-white/5 bg-[#222222]">
+      <View
+        className="rounded-xl overflow-hidden"
+        style={{
+          backgroundColor: '#0a0a0a',
+          borderWidth: 1,
+          borderColor: '#DC262640',
+          shadowColor: '#DC2626',
+          shadowOffset: { width: 0, height: 0 },
+          shadowOpacity: 0.15,
+          shadowRadius: 10,
+          elevation: 5,
+        }}
+      >
+        {/* Header - ED HARDY FIRE GRADIENT */}
+        <View
+          className="flex-row justify-between items-center p-4 border-b"
+          style={{
+            backgroundColor: '#0f0505',
+            borderBottomColor: '#DC262650',
+            borderBottomWidth: 2,
+          }}
+        >
           <View className="flex-1">
-            <Text className="text-white font-bold tracking-wider text-lg uppercase">
+            <Text
+              className="font-bold tracking-wider text-lg uppercase"
+              style={{ color: '#F97316' }}
+            >
               {mealName}
             </Text>
             {/* Macros objetivo si existen */}
             {meal.targetMacros && (
               <View className="flex-row gap-3 mt-1">
-                <Text className="text-savage-red text-xs font-mono">
+                <Text className="text-xs font-mono" style={{ color: '#A855F7' }}>
                   {meal.targetMacros.protein}P
                 </Text>
-                <Text className="text-yellow-500 text-xs font-mono">
+                <Text className="text-xs font-mono" style={{ color: '#FBBF24' }}>
                   {meal.targetMacros.carbs}C
                 </Text>
-                <Text className="text-blue-400 text-xs font-mono">{meal.targetMacros.fat}G</Text>
+                <Text className="text-xs font-mono" style={{ color: '#3B82F6' }}>
+                  {meal.targetMacros.fat}G
+                </Text>
                 <Text className="text-zinc-500 text-xs font-mono">
                   {meal.targetMacros.calories} kcal
                 </Text>
@@ -268,10 +292,13 @@ export const MealCard: React.FC<MealCardProps> = ({
           </View>
           <Pressable
             onPress={() => onTimeChange(meal.id)}
-            className="flex-row items-center gap-2 bg-blue-500/10 px-3 py-1.5 rounded-full active:bg-blue-500/20"
+            className="flex-row items-center gap-2 px-3 py-1.5 rounded-full active:opacity-70"
+            style={{ backgroundColor: '#F9731620' }}
           >
-            <Clock size={14} color="#3B82F6" />
-            <Text className="text-blue-400 text-sm font-mono">{displayTime}</Text>
+            <Clock size={14} color="#F97316" />
+            <Text className="text-sm font-mono font-bold" style={{ color: '#F97316' }}>
+              {displayTime}
+            </Text>
           </Pressable>
         </View>
 
@@ -291,25 +318,31 @@ export const MealCard: React.FC<MealCardProps> = ({
           {canAddMore && onAddOption && renderAddOptionCard()}
         </ScrollView>
 
-        {/* Footer / Pagination + Navigation */}
-        <View className="bg-[#151515] py-2 px-4 flex-row items-center justify-between">
+        {/* Footer / Pagination + Navigation - FIRE ACCENT */}
+        <View
+          className="py-2 px-4 flex-row items-center justify-between"
+          style={{ backgroundColor: '#0a0505' }}
+        >
           {/* Navigation arrows */}
           <Pressable
             onPress={() => navigateToOption(Math.max(0, meal.selectedOption - 1))}
             disabled={meal.selectedOption === 0}
             className={`p-1 ${meal.selectedOption === 0 ? 'opacity-20' : 'opacity-100'}`}
           >
-            <ChevronLeft size={18} color="#666" />
+            <ChevronLeft size={18} color="#F97316" />
           </Pressable>
 
-          {/* Dots */}
+          {/* Dots - FIRE COLORS */}
           <View className="flex-row gap-2 flex-1 justify-center">
             {meal.options.map((_, idx) => (
               <Pressable key={idx} onPress={() => navigateToOption(idx)} className="p-1">
                 <View
-                  className={`rounded-full ${
-                    idx === meal.selectedOption ? 'bg-white w-6 h-1.5' : 'bg-zinc-600 w-1.5 h-1.5'
-                  }`}
+                  className="rounded-full"
+                  style={{
+                    backgroundColor: idx === meal.selectedOption ? '#F97316' : '#3F3F46',
+                    width: idx === meal.selectedOption ? 24 : 6,
+                    height: 6,
+                  }}
                 />
               </Pressable>
             ))}
@@ -328,14 +361,14 @@ export const MealCard: React.FC<MealCardProps> = ({
             disabled={meal.selectedOption === meal.options.length - 1}
             className={`p-1 ${meal.selectedOption === meal.options.length - 1 ? 'opacity-20' : 'opacity-100'}`}
           >
-            <ChevronRight size={18} color="#666" />
+            <ChevronRight size={18} color="#F97316" />
           </Pressable>
         </View>
 
         {/* Hint */}
-        <View className="bg-[#0f0f0f] py-1.5">
-          <Text className="text-zinc-700 text-[10px] text-center">
-            Desliza para ver opciones • Toca para editar • Mantén para eliminar
+        <View style={{ backgroundColor: '#050505' }} className="py-1.5">
+          <Text className="text-zinc-600 text-[10px] text-center font-medium tracking-wide">
+            🔥 Desliza para ver opciones • Toca para editar
           </Text>
         </View>
       </View>

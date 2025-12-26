@@ -373,22 +373,37 @@ export default function TrensID({ userId, profileData, measurements, onUpdate }:
 
   return (
     <View className="mb-6">
-      {/* CARD CONTAINER */}
+      {/* CARD CONTAINER - ED HARDY STYLE */}
       <TouchableOpacity
         activeOpacity={isExpanded ? 1 : 0.8}
         onPress={!isExpanded ? handleExpand : undefined}
-        className={`bg-[#111] border rounded-sm overflow-hidden ${
-          isExpanded ? 'border-zinc-700 bg-[#0e0e0e]' : 'border-zinc-800'
+        className={`rounded-lg overflow-hidden ${
+          isExpanded ? 'border-2 border-fire-orange/50' : 'border border-zinc-800'
         }`}
+        style={{
+          backgroundColor: isExpanded ? '#0a0505' : '#0e0e0e',
+          shadowColor: isExpanded ? '#F97316' : 'transparent',
+          shadowOffset: { width: 0, height: 0 },
+          shadowOpacity: isExpanded ? 0.3 : 0,
+          shadowRadius: 15,
+          elevation: isExpanded ? 10 : 0,
+        }}
       >
-        {/* HEADER */}
-        <View className="flex-row justify-between items-center px-4 py-3 border-b border-zinc-800">
+        {/* HEADER - FIRE ACCENT */}
+        <View
+          className="flex-row justify-between items-center px-4 py-3 border-b"
+          style={{
+            borderBottomColor: isExpanded ? '#F97316' : '#27272a',
+            borderBottomWidth: isExpanded ? 2 : 1,
+          }}
+        >
           <View className="flex-row items-center gap-2">
             <View
-              className={`w-2 h-2 rounded-full ${isExpanded ? 'bg-savage-red' : 'bg-zinc-600'}`}
+              className="w-2 h-2 rounded-full"
+              style={{ backgroundColor: isExpanded ? '#F97316' : '#52525b' }}
             />
             <Text className="text-zinc-500 text-[10px] uppercase tracking-widest font-bold">
-              ID // Biometrics {isExpanded && <Text className="text-savage-red">[EDIT MODE]</Text>}
+              ID // Biometrics {isExpanded && <Text style={{ color: '#F97316' }}>[EDIT MODE]</Text>}
             </Text>
           </View>
           {isExpanded ? (
@@ -396,7 +411,7 @@ export default function TrensID({ userId, profileData, measurements, onUpdate }:
               onPress={handleCollapse}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             >
-              <X size={14} color="#71717a" />
+              <X size={14} color="#F97316" />
             </TouchableOpacity>
           ) : (
             <Edit2 size={12} color="#52525b" />

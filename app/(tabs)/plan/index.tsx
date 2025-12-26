@@ -3,12 +3,12 @@
 // Línea de tiempo con Comidas, Stacks y Bloque de Entrenamiento
 // ============================================================================
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { View, Text, ScrollView, Pressable, Alert, RefreshControl } from 'react-native';
 import Animated, { useAnimatedStyle, withSpring } from 'react-native-reanimated';
-import { Plus, Pill } from 'lucide-react-native';
+import { Plus, Pill, Sparkles } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 
 import { MealCard } from '../../../components/plan/MealCard';
 import { StackCard } from '../../../components/plan/StackCard';
@@ -21,12 +21,17 @@ import { AddOptionModal } from '../../../components/plan/AddOptionModal';
 import { supabase } from '../../../lib/supabase';
 import { useHank } from '../../../context/HankContext';
 import { useSaveGuard } from '../../_layout';
+import { useSport } from '../../../context/SportContext';
 import {
   calculateMacrosWithAI,
   calculateUserDailyMacros,
   recalculateAllMealsForNewCount,
   calculateMealWithUserMacros,
 } from '../../../services/hank/nutrition';
+
+// Import sport-specific screens
+import RaceScreen from '../race';
+import SpotScreen from '../spot';
 
 // ============================================================================
 // ANIMATED WRAPPER - Para animar items durante drag
@@ -65,6 +70,7 @@ interface MealOption {
 
 interface Meal {
   id: string;
+  name: string; // Nombre guardado en DB
   time: string;
   options: MealOption[];
   selectedOption: number;
@@ -99,7 +105,14 @@ interface WorkoutBlockData {
   routineName: string;
   preStack: StackItem[];
   postStack: StackItem[];
-  exercises?: { id: string; name: string; sets?: number; reps?: string; imageUrl?: string }[];
+  exercises?: {
+    id: string;
+    name: string;
+    sets?: number;
+    reps?: string;
+    imageUrl?: string;
+    videoUrl?: string;
+  }[];
 }
 
 interface TimelineItem {
@@ -111,8 +124,13 @@ interface TimelineItem {
 // ============================================================================
 // HELPERS
 // ============================================================================
-const getMealName = (index: number, total: number): string => {
-  if (total === 1) return 'COMIDA ÚNICA';
+
+/**
+ * Genera nombre inteligente para comidas basado en cantidad total
+ * Lógica: 2=Desayuno/Cena, 3=Des/Alm/Cena, 4=Comida 1-4, 5=Des/Med.Mañana/Alm/Med.Tarde/Cena, 6+=Comida N
+ */
+const getSmartMealName = (index: number, total: number): string => {
+  if (total === 1) return 'COMIDA';
   if (total === 2) return index === 0 ? 'DESAYUNO' : 'CENA';
   if (total === 3) return ['DESAYUNO', 'ALMUERZO', 'CENA'][index] || `COMIDA ${index + 1}`;
   if (total === 4) return `COMIDA ${index + 1}`;
@@ -161,12 +179,44 @@ const parseTimeToSQL = (timeStr: string): string | null => {
 };
 
 // ============================================================================
-// COMPONENT
+// TAB 5 ROUTER - Renderiza el contenido correcto según el deporte activo
 // ============================================================================
-export default function PlanScreen() {
+export default function Tab5Router() {
+  const { activeSport } = useSport();
+  const sportCode = activeSport?.code || 'GYM';
+
+  // Renderizar pantalla según deporte
+  switch (sportCode) {
+    case 'MOTO':
+    case 'AUTO':
+      return <RaceScreen />;
+    case 'SURF':
+      return <SpotScreen />;
+    case 'GYM':
+    default:
+      return <PlanScreen />;
+  }
+}
+
+// ============================================================================
+// PLAN SCREEN - Pantalla original de nutrición y plan
+// ============================================================================
+function PlanScreen() {
   const router = useRouter();
-  const { refreshTrigger } = useHank();
+  const { refreshTrigger, setScreenContext } = useHank();
   const { canSave } = useSaveGuard();
+
+  // Sincronizar contexto con HANK
+  useFocusEffect(
+    useCallback(() => {
+      setScreenContext({
+        module: 'plan',
+        viewMode: null,
+        currentExerciseIndex: null,
+        currentTrainingDay: 0,
+      });
+    }, [setScreenContext])
+  );
 
   // State
   const [planName, setPlanName] = useState('MI PLAN');
@@ -175,7 +225,14 @@ export default function PlanScreen() {
   const [workoutPosIndex, setWorkoutPosIndex] = useState(2);
   const [todayRoutine, setTodayRoutine] = useState<string>('SIN RUTINA');
   const [todayExercises, setTodayExercises] = useState<
-    { id: string; name: string; sets?: number; reps?: string; imageUrl?: string }[]
+    {
+      id: string;
+      name: string;
+      sets?: number;
+      reps?: string;
+      imageUrl?: string;
+      videoUrl?: string;
+    }[]
   >([]);
 
   // Modals
@@ -205,8 +262,15 @@ export default function PlanScreen() {
   } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [isAdjustingMacros, setIsAdjustingMacros] = useState(false);
   const [isDraggingWorkout, setIsDraggingWorkout] = useState(false);
   const [dragTargetIndex, setDragTargetIndex] = useState<number | null>(null);
+
+  // Ref para auto-scroll al elemento actual
+  const scrollViewRef = useRef<ScrollView>(null);
+  const itemLayouts = useRef<{ y: number; height: number }[]>([]);
+  const hasScrolledToCurrentItem = useRef(false);
+  const layoutsReady = useRef(0);
 
   // ============================================================================
   // HELPER: Obtener perfil completo con medidas corporales Y macros cacheados
@@ -381,12 +445,29 @@ export default function PlanScreen() {
 
           return {
             id: meal.id,
+            name: meal.name || 'Comida',
             time: meal.scheduled_time?.slice(0, 5) || '12:00',
             selectedOption: 0,
             targetMacros: perMealMacros || undefined,
             options,
           };
         });
+
+        // Sincronizar nombres con lógica inteligente en DB si no coinciden
+        const total = formattedMeals.length;
+        for (let i = 0; i < formattedMeals.length; i++) {
+          const expectedName = getSmartMealName(i, total);
+          if (formattedMeals[i].name !== expectedName) {
+            formattedMeals[i].name = expectedName;
+            // Actualizar en DB silenciosamente
+            supabase
+              .from('meals')
+              .update({ name: expectedName, position: i })
+              .eq('id', formattedMeals[i].id)
+              .then(() => {});
+          }
+        }
+
         setMeals(formattedMeals);
 
         // Guardar macros por comida en el estado para uso posterior
@@ -431,8 +512,8 @@ export default function PlanScreen() {
       }
 
       // Fetch current training day from profiles
-      // El sistema usa días de entrenamiento (0, 1, 2...) no días de la semana
-      // IMPORTANTE: Usar la misma lógica de GYM para determinar el día actual
+      // IMPORTANTE: Usar el día guardado directamente, sin avanzar automáticamente
+      // GYM es quien maneja el avance de días, PLAN solo lee
       const { data: profileData } = await supabase
         .from('profiles')
         .select(
@@ -441,109 +522,131 @@ export default function PlanScreen() {
         .eq('id', user.id)
         .single();
 
-      // Calcular el día de entrenamiento correcto
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const todayISO = today.toISOString();
+      // Usar el día guardado en la base de datos
+      const currentTrainingDay = profileData?.training_current_day ?? 0;
 
-      let currentTrainingDay = profileData?.training_current_day ?? 0;
-      const frequency = profileData?.training_frequency ?? 3;
-
-      // Verificar si debemos avanzar al siguiente día
-      if (profileData?.training_last_access) {
-        const lastAccess = new Date(profileData.training_last_access);
-        lastAccess.setHours(0, 0, 0, 0);
-        const lastAccessISO = lastAccess.toISOString();
-
-        // Si han pasado uno o más días, avanzar al siguiente día de entrenamiento
-        if (todayISO > lastAccessISO) {
-          currentTrainingDay = (profileData.training_current_day || 0) + 1;
-          if (currentTrainingDay >= frequency) {
-            currentTrainingDay = 0; // Reiniciar ciclo
-          }
-
-          // Actualizar en Supabase para sincronizar con GYM
-          await supabase
-            .from('profiles')
-            .update({
-              training_last_access: todayISO,
-              training_current_day: currentTrainingDay,
-            })
-            .eq('id', user.id);
-
-          console.warn(`🏋️ PLAN: Día avanzado automáticamente a ${currentTrainingDay}`);
-        }
-      }
-
+      // Leer nombres de rutinas directamente de la base de datos
+      // Si no hay, mostrará "ENTRENAMIENTO" para indicar que GYM no ha sincronizado
       const routineNames = profileData?.training_routine_names || {};
-      console.warn(`🏋️ PLAN: Día de entrenamiento actual: ${currentTrainingDay}`);
-      console.warn(`🏋️ PLAN: Nombres de rutinas:`, routineNames);
+
+      console.warn(
+        `🏋️ PLAN: Día: ${currentTrainingDay}, Rutina: ${routineNames[String(currentTrainingDay)] || 'NO SINCRONIZADO'}`
+      );
 
       // Fetch exercises for current training day
-      // Cada ejercicio es un registro individual con type='exercise'
-      const { data: exercisesData, error: exercisesError } = await supabase
-        .from('user_assets')
-        .select('id, name, media_url, training_days, metadata')
+      // ARQUITECTURA: user_exercise_config + exercises (igual que GYM)
+      const { data: userConfigs, error: exercisesError } = await supabase
+        .from('user_exercise_config')
+        .select(
+          `
+          id,
+          exercise_id,
+          training_days,
+          display_order,
+          custom_media_url,
+          exercises (
+            id,
+            name,
+            default_media_url,
+            thumbnail_url,
+            video_url
+          )
+        `
+        )
         .eq('user_id', user.id)
-        .eq('type', 'exercise')
-        .is('deleted_at', null)
+        .order('display_order', { ascending: true, nullsFirst: false })
         .order('created_at', { ascending: true });
 
-      console.warn(`🏋️ PLAN: Total ejercicios encontrados: ${exercisesData?.length || 0}`);
+      // Mapear al formato simplificado
+      const exercisesData =
+        userConfigs?.map((item: any) => {
+          const exercise = item.exercises;
+          return {
+            id: item.id,
+            name: exercise?.name || 'UNNAMED',
+            media_url:
+              item.custom_media_url || exercise?.default_media_url || exercise?.thumbnail_url || '',
+            video_url: exercise?.video_url || '',
+            training_days: item.training_days || [0],
+          };
+        }) || [];
+
+      console.warn(`🏋️ PLAN: Total ejercicios encontrados: ${exercisesData.length}`);
       if (exercisesError) {
         console.error('Error fetching exercises:', exercisesError);
       }
-      if (exercisesData && exercisesData.length > 0) {
+
+      // Log detallado de ejercicios y sus días
+      if (exercisesData.length > 0) {
         console.warn(
-          '🏋️ PLAN: Ejercicios:',
-          exercisesData.map((e: any) => ({
-            name: e.name,
-            training_days: e.training_days,
-          }))
+          '🏋️ PLAN: Ejercicios con días:',
+          exercisesData
+            .map((e: any) => `${e.name}: [${(e.training_days || [0]).join(',')}]`)
+            .join(' | ')
         );
       }
 
       // Filtrar por día de entrenamiento
-      const todayExercisesFiltered =
-        exercisesData?.filter((item: any) => {
-          const itemDays = item.training_days || [0];
-          return itemDays.includes(currentTrainingDay);
-        }) || [];
+      let todayExercisesFiltered = exercisesData.filter((item: any) => {
+        const itemDays = item.training_days || [0];
+        return itemDays.includes(currentTrainingDay);
+      });
 
       console.warn(
         `🏋️ PLAN: Ejercicios para día ${currentTrainingDay}: ${todayExercisesFiltered.length}`
       );
 
+      // Si no hay ejercicios para el día actual pero hay ejercicios en general,
+      // mostrar todos los del día 0 (rutina por defecto) o todos si no hay día 0
+      if (todayExercisesFiltered.length === 0 && exercisesData.length > 0) {
+        console.warn('🏋️ PLAN: Sin ejercicios para día actual, buscando día 0...');
+        todayExercisesFiltered = exercisesData.filter((item: any) => {
+          const itemDays = item.training_days || [0];
+          return itemDays.includes(0);
+        });
+
+        // Si aún no hay, mostrar todos
+        if (todayExercisesFiltered.length === 0) {
+          console.warn('🏋️ PLAN: Sin día 0, mostrando todos los ejercicios');
+          todayExercisesFiltered = exercisesData;
+        }
+      }
+
       if (todayExercisesFiltered.length > 0) {
         // Usar nombre de rutina guardado de la base de datos
         const savedRoutineName = routineNames[String(currentTrainingDay)];
 
-        // Si no hay nombre guardado, mostrar "RUTINA DÍA X"
-        const finalRoutineName = savedRoutineName || `RUTINA DÍA ${currentTrainingDay + 1}`;
+        // Si no hay nombre guardado, usar 'ENTRENAMIENTO' simple
+        const finalRoutineName = savedRoutineName || 'ENTRENAMIENTO';
 
         setTodayRoutine(finalRoutineName);
 
         // Helper para verificar si es video
         const isVideoUrl = (url: string) => {
+          if (!url) return false;
           const videoExtensions = ['.mp4', '.mov', '.avi', '.webm', '.m4v'];
           return videoExtensions.some((ext) => url.toLowerCase().includes(ext));
         };
 
         // Formatear ejercicios para el slider
         const formattedExercises = todayExercisesFiltered.map((item: any, idx: number) => {
-          const url = item.media_url || '';
-          const isVideo = isVideoUrl(url);
+          const mediaUrl = item.media_url || '';
+          const explicitVideoUrl = item.video_url || '';
 
-          // Para videos, intentar obtener thumbnail_url del metadata, o usar videoUrl
-          let imageUrl = undefined;
-          let videoUrl = undefined;
+          // Priorizar video_url explícito, luego verificar si media_url es video
+          let imageUrl: string | undefined = undefined;
+          let videoUrl: string | undefined = undefined;
 
-          if (isVideo) {
-            // Buscar thumbnail en metadata si existe
-            imageUrl = item.metadata?.thumbnail_url;
-            videoUrl = url;
+          if (explicitVideoUrl) {
+            // Tiene video_url explícito
+            videoUrl = explicitVideoUrl;
+            imageUrl = mediaUrl || undefined; // media_url como thumbnail
+          } else if (isVideoUrl(mediaUrl)) {
+            // media_url es un video
+            videoUrl = mediaUrl;
           } else {
-            imageUrl = url || undefined;
+            // Es imagen
+            imageUrl = mediaUrl || undefined;
           }
 
           return {
@@ -556,7 +659,7 @@ export default function PlanScreen() {
 
         console.warn('🏋️ Rutina:', finalRoutineName);
         console.warn('🏋️ Ejercicios formateados:', formattedExercises.length);
-        setTodayExercises(formattedExercises.slice(0, 10));
+        setTodayExercises(formattedExercises);
       } else {
         // No hay ejercicios para hoy - día de descanso
         console.warn('🏋️ Sin ejercicios para hoy - DESCANSO');
@@ -701,11 +804,24 @@ export default function PlanScreen() {
           const newMeals = meals.filter((m) => m.id !== mealId);
           setMeals(newMeals);
 
+          // Renombrar comidas restantes con lógica inteligente
+          const newTotal = newMeals.length;
+          for (let i = 0; i < newMeals.length; i++) {
+            const newName = getSmartMealName(i, newTotal);
+            await supabase
+              .from('meals')
+              .update({ name: newName, position: i })
+              .eq('id', newMeals[i].id);
+          }
+
           // Recalcular macros de todas las comidas restantes
           if (newMeals.length > 0) {
             const mealIds = newMeals.map((m) => m.id);
             recalculateAllMealsAfterChange(newMeals.length, mealIds);
           }
+
+          // Refrescar datos
+          await fetchData();
         },
       },
     ]);
@@ -934,6 +1050,9 @@ export default function PlanScreen() {
     // Guard: Verificar si puede guardar
     if (!canSave('create_meal')) return;
 
+    // Cerrar modal inmediatamente
+    setShowAddMeal(false);
+
     try {
       const {
         data: { user },
@@ -951,62 +1070,11 @@ export default function PlanScreen() {
         formattedTime = hours.padStart(2, '0') + ':' + (minutes || '00').padStart(2, '0');
       }
 
-      // Get active plan
-      let { data: plan } = await supabase
-        .from('nutrition_plans')
-        .select('id')
-        .eq('user_id', user.id)
-        .eq('is_active', true)
-        .single();
-
-      if (!plan) {
-        // Create default plan
-        const { data: newPlan, error: planError } = await supabase
-          .from('nutrition_plans')
-          .insert({ user_id: user.id, name: 'MI PLAN', is_active: true })
-          .select()
-          .single();
-
-        if (planError) {
-          console.error('Error creating plan:', planError);
-          throw new Error(`No se pudo crear el plan: ${planError.message}`);
-        }
-        plan = newPlan;
-      }
-
-      if (!plan) {
-        throw new Error('No se pudo obtener el plan');
-      }
-
-      // Create meal
-      const { data: mealData, error: mealError } = await supabase
-        .from('meals')
-        .insert({
-          plan_id: plan.id,
-          user_id: user.id,
-          time: formattedTime,
-        })
-        .select()
-        .single();
-
-      if (mealError) throw mealError;
-
-      // Create meal option
-      const { data: optionData, error: optError } = await supabase
-        .from('meal_options')
-        .insert({
-          meal_id: mealData.id,
-          name: 'Opción Principal',
-          option_index: 0,
-        })
-        .select()
-        .single();
-
-      if (optError) throw optError;
-
       // Calcular macros con IA si está activado
       let finalIngredients = ingredients;
       if (useHankAI) {
+        // Mostrar indicador de ajuste de macros
+        setIsAdjustingMacros(true);
         try {
           const ingredientsWithIds = ingredients.map((ing, i) => ({
             id: `temp-${i}`,
@@ -1055,26 +1123,38 @@ export default function PlanScreen() {
         }
       }
 
-      // Create ingredients
-      const ingredientsToInsert = finalIngredients.map((ing, idx) => ({
-        option_id: optionData.id,
-        name: ing.name,
-        quantity: ing.quantity || '~100 gr',
-        portion: ing.portion || '',
-        sort_order: idx,
-      }));
+      // Calcular posición (última + 1) y nombre inteligente
+      const newPosition = meals.length;
+      const newTotal = meals.length + 1;
+      const mealName = getSmartMealName(newPosition, newTotal);
 
-      await supabase.from('meal_ingredients').insert(ingredientsToInsert);
+      // Crear meal directamente con ingredients como JSONB
+      const { error: mealError } = await supabase.from('meals').insert({
+        user_id: user.id,
+        name: mealName,
+        scheduled_time: formattedTime,
+        ingredients: finalIngredients.map((ing) => ({
+          name: ing.name,
+          quantity: ing.quantity || '~100 gr',
+          portion: ing.portion || '',
+        })),
+        position: newPosition,
+        is_completed: false,
+      });
 
-      // Calcular nuevo número de comidas
-      const newMealCount = meals.length + 1;
+      if (mealError) {
+        console.error('Error creating meal:', mealError);
+        throw mealError;
+      }
 
-      // Recalcular macros de todas las comidas (incluida la nueva)
-      // Esto también refrescará los datos al final
-      await recalculateAllMealsAfterChange(newMealCount);
+      // Refrescar datos inmediatamente
+      await fetchData();
     } catch (error) {
       console.error('Error adding meal:', error);
       Alert.alert('Error', 'No se pudo agregar la comida');
+    } finally {
+      // Siempre limpiar el estado de ajuste
+      setIsAdjustingMacros(false);
     }
   };
 
@@ -1137,13 +1217,13 @@ export default function PlanScreen() {
     if (!meal) return;
 
     const mealIndex = meals.findIndex((m) => m.id === mealId);
-    const mealName = getMealName(mealIndex, meals.length);
+    const displayName = meal.name || getSmartMealName(mealIndex, meals.length);
 
     // Usar targetMacros de la comida o mealMacros del estado (ya calculado)
     const macros = meal.targetMacros || mealMacros;
 
     setAddOptionMealId(mealId);
-    setAddOptionMealName(mealName);
+    setAddOptionMealName(displayName);
     setMealMacros(macros || null);
     setShowAddOption(true);
   };
@@ -1319,6 +1399,106 @@ export default function PlanScreen() {
   const timeline = buildTimeline();
 
   // ============================================================================
+  // AUTO-SCROLL: Calcular y scrollear al elemento que corresponde a la hora actual
+  // ============================================================================
+  const getCurrentTimelineIndex = useCallback(() => {
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+    let bestIndex = 0;
+    let smallestPositiveDiff = Infinity; // Para items que aún no pasan
+    let closestPastIndex = 0;
+    let smallestNegativeDiff = -Infinity; // Para items que ya pasaron (el más reciente)
+
+    timeline.forEach((item, index) => {
+      let itemTime: string | undefined;
+
+      if (item.type === 'meal') {
+        itemTime = (item.data as Meal).time;
+      } else if (item.type === 'stack') {
+        itemTime = (item.data as Stack).time;
+      }
+
+      if (itemTime) {
+        const [hours, minutes] = itemTime.split(':').map(Number);
+        const itemMinutes = hours * 60 + minutes;
+        const diff = itemMinutes - currentMinutes;
+
+        if (diff >= 0 && diff < smallestPositiveDiff) {
+          // Item que aún no ha pasado (próximo)
+          smallestPositiveDiff = diff;
+          bestIndex = index;
+        } else if (diff < 0 && diff > smallestNegativeDiff) {
+          // Item que ya pasó (buscar el más reciente)
+          smallestNegativeDiff = diff;
+          closestPastIndex = index;
+        }
+      }
+    });
+
+    // Si no hay items futuros, ir al más reciente que ya pasó
+    if (smallestPositiveDiff === Infinity) {
+      bestIndex = closestPastIndex;
+    }
+
+    return bestIndex;
+  }, [timeline]);
+
+  // Handler para guardar posición y disparar scroll cuando el último item se renderice
+  const handleItemLayout = useCallback(
+    (index: number, y: number) => {
+      itemLayouts.current[index] = { y, height: 0 };
+      layoutsReady.current++;
+
+      // Cuando TODOS los items han reportado su layout, hacer scroll
+      if (
+        layoutsReady.current >= timeline.length &&
+        !hasScrolledToCurrentItem.current &&
+        timeline.length > 0
+      ) {
+        const currentIndex = getCurrentTimelineIndex();
+        const layout = itemLayouts.current[currentIndex];
+
+        if (layout && layout.y > 0) {
+          // Pequeño delay para asegurar que el ScrollView esté listo
+          setTimeout(() => {
+            scrollViewRef.current?.scrollTo({
+              y: Math.max(0, layout.y - 30),
+              animated: true,
+            });
+          }, 100);
+        }
+        hasScrolledToCurrentItem.current = true;
+      }
+    },
+    [timeline.length, getCurrentTimelineIndex]
+  );
+
+  // Scroll automático cuando la pantalla recibe focus (para volver a PLAN)
+  useFocusEffect(
+    useCallback(() => {
+      // Si ya tenemos layouts guardados, hacer scroll inmediatamente
+      if (itemLayouts.current.length > 0 && timeline.length > 0) {
+        const currentIndex = getCurrentTimelineIndex();
+        const layout = itemLayouts.current[currentIndex];
+
+        if (layout && layout.y > 0) {
+          setTimeout(() => {
+            scrollViewRef.current?.scrollTo({
+              y: Math.max(0, layout.y - 30),
+              animated: true,
+            });
+          }, 200);
+        }
+      } else {
+        // Primera vez - resetear para que onLayout llene los datos
+        hasScrolledToCurrentItem.current = false;
+        layoutsReady.current = 0;
+      }
+    }, [timeline.length, getCurrentTimelineIndex])
+  );
+
+  // ============================================================================
   // RENDER
   // ============================================================================
   if (isLoading) {
@@ -1331,12 +1511,21 @@ export default function PlanScreen() {
 
   return (
     <View className="flex-1 bg-black">
-      {/* Header */}
-      <View className="px-5 pt-16 pb-4 flex-row justify-between items-center border-b border-white/5 bg-black">
+      {/* Header - ED HARDY FIRE STYLE */}
+      <View className="px-5 pt-16 pb-4 flex-row justify-between items-center border-b border-fire-red/20 bg-black">
         <View>
-          <Text className="text-zinc-500 text-xs tracking-widest uppercase mb-1">Tu Plan</Text>
-          <Text className="text-white text-xl font-bold font-mono tracking-tighter">
-            {planName}
+          <Text className="text-zinc-500 text-xs tracking-widest uppercase mb-1 font-mono">
+            Tu Plan
+          </Text>
+          <Text
+            className="text-fire-orange text-xl font-bold font-mono tracking-tighter"
+            style={{
+              textShadowColor: '#F97316',
+              textShadowOffset: { width: 0, height: 0 },
+              textShadowRadius: 8,
+            }}
+          >
+            🔥 {planName}
           </Text>
         </View>
         <Pressable
@@ -1344,29 +1533,42 @@ export default function PlanScreen() {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             setShowStackManager(true);
           }}
-          className="flex-row items-center gap-2 bg-[#1a1a1a] border border-white/10 px-3 py-2 rounded-full active:bg-[#222222]"
+          className="flex-row items-center gap-2 px-3 py-2 rounded-full active:opacity-80"
+          style={{
+            backgroundColor: '#0a0005',
+            borderWidth: 1,
+            borderColor: '#A855F7',
+            shadowColor: '#A855F7',
+            shadowOffset: { width: 0, height: 0 },
+            shadowOpacity: 0.5,
+            shadowRadius: 8,
+          }}
         >
           <Pill size={16} color="#A855F7" />
-          <Text className="text-white text-xs font-bold">STACK</Text>
+          <Text className="text-purple-400 text-xs font-bold">STACK</Text>
         </Pressable>
       </View>
 
       {/* Timeline */}
       <ScrollView
+        ref={scrollViewRef}
         className="flex-1 px-5"
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#DC2626" />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#F97316" />
         }
       >
-        {/* Timeline Line */}
-        <View className="absolute left-9 top-0 bottom-0 w-px bg-white/5" />
+        {/* Timeline Line - Fire gradient effect */}
+        <View
+          className="absolute left-9 top-0 bottom-0 w-px"
+          style={{ backgroundColor: 'rgba(249, 115, 22, 0.2)' }}
+        />
 
         <View className="pt-6">
           {timeline.length === 0 ? (
             <View className="items-center justify-center py-20">
               <Text className="text-zinc-500 text-center mb-2">No hay comidas configuradas</Text>
-              <Text className="text-zinc-600 text-sm text-center">
+              <Text className="text-zinc-600 text-sm text-center font-mono">
                 Agrega tu primera comida para comenzar
               </Text>
             </View>
@@ -1404,20 +1606,27 @@ export default function PlanScreen() {
                 const meal = item.data as Meal;
                 const mealIndex = meals.findIndex((m) => m.id === meal.id);
                 const offset = getAnimatedOffset();
+                // Usar nombre de DB si existe, sino lógica inteligente
+                const displayName = meal.name || getSmartMealName(mealIndex, meals.length);
                 return (
-                  <AnimatedTimelineItem key={meal.id} offset={offset}>
-                    <MealCard
-                      meal={meal}
-                      mealName={getMealName(mealIndex, meals.length)}
-                      onSwap={handleSwap}
-                      onTimeChange={handleTimeChange}
-                      onDelete={handleDeleteMeal}
-                      onDeleteOption={handleDeleteOption}
-                      onEdit={handleEditMeal}
-                      onAddOption={handleAddOption}
-                      isCompressed={isDraggingWorkout}
-                    />
-                  </AnimatedTimelineItem>
+                  <View
+                    key={meal.id}
+                    onLayout={(e) => handleItemLayout(timelineIndex, e.nativeEvent.layout.y)}
+                  >
+                    <AnimatedTimelineItem offset={offset}>
+                      <MealCard
+                        meal={meal}
+                        mealName={displayName}
+                        onSwap={handleSwap}
+                        onTimeChange={handleTimeChange}
+                        onDelete={handleDeleteMeal}
+                        onDeleteOption={handleDeleteOption}
+                        onEdit={handleEditMeal}
+                        onAddOption={handleAddOption}
+                        isCompressed={isDraggingWorkout}
+                      />
+                    </AnimatedTimelineItem>
+                  </View>
                 );
               }
 
@@ -1425,42 +1634,51 @@ export default function PlanScreen() {
                 const stack = item.data as Stack;
                 const offset = getAnimatedOffset();
                 return (
-                  <AnimatedTimelineItem key={stack.id} offset={offset}>
-                    <StackCard
-                      stack={stack}
-                      onTimeChange={handleStackTimeChange}
-                      onItemDelete={handleRemoveStackItem}
-                      isCompressed={isDraggingWorkout}
-                    />
-                  </AnimatedTimelineItem>
+                  <View
+                    key={stack.id}
+                    onLayout={(e) => handleItemLayout(timelineIndex, e.nativeEvent.layout.y)}
+                  >
+                    <AnimatedTimelineItem offset={offset}>
+                      <StackCard
+                        stack={stack}
+                        onTimeChange={handleStackTimeChange}
+                        onItemDelete={handleRemoveStackItem}
+                        isCompressed={isDraggingWorkout}
+                      />
+                    </AnimatedTimelineItem>
+                  </View>
                 );
               }
 
               if (item.type === 'workout') {
                 const workout = item.data as WorkoutBlockData;
                 return (
-                  <DraggableWorkoutBlock
+                  <View
                     key="workout-block"
-                    data={workout}
-                    currentIndex={workoutPosIndex}
-                    totalItems={timeline.length}
-                    onMoveUp={() => handleMoveWorkout('up')}
-                    onMoveDown={() => handleMoveWorkout('down')}
-                    onDragEnd={handleDragEnd}
-                    onDragStart={() => {
-                      setIsDraggingWorkout(true);
-                      setDragTargetIndex(workoutPosIndex);
-                    }}
-                    onDragCancel={() => {
-                      setIsDraggingWorkout(false);
-                      setDragTargetIndex(null);
-                    }}
-                    onPositionChange={(targetIndex) => {
-                      setDragTargetIndex(targetIndex);
-                    }}
-                    onPressRoutine={() => router.push('/(tabs)/gym')}
-                    itemHeight={isDraggingWorkout ? 85 : 160}
-                  />
+                    onLayout={(e) => handleItemLayout(timelineIndex, e.nativeEvent.layout.y)}
+                  >
+                    <DraggableWorkoutBlock
+                      data={workout}
+                      currentIndex={workoutPosIndex}
+                      totalItems={timeline.length}
+                      onMoveUp={() => handleMoveWorkout('up')}
+                      onMoveDown={() => handleMoveWorkout('down')}
+                      onDragEnd={handleDragEnd}
+                      onDragStart={() => {
+                        setIsDraggingWorkout(true);
+                        setDragTargetIndex(workoutPosIndex);
+                      }}
+                      onDragCancel={() => {
+                        setIsDraggingWorkout(false);
+                        setDragTargetIndex(null);
+                      }}
+                      onPositionChange={(targetIndex) => {
+                        setDragTargetIndex(targetIndex);
+                      }}
+                      onPressRoutine={() => router.push('/(tabs)/gym')}
+                      itemHeight={isDraggingWorkout ? 85 : 160}
+                    />
+                  </View>
                 );
               }
 
@@ -1469,7 +1687,24 @@ export default function PlanScreen() {
           )}
         </View>
 
-        {/* Add Meal Button */}
+        {/* Indicador de ajuste de macros con IA */}
+        {isAdjustingMacros && (
+          <View className="bg-zinc-900/80 border border-red-500/40 rounded-xl p-4 mt-4 mx-1">
+            <View className="flex-row items-center gap-3">
+              <View className="w-8 h-8 bg-red-600 rounded-full items-center justify-center">
+                <Sparkles size={16} color="#fff" />
+              </View>
+              <View className="flex-1">
+                <Text className="text-white font-bold text-sm">Personalizando tu comida...</Text>
+                <Text className="text-zinc-400 text-xs mt-0.5">
+                  Ajustando porciones según tus macros diarios
+                </Text>
+              </View>
+            </View>
+          </View>
+        )}
+
+        {/* Add Meal Button - ED HARDY FIRE STYLE */}
         <Pressable
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -1488,11 +1723,17 @@ export default function PlanScreen() {
             }
             setShowAddMeal(true);
           }}
-          className="w-full py-4 mt-4 mb-24 border-2 border-dashed border-zinc-800 rounded-xl active:border-white/20 active:bg-white/5"
+          className="w-full py-4 mt-4 mb-24 rounded-xl active:opacity-80"
+          style={{
+            borderWidth: 2,
+            borderStyle: 'dashed',
+            borderColor: '#F97316',
+            backgroundColor: '#0a0500',
+          }}
         >
           <View className="flex-row items-center justify-center gap-2">
-            <Plus size={20} color="#666" />
-            <Text className="text-zinc-500 font-bold tracking-widest">AGREGAR COMIDA</Text>
+            <Plus size={20} color="#F97316" />
+            <Text className="text-fire-orange font-bold tracking-widest">AGREGAR COMIDA 🔥</Text>
           </View>
         </Pressable>
       </ScrollView>

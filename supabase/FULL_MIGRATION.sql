@@ -324,6 +324,33 @@ CREATE POLICY "daily_nutrition_update" ON public.daily_nutrition_log FOR UPDATE 
 -- PARTE 5: MÓDULO PRO (Videos y Sistema PRO/FREE)
 -- ============================================================================
 
+-- 5.0 SUPPLEMENT_STACK (Stack de suplementos/fármacos)
+CREATE TABLE IF NOT EXISTS public.supplement_stack (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  dose TEXT NOT NULL,
+  type TEXT NOT NULL DEFAULT 'pill' CHECK (type IN ('pill', 'syringe', 'powder', 'liquid')),
+  notes TEXT,
+  time TIME,
+  is_pre_workout BOOLEAN DEFAULT false,
+  is_post_workout BOOLEAN DEFAULT false,
+  is_active BOOLEAN DEFAULT true,
+  days_of_week INTEGER[] DEFAULT ARRAY[0, 1, 2, 3, 4, 5, 6],
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_supplement_stack_user ON public.supplement_stack(user_id);
+CREATE INDEX IF NOT EXISTS idx_supplement_stack_active ON public.supplement_stack(user_id, is_active);
+
+ALTER TABLE public.supplement_stack ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "supplement_stack_select" ON public.supplement_stack FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "supplement_stack_insert" ON public.supplement_stack FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "supplement_stack_update" ON public.supplement_stack FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "supplement_stack_delete" ON public.supplement_stack FOR DELETE USING (auth.uid() = user_id);
+
 -- 5.1 USER_ROLES
 CREATE TABLE IF NOT EXISTS public.user_roles (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

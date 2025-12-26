@@ -7,6 +7,7 @@ import { CameraView, useCameraPermissions, FlashMode } from 'expo-camera';
 import { Audio } from 'expo-av';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useFocusEffect } from 'expo-router';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -51,8 +52,20 @@ interface SpotifyMetadata {
 export default function ProScreen() {
   const { user, isPro, spotifyPremium, spotifyConnected } = useUserRoleContext();
   const { context: proContext, clearContext } = useProContext();
-  const { triggerRefresh } = useHank();
+  const { triggerRefresh, setScreenContext } = useHank();
   const { canSave } = useSaveGuard();
+
+  // Sincronizar contexto con HANK
+  useFocusEffect(
+    useCallback(() => {
+      setScreenContext({
+        module: 'pro',
+        viewMode: proContext.type || 'free',
+        currentExerciseIndex: null,
+        currentTrainingDay: 0,
+      });
+    }, [proContext.type, setScreenContext])
+  );
 
   // Upgrade Modal (para usuarios FREE)
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
@@ -77,6 +90,7 @@ export default function ProScreen() {
 
   // Timer ref
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recordingTimeRef = useRef(0);
 
   // Capturar metadata de Spotify al montar (solo PRO y solo si está reproduciendo)
   useEffect(() => {
@@ -241,7 +255,9 @@ export default function ProScreen() {
     }
 
     // Timer
+    recordingTimeRef.current = 0;
     timerRef.current = setInterval(() => {
+      recordingTimeRef.current += 1;
       setRecordingTime((prev) => prev + 1);
     }, 1000);
 
@@ -254,9 +270,13 @@ export default function ProScreen() {
         clearInterval(timerRef.current);
       }
 
+      // Usar el ref para obtener la duración exacta (mínimo 1 segundo)
+      const finalDuration = Math.max(1, recordingTimeRef.current);
+      console.log('🎬 Video grabado, duración:', finalDuration, 'segundos');
+
       setCapturedVideo({
         uri: video.uri,
-        duration: recordingTime,
+        duration: finalDuration,
         timestamp: new Date(),
       });
       setEditorVisible(true); // Mostrar editor fullscreen
@@ -400,21 +420,24 @@ export default function ProScreen() {
   };
 
   const getContextLabel = (): string => {
+    // Debug log
+    console.log('🎬 PRO Context:', JSON.stringify(proContext));
+
     if (proContext.type === 'tactical' && proContext.exerciseName) {
-      return `REC: ${proContext.exerciseName.toUpperCase()}`;
+      return `🔥 ${proContext.exerciseName.toUpperCase()}`;
     }
-    return 'REC: CÁMARA LIBRE';
+    return '🔥 CÁMARA LIBRE';
   };
 
   // -------------------------------------------------------------------------
-  // RENDER: MAIN SCREEN - CÁMARA EN VIVO PERMANENTE
+  // RENDER: MAIN SCREEN - CÁMARA EN VIVO PERMANENTE - ED HARDY FIRE STYLE
   // -------------------------------------------------------------------------
 
   // Pedir permisos si no están concedidos
   if (!permission) {
     return (
       <View className="flex-1 bg-black items-center justify-center">
-        <ActivityIndicator size="large" color="#DC2626" />
+        <ActivityIndicator size="large" color="#F97316" />
       </View>
     );
   }
@@ -422,18 +445,43 @@ export default function ProScreen() {
   if (!permission.granted) {
     return (
       <View className="flex-1 bg-black items-center justify-center px-6">
-        <Lock color="#DC2626" size={64} className="mb-4" />
-        <Text className="text-white text-xl font-bold mb-2 text-center">
-          Acceso a Cámara Requerido
+        <View
+          style={{
+            shadowColor: '#F97316',
+            shadowOffset: { width: 0, height: 0 },
+            shadowOpacity: 0.8,
+            shadowRadius: 20,
+          }}
+        >
+          <Lock color="#F97316" size={64} />
+        </View>
+        <Text
+          className="text-fire-orange text-xl font-bold mb-2 text-center mt-4"
+          style={{
+            textShadowColor: '#F97316',
+            textShadowOffset: { width: 0, height: 0 },
+            textShadowRadius: 10,
+          }}
+        >
+          🔥 Acceso a Cámara Requerido
         </Text>
         <Text className="text-zinc-400 text-center mb-8">
           PRO necesita acceso a tu cámara para grabar tus entrenamientos
         </Text>
         <TouchableOpacity
           onPress={requestPermission}
-          className="bg-savage-red px-8 py-4 rounded-full"
+          className="px-8 py-4 rounded-full"
+          style={{
+            backgroundColor: '#0a0000',
+            borderWidth: 2,
+            borderColor: '#F97316',
+            shadowColor: '#DC2626',
+            shadowOffset: { width: 0, height: 0 },
+            shadowOpacity: 1,
+            shadowRadius: 15,
+          }}
         >
-          <Text className="text-white font-bold">PERMITIR ACCESO</Text>
+          <Text className="text-fire-orange font-bold">PERMITIR ACCESO 🔥</Text>
         </TouchableOpacity>
       </View>
     );
@@ -451,48 +499,97 @@ export default function ProScreen() {
           flash={flashMode}
         />
 
-        {/* HUD SUPERIOR */}
+        {/* HUD SUPERIOR - ED HARDY FIRE */}
         <LinearGradient
-          colors={['rgba(0,0,0,0.7)', 'transparent']}
+          colors={['rgba(10,0,0,0.85)', 'transparent']}
           className="absolute top-0 left-0 right-0 h-28"
         />
         <View className="absolute top-14 left-0 right-0 px-4 flex-row justify-between items-center z-10">
-          {/* Etiqueta de Contexto (Izquierda) */}
-          <View className="flex-row items-center">
+          {/* Etiqueta de Contexto (Izquierda) - Fire Style */}
+          <View
+            className="flex-row items-center px-3 py-1.5 rounded-full"
+            style={{
+              backgroundColor: 'rgba(10, 0, 0, 0.8)',
+              borderWidth: 1,
+              borderColor: '#F97316',
+            }}
+          >
             <Animated.View style={pulseAnimatedStyle}>
-              <View className="w-3 h-3 bg-savage-red rounded-full mr-2" />
+              <View
+                className="w-3 h-3 bg-fire-orange rounded-full mr-2"
+                style={{
+                  shadowColor: '#F97316',
+                  shadowOffset: { width: 0, height: 0 },
+                  shadowOpacity: 1,
+                  shadowRadius: 8,
+                }}
+              />
             </Animated.View>
-            <Text className="text-white font-bold text-sm tracking-wide">
-              {isRecording ? getContextLabel() : 'PRO'}
+            <Text className="text-fire-orange font-bold text-sm tracking-wide">
+              {isRecording ? getContextLabel() : '🔥 PRO'}
             </Text>
           </View>
 
           {/* Herramientas Rápidas (Derecha) */}
           <View className="flex-row items-center gap-4">
-            <TouchableOpacity onPress={toggleFlash} className="bg-black/40 p-2 rounded-full">
+            <TouchableOpacity
+              onPress={toggleFlash}
+              className="p-2 rounded-full"
+              style={{
+                backgroundColor: 'rgba(10, 0, 0, 0.8)',
+                borderWidth: 1,
+                borderColor: flashMode === 'on' ? '#FBBF24' : '#F97316',
+              }}
+            >
               {getFlashIcon()}
             </TouchableOpacity>
-            <TouchableOpacity onPress={flipCamera} className="bg-black/40 p-2 rounded-full">
-              <RotateCcw color="#FFFFFF" size={24} />
+            <TouchableOpacity
+              onPress={flipCamera}
+              className="p-2 rounded-full"
+              style={{
+                backgroundColor: 'rgba(10, 0, 0, 0.8)',
+                borderWidth: 1,
+                borderColor: '#F97316',
+              }}
+            >
+              <RotateCcw color="#F97316" size={24} />
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* CONTADOR TIEMPO (Solo grabando) */}
+        {/* CONTADOR TIEMPO (Solo grabando) - ED HARDY */}
         {isRecording && (
           <View className="absolute top-32 left-0 right-0 items-center z-10">
-            <View className="bg-black/60 px-4 py-2 rounded-full">
-              <Text className="text-white font-mono font-bold text-lg">
-                {formatTime(recordingTime)}
+            <View
+              className="px-5 py-2 rounded-full"
+              style={{
+                backgroundColor: 'rgba(10, 0, 0, 0.85)',
+                borderWidth: 2,
+                borderColor: '#DC2626',
+                shadowColor: '#DC2626',
+                shadowOffset: { width: 0, height: 0 },
+                shadowOpacity: 1,
+                shadowRadius: 15,
+              }}
+            >
+              <Text className="text-fire-orange font-mono font-bold text-lg">
+                🔥 {formatTime(recordingTime)}
               </Text>
             </View>
           </View>
         )}
 
-        {/* SPOTIFY INDICATOR (Solo si hay música capturada) */}
+        {/* SPOTIFY INDICATOR (Solo si hay música capturada) - ED HARDY */}
         {isRecording && spotifyMetadata && (
           <View className="absolute top-44 left-4 right-4 z-10">
-            <View className="bg-black/70 rounded-xl p-3 flex-row items-center border border-green-500/30">
+            <View
+              className="rounded-xl p-3 flex-row items-center"
+              style={{
+                backgroundColor: 'rgba(10, 0, 0, 0.85)',
+                borderWidth: 1,
+                borderColor: '#1DB954',
+              }}
+            >
               <View className="w-10 h-10 bg-green-500 rounded-lg items-center justify-center mr-3">
                 <Music color="#000" size={20} />
               </View>
@@ -504,20 +601,27 @@ export default function ProScreen() {
                   {spotifyMetadata.artist}
                 </Text>
               </View>
-              <View className="bg-green-500/20 px-2 py-1 rounded">
+              <View
+                className="px-2 py-1 rounded"
+                style={{
+                  backgroundColor: 'rgba(30, 215, 96, 0.2)',
+                  borderWidth: 1,
+                  borderColor: '#1DB954',
+                }}
+              >
                 <Text className="text-green-500 text-xs font-bold">SYNC</Text>
               </View>
             </View>
           </View>
         )}
 
-        {/* CONTROLES INFERIORES */}
+        {/* CONTROLES INFERIORES - ED HARDY FIRE */}
         <LinearGradient
-          colors={['transparent', 'rgba(0,0,0,0.8)']}
+          colors={['transparent', 'rgba(10,0,0,0.9)']}
           className="absolute bottom-0 left-0 right-0 h-40"
         />
         <View className="absolute bottom-12 left-0 right-0 items-center z-10">
-          {/* SHUTTER BUTTON */}
+          {/* SHUTTER BUTTON - FIRE RING */}
           <Animated.View style={shutterAnimatedStyle}>
             <TouchableOpacity
               onPress={isRecording ? stopRecording : startRecording}
@@ -527,17 +631,34 @@ export default function ProScreen() {
                 className="w-24 h-24 rounded-full items-center justify-center"
                 style={{
                   borderWidth: 4,
-                  borderColor: '#DC2626',
-                  shadowColor: '#DC2626',
+                  borderColor: '#F97316',
+                  backgroundColor: 'rgba(10, 0, 0, 0.5)',
+                  shadowColor: '#F97316',
                   shadowOffset: { width: 0, height: 0 },
-                  shadowOpacity: 0.8,
-                  shadowRadius: 12,
+                  shadowOpacity: 1,
+                  shadowRadius: 20,
                 }}
               >
                 {isRecording ? (
-                  <View className="w-8 h-8 bg-savage-red rounded-md" />
+                  <View
+                    className="w-8 h-8 rounded-md"
+                    style={{
+                      backgroundColor: '#DC2626',
+                      shadowColor: '#DC2626',
+                      shadowOffset: { width: 0, height: 0 },
+                      shadowOpacity: 1,
+                      shadowRadius: 10,
+                    }}
+                  />
                 ) : (
-                  <View className="w-16 h-16 rounded-full border-2 border-savage-red/50" />
+                  <View
+                    className="w-16 h-16 rounded-full"
+                    style={{
+                      borderWidth: 2,
+                      borderColor: '#F97316',
+                      backgroundColor: 'rgba(249, 115, 22, 0.1)',
+                    }}
+                  />
                 )}
               </View>
             </TouchableOpacity>

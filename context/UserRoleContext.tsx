@@ -9,6 +9,7 @@ import React, {
 import { supabase } from '../lib/supabase';
 import { User } from '@supabase/supabase-js';
 import spotify from '../services/spotify/spotify';
+import { spotifyLogger, authLogger } from '../lib/logger';
 
 // ============================================================================
 // TIPOS
@@ -91,13 +92,13 @@ export function UserRoleProvider({ children }: { children: ReactNode }) {
         // Cargar estado de Spotify desde la DB
         setSpotifyConnected(roleData.spotify_connected ?? false);
         setSpotifyPremium(roleData.spotify_premium ?? false);
-        console.log('🎵 Spotify status cargado:', {
+        spotifyLogger.debug('Status cargado:', {
           connected: roleData.spotify_connected,
           premium: roleData.spotify_premium,
         });
       }
     } catch (err) {
-      console.error('Error fetching user role:', err);
+      authLogger.error('Error fetching user role:', err);
       setRole('free');
     }
   }, []);
@@ -155,14 +156,14 @@ export function UserRoleProvider({ children }: { children: ReactNode }) {
           .eq('user_id', user.id);
 
         if (updateError) {
-          console.error('Error updating Spotify status:', updateError);
+          spotifyLogger.error('Error updating status:', updateError);
         } else {
           setSpotifyConnected(connected);
           setSpotifyPremium(premium);
-          console.log('🎵 Spotify status actualizado en DB:', { connected, premium });
+          spotifyLogger.debug('Status actualizado en DB:', { connected, premium });
         }
       } catch (err) {
-        console.error('Error updating Spotify status:', err);
+        spotifyLogger.error('Error updating status:', err);
       }
     },
     [user]

@@ -1,0 +1,434 @@
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  ReactNode,
+} from 'react';
+import { supabase } from '../lib/supabase';
+import { useUserRoleContext } from './UserRoleContext';
+
+// ============================================================================
+// TIPOS
+// ============================================================================
+
+export interface Sport {
+  id: string;
+  code: 'GYM' | 'MOTO' | 'AUTO' | 'SURF';
+  name: string;
+  description: string;
+  icon: string;
+  color_primary: string;
+  color_secondary?: string;
+  tab_4_name: string;
+  tab_4_icon: string;
+  tab_5_name: string;
+  tab_5_icon: string;
+  inventory_categories: InventoryCategory[];
+  available_tools: SportTool[];
+  profile_fields: ProfileField[];
+  display_order: number;
+}
+
+export interface InventoryCategory {
+  code: string;
+  name: string;
+  icon: string;
+  fields?: CategoryField[];
+}
+
+export interface CategoryField {
+  code: string;
+  name: string;
+  type: 'text' | 'number' | 'date' | 'select';
+  options?: string[];
+}
+
+export interface SportTool {
+  code: string;
+  name: string;
+}
+
+export interface ProfileField {
+  code: string;
+  name: string;
+  type: 'text' | 'number' | 'select';
+  options?: string[];
+}
+
+export interface UserSport {
+  id: string;
+  sport_id: string;
+  is_active: boolean;
+  is_primary: boolean;
+  personalization_mode: 'MANUAL' | 'AI' | 'HYBRID';
+  sport_profile: Record<string, any>;
+  custom_config: Record<string, any>;
+}
+
+export type PersonalizationMode = 'MANUAL' | 'AI' | 'HYBRID';
+
+// ============================================================================
+// CONFIGURACIÓN DE TABS POR DEPORTE
+// ============================================================================
+
+export const SPORT_TAB_CONFIG: Record<
+  string,
+  {
+    tab4: { name: string; icon: string };
+    tab5: { name: string; icon: string };
+    color: string;
+  }
+> = {
+  GYM: {
+    tab4: { name: 'GYM', icon: 'Dumbbell' },
+    tab5: { name: 'PLAN', icon: 'Utensils' },
+    color: '#DC2626',
+  },
+  MOTO: {
+    tab4: { name: 'GARAJE', icon: 'Warehouse' },
+    tab5: { name: 'RACE', icon: 'Flag' },
+    color: '#F97316',
+  },
+  AUTO: {
+    tab4: { name: 'GARAJE', icon: 'Warehouse' },
+    tab5: { name: 'RACE', icon: 'Flag' },
+    color: '#EAB308',
+  },
+  SURF: {
+    tab4: { name: 'TABLA', icon: 'Sailboat' },
+    tab5: { name: 'SPOT', icon: 'Waves' },
+    color: '#0EA5E9',
+  },
+};
+
+// ============================================================================
+// CONTEXTO
+// ============================================================================
+
+interface SportContextType {
+  // Estado
+  activeSport: Sport | null;
+  userSports: UserSport[];
+  allSports: Sport[];
+  personalizationMode: PersonalizationMode;
+  loading: boolean;
+
+  // Acciones
+  setActiveSport: (sportCode: string) => Promise<void>;
+  addUserSport: (sportId: string) => Promise<void>;
+  removeUserSport: (sportId: string) => Promise<void>;
+  setPersonalizationMode: (mode: PersonalizationMode) => Promise<void>;
+  refreshSports: () => Promise<void>;
+
+  // Helpers
+  getTabConfig: () => {
+    tab4: { name: string; icon: string };
+    tab5: { name: string; icon: string };
+    color: string;
+  };
+  isFirstTime: boolean;
+}
+
+const SportContext = createContext<SportContextType | undefined>(undefined);
+
+// ============================================================================
+// PROVIDER
+// ============================================================================
+
+export function SportProvider({ children }: { children: ReactNode }) {
+  const { user, isAuthenticated } = useUserRoleContext();
+
+  const [allSports, setAllSports] = useState<Sport[]>([]);
+  const [userSports, setUserSports] = useState<UserSport[]>([]);
+  const [activeSport, setActiveSportState] = useState<Sport | null>(null);
+  const [personalizationMode, setPersonalizationModeState] =
+    useState<PersonalizationMode>('HYBRID');
+  const [loading, setLoading] = useState(true);
+  const [isFirstTime, setIsFirstTime] = useState(false);
+
+  // -------------------------------------------------------------------------
+  // CARGAR DEPORTES DISPONIBLES
+  // -------------------------------------------------------------------------
+  const loadAllSports = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('sports')
+        .select('*')
+        .eq('is_active', true)
+        .order('display_order');
+
+      if (error) throw error;
+      setAllSports(data || []);
+    } catch (error) {
+      console.error('Error loading sports:', error);
+      // Fallback a datos locales si falla
+      setAllSports([
+        {
+          id: 'gym-local',
+          code: 'GYM',
+          name: 'Gym & Fitness',
+          description: 'Entrenamiento de fuerza',
+          icon: 'Dumbbell',
+          color_primary: '#DC2626',
+          tab_4_name: 'GYM',
+          tab_4_icon: 'Dumbbell',
+          tab_5_name: 'PLAN',
+          tab_5_icon: 'Utensils',
+          inventory_categories: [],
+          available_tools: [],
+          profile_fields: [],
+          display_order: 1,
+        },
+      ] as Sport[]);
+    }
+  }, []);
+
+  // -------------------------------------------------------------------------
+  // CARGAR DEPORTES DEL USUARIO
+  // -------------------------------------------------------------------------
+  const loadUserSports = useCallback(async () => {
+    if (!user) {
+      setUserSports([]);
+      setActiveSportState(null);
+      setLoading(false);
+      return;
+    }
+
+    try {
+      // Cargar deportes del usuario
+      const { data: userSportsData, error: userSportsError } = await supabase
+        .from('user_sports')
+        .select('*')
+        .eq('user_id', user.id);
+
+      if (userSportsError) throw userSportsError;
+      setUserSports(userSportsData || []);
+
+      // Cargar perfil para obtener deporte activo
+      const { data: profile, error: profileError } = await supabase
+        .from('user_profiles')
+        .select('active_sport_id, personalization_mode, hank_first_time_shown')
+        .eq('user_id', user.id)
+        .single();
+
+      if (profileError && profileError.code !== 'PGRST116') {
+        throw profileError;
+      }
+
+      // Determinar si es primera vez
+      setIsFirstTime(!profile?.hank_first_time_shown);
+
+      // Setear modo de personalización
+      if (profile?.personalization_mode) {
+        setPersonalizationModeState(profile.personalization_mode as PersonalizationMode);
+      }
+
+      // Setear deporte activo
+      if (profile?.active_sport_id && allSports.length > 0) {
+        const active = allSports.find((s) => s.id === profile.active_sport_id);
+        if (active) {
+          setActiveSportState(active);
+        } else {
+          // Default a GYM
+          const gym = allSports.find((s) => s.code === 'GYM');
+          setActiveSportState(gym || null);
+        }
+      } else if (allSports.length > 0) {
+        // Default a GYM si no hay deporte activo
+        const gym = allSports.find((s) => s.code === 'GYM');
+        setActiveSportState(gym || allSports[0]);
+      }
+    } catch (error) {
+      console.error('Error loading user sports:', error);
+      // Default a GYM en caso de error
+      const gym = allSports.find((s) => s.code === 'GYM');
+      setActiveSportState(gym || null);
+    } finally {
+      setLoading(false);
+    }
+  }, [user, allSports]);
+
+  // -------------------------------------------------------------------------
+  // CAMBIAR DEPORTE ACTIVO
+  // -------------------------------------------------------------------------
+  const setActiveSport = useCallback(
+    async (sportCode: string) => {
+      const sport = allSports.find((s) => s.code === sportCode);
+      if (!sport) return;
+
+      setActiveSportState(sport);
+
+      if (user) {
+        try {
+          // Actualizar en perfil
+          await supabase
+            .from('user_profiles')
+            .update({ active_sport_id: sport.id })
+            .eq('user_id', user.id);
+
+          // Asegurar que el deporte está en user_sports
+          const exists = userSports.find((us) => us.sport_id === sport.id);
+          if (!exists) {
+            await supabase.from('user_sports').insert({
+              user_id: user.id,
+              sport_id: sport.id,
+              is_active: true,
+              is_primary: userSports.length === 0,
+            });
+          }
+        } catch (error) {
+          console.error('Error setting active sport:', error);
+        }
+      }
+    },
+    [user, allSports, userSports]
+  );
+
+  // -------------------------------------------------------------------------
+  // AGREGAR DEPORTE AL USUARIO
+  // -------------------------------------------------------------------------
+  const addUserSport = useCallback(
+    async (sportId: string) => {
+      if (!user) return;
+
+      try {
+        const { data, error } = await supabase
+          .from('user_sports')
+          .insert({
+            user_id: user.id,
+            sport_id: sportId,
+            is_active: true,
+            is_primary: userSports.length === 0,
+          })
+          .select()
+          .single();
+
+        if (error) throw error;
+        setUserSports((prev) => [...prev, data]);
+      } catch (error) {
+        console.error('Error adding user sport:', error);
+      }
+    },
+    [user, userSports]
+  );
+
+  // -------------------------------------------------------------------------
+  // REMOVER DEPORTE DEL USUARIO
+  // -------------------------------------------------------------------------
+  const removeUserSport = useCallback(
+    async (sportId: string) => {
+      if (!user) return;
+
+      try {
+        await supabase.from('user_sports').delete().eq('user_id', user.id).eq('sport_id', sportId);
+
+        setUserSports((prev) => prev.filter((us) => us.sport_id !== sportId));
+      } catch (error) {
+        console.error('Error removing user sport:', error);
+      }
+    },
+    [user]
+  );
+
+  // -------------------------------------------------------------------------
+  // CAMBIAR MODO DE PERSONALIZACIÓN
+  // -------------------------------------------------------------------------
+  const setPersonalizationMode = useCallback(
+    async (mode: PersonalizationMode) => {
+      setPersonalizationModeState(mode);
+
+      if (user) {
+        try {
+          await supabase
+            .from('user_profiles')
+            .update({ personalization_mode: mode })
+            .eq('user_id', user.id);
+        } catch (error) {
+          console.error('Error setting personalization mode:', error);
+        }
+      }
+    },
+    [user]
+  );
+
+  // -------------------------------------------------------------------------
+  // REFRESH
+  // -------------------------------------------------------------------------
+  const refreshSports = useCallback(async () => {
+    setLoading(true);
+    await loadAllSports();
+    await loadUserSports();
+  }, [loadAllSports, loadUserSports]);
+
+  // -------------------------------------------------------------------------
+  // HELPER: OBTENER CONFIG DE TABS
+  // -------------------------------------------------------------------------
+  const getTabConfig = useCallback(() => {
+    if (activeSport) {
+      return {
+        tab4: { name: activeSport.tab_4_name, icon: activeSport.tab_4_icon },
+        tab5: { name: activeSport.tab_5_name, icon: activeSport.tab_5_icon },
+        color: activeSport.color_primary,
+      };
+    }
+    // Default a GYM
+    return SPORT_TAB_CONFIG.GYM;
+  }, [activeSport]);
+
+  // -------------------------------------------------------------------------
+  // EFFECTS
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    loadAllSports();
+  }, [loadAllSports]);
+
+  useEffect(() => {
+    if (allSports.length > 0) {
+      loadUserSports();
+    }
+  }, [allSports, loadUserSports, isAuthenticated]);
+
+  // -------------------------------------------------------------------------
+  // RENDER
+  // -------------------------------------------------------------------------
+  return (
+    <SportContext.Provider
+      value={{
+        activeSport,
+        userSports,
+        allSports,
+        personalizationMode,
+        loading,
+        setActiveSport,
+        addUserSport,
+        removeUserSport,
+        setPersonalizationMode,
+        refreshSports,
+        getTabConfig,
+        isFirstTime,
+      }}
+    >
+      {children}
+    </SportContext.Provider>
+  );
+}
+
+// ============================================================================
+// HOOK
+// ============================================================================
+
+export function useSport() {
+  const context = useContext(SportContext);
+  if (!context) {
+    throw new Error('useSport must be used within a SportProvider');
+  }
+  return context;
+}
+
+// ============================================================================
+// EXPORT DEFAULT
+// ============================================================================
+
+export default SportContext;

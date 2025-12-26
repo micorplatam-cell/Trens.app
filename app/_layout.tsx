@@ -57,15 +57,10 @@ const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 export { useUserRoleContext } from '../context/UserRoleContext';
 
 // ============================================================================
-// 2. SPORT PROVIDER (Placeholder - Conectar con lógica real)
+// 2. SPORT PROVIDER - Maneja deporte activo y configuración dinámica
 // ============================================================================
-const SportContext = createContext({});
-
-export const useSport = () => useContext(SportContext);
-
-const SportProvider = ({ children }: { children: React.ReactNode }) => {
-  return <SportContext.Provider value={{}}>{children}</SportContext.Provider>;
-};
+import { SportProvider, useSport } from '../context/SportContext';
+export { useSport } from '../context/SportContext';
 
 // ============================================================================
 // 3. HANK PROVIDER - Importado desde context/HankContext.tsx
