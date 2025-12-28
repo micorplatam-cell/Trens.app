@@ -1008,9 +1008,9 @@ function GymScreen() {
 
       setTacticalContext(exerciseId, exerciseName, notes, tags);
 
-      // Solo sincronizar con HANK si el ejercicio cambió (para evitar logs excesivos)
-      if (lastSyncedExerciseId.current !== exerciseId && viewMode === 'FOCUS') {
-        lastSyncedExerciseId.current = exerciseId;
+      // SIEMPRE sincronizar con HANK cuando el ejercicio cambie
+      // (Removida optimización de lastSyncedExerciseId para debugging)
+      if (viewMode === 'FOCUS') {
         console.log('🎯 SINCRONIZANDO CON HANK:', exerciseId, exerciseName);
 
         if (altIndex > 0 && currentExercise.alternatives?.[altIndex - 1]) {
@@ -1019,8 +1019,8 @@ function GymScreen() {
             parentExerciseName: currentExercise.name,
           });
         } else {
-          // Usar exercise_id (ID real del ejercicio), no user_exercise_config.id
-          setActiveAsset(currentExercise.exercise_id);
+          // Usar exerciseId calculado (que ya es currentExercise.exercise_id para principales)
+          setActiveAsset(exerciseId);
         }
       }
     }
@@ -1633,7 +1633,7 @@ function GymScreen() {
   // Cargar videos del ejercicio cuando se abre el historial
   useEffect(() => {
     const fetchExerciseVideos = async () => {
-      if (!historialModalVisible || !modalExercise) return;
+      if (!historialModalVisible || !modalExercise || !user) return;
 
       setLoadingVideos(true);
       try {
@@ -1643,7 +1643,9 @@ function GymScreen() {
         const { data, error } = await supabase
           .from('pro_videos')
           .select('*')
+          .eq('user_id', user.id)
           .eq('exercise_id', exerciseId)
+          .not('video_url', 'is', null)
           .order('created_at', { ascending: false });
 
         if (error) throw error;
@@ -2204,19 +2206,23 @@ function GymScreen() {
 
         // Cargar videos de pro_videos para todos los ejercicios del usuario
         // Incluir ejercicios principales Y alternativas
-        const allExerciseIds = [...filteredData.map((item: any) => item.id), ...allAlternativeIds];
+        // IMPORTANTE: usar exercise_id (ID de tabla exercises), NO id (ID de user_exercise_config)
+        const allExerciseIds = [
+          ...filteredData.map((item: any) => item.exercise_id),
+          ...allAlternativeIds,
+        ];
         let exerciseVideosMap: Record<string, VideoRecord[]> = {};
 
         // Crear mapa de nombre -> IDs para sincronizar videos por nombre de ejercicio
         const exerciseNameToIds: Record<string, string[]> = {};
 
-        // Agregar ejercicios principales al mapa nombre -> IDs
+        // Agregar ejercicios principales al mapa nombre -> IDs (usando exercise_id)
         filteredData.forEach((item: any) => {
           const name = item.name?.toLowerCase()?.trim();
           if (name) {
             if (!exerciseNameToIds[name]) exerciseNameToIds[name] = [];
-            if (!exerciseNameToIds[name].includes(item.id)) {
-              exerciseNameToIds[name].push(item.id);
+            if (!exerciseNameToIds[name].includes(item.exercise_id)) {
+              exerciseNameToIds[name].push(item.exercise_id);
             }
           }
         });
@@ -2245,7 +2251,9 @@ function GymScreen() {
             .select(
               'id, exercise_id, video_url, thumbnail_url, weight_kg, reps, free_text, is_public, created_at, spotify, cloudflare_video_id, notes, exercise_notes, tags'
             )
+            .eq('user_id', user.id)
             .in('exercise_id', allExerciseIds)
+            .not('video_url', 'is', null)
             .order('created_at', { ascending: false });
 
           if (!videosError && videosData) {
@@ -2391,7 +2399,7 @@ function GymScreen() {
               order: item.order || 0,
               series: seriesForState,
               training_days: item.training_days || [0],
-              videos: exerciseVideosMap[item.id] || [],
+              videos: exerciseVideosMap[item.exercise_id] || [],
               alternatives,
             };
           } catch (mapError) {

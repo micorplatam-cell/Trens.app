@@ -334,11 +334,12 @@ export default function AdnScreen() {
         .is('deleted_at', null)
         .order('created_at', { ascending: false });
 
-      // Fetch videos from pro_videos
+      // Fetch videos from pro_videos - SOLO los que tienen video_url
       const { data: proVideosData } = await supabase
         .from('pro_videos')
         .select('*')
         .eq('user_id', user.id)
+        .not('video_url', 'is', null)
         .order('created_at', { ascending: false });
 
       // Map user_assets to videos format

@@ -24,8 +24,11 @@ import { useHank } from '../../../context/HankContext';
 import { useSaveGuard } from '../../_layout';
 import { ProUpgradeModal } from '../../../components/pro/ProUpgradeModal';
 import { FullscreenVideoEditor } from '../../../components/pro/FullscreenVideoEditor';
+import { PRNotificationModal } from '../../../components/pro/PRNotificationModal';
 import spotify from '../../../services/spotify/spotify';
 import cloudflareStream from '../../../services/cloudflare/stream';
+import { detectRecordsForNewVideo } from '../../../services/records/recordDetection';
+import type { RecordDetectionResult } from '../../../types/records';
 
 // ============================================================================
 // TIPOS
@@ -95,6 +98,10 @@ export default function ProScreen() {
   // Toast de confirmación
   const [showSaveToast, setShowSaveToast] = useState(false);
   const [saveToastMessage, setSaveToastMessage] = useState('');
+
+  // PR Notification State
+  const [prResult, setPrResult] = useState<RecordDetectionResult | null>(null);
+  const [showPRModal, setShowPRModal] = useState(false);
 
   // Timer ref
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -453,7 +460,36 @@ export default function ProScreen() {
         throw insertError;
       }
 
-      // 4. COMPARTIR SI ES PÚBLICO
+      // 4. DETECTAR RÉCORDS PERSONALES (PRs)
+      // Solo para videos tácticos con peso y reps
+      if (
+        proContext.type === 'tactical' &&
+        proContext.exerciseId &&
+        proContext.exerciseName &&
+        data.weightKg &&
+        data.reps
+      ) {
+        try {
+          const recordResult = await detectRecordsForNewVideo(
+            user.id,
+            proContext.exerciseId,
+            proContext.exerciseName,
+            data.weightKg,
+            data.reps
+          );
+
+          if (recordResult.hasRecord) {
+            console.log('🏆 PR DETECTADO:', recordResult.primaryRecord?.type);
+            setPrResult(recordResult);
+            setShowPRModal(true);
+          }
+        } catch (prError) {
+          console.warn('Error detectando PRs:', prError);
+          // No bloquear el flujo si falla la detección de PRs
+        }
+      }
+
+      // 5. COMPARTIR SI ES PÚBLICO
       if (data.isPublic && capturedVideo?.uri) {
         const isSharingAvailable = await Sharing.isAvailableAsync();
         if (isSharingAvailable) {
@@ -731,6 +767,16 @@ export default function ProScreen() {
           visible={showUpgradeModal}
           onClose={() => setShowUpgradeModal(false)}
           feature="camera"
+        />
+
+        {/* PR NOTIFICATION MODAL - Celebración de récords */}
+        <PRNotificationModal
+          visible={showPRModal}
+          result={prResult}
+          onClose={() => {
+            setShowPRModal(false);
+            setPrResult(null);
+          }}
         />
 
         {/* TOAST DE CONFIRMACIÓN */}
