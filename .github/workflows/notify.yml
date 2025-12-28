@@ -7,7 +7,7 @@ on:
 
 jobs:
   notify:
-    name: 📡 Send Notifications
+    name: 📱 WhatsApp Notification
     runs-on: ubuntu-latest
     if: github.event_name == 'push'
 
@@ -24,56 +24,15 @@ jobs:
           echo "author=$(git log -1 --pretty=%an)" >> $GITHUB_OUTPUT
           echo "sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
-      - name: 📱 Discord Notification
-        if: ${{ secrets.DISCORD_WEBHOOK_URL != '' }}
-        run: |
-          curl -s -X POST "${{ secrets.DISCORD_WEBHOOK_URL }}" \
-            -H "Content-Type: application/json" \
-            -d '{
-              "embeds": [{
-                "title": "🚀 Nuevo Deploy en TRENS",
-                "color": 14423100,
-                "fields": [
-                  {"name": "📝 Commit", "value": "${{ steps.commit.outputs.message }}", "inline": false},
-                  {"name": "👤 Autor", "value": "${{ steps.commit.outputs.author }}", "inline": true},
-                  {"name": "🔗 SHA", "value": "`${{ steps.commit.outputs.sha }}`", "inline": true}
-                ],
-                "footer": {"text": "TRENS CI/CD"}
-              }]
-            }'
-
-      - name: 📱 Slack Notification
-        if: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
-        run: |
-          curl -s -X POST "${{ secrets.SLACK_WEBHOOK_URL }}" \
-            -H "Content-Type: application/json" \
-            -d '{
-              "text": "🚀 *Nuevo Deploy en TRENS*\n📝 ${{ steps.commit.outputs.message }}\n👤 ${{ steps.commit.outputs.author }}"
-            }'
-
-      - name: 📱 Telegram Notification
-        if: ${{ secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != '' }}
-        run: |
-          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-            -d "chat_id=${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -d "text=🚀 *Nuevo Deploy en TRENS*%0A📝 ${{ steps.commit.outputs.message }}%0A👤 ${{ steps.commit.outputs.author }}" \
-            -d "parse_mode=Markdown"
-
       - name: 📱 WhatsApp Notification (CallMeBot)
         if: ${{ secrets.CALLMEBOT_PHONE != '' && secrets.CALLMEBOT_APIKEY != '' }}
         run: |
-          MESSAGE="🚀 Nuevo Deploy en TRENS - ${{ steps.commit.outputs.message }}"
+          MESSAGE="🚀 TRENS Deploy: ${{ steps.commit.outputs.message }} (${{ steps.commit.outputs.sha }})"
           ENCODED=$(echo "$MESSAGE" | sed 's/ /%20/g')
           curl -s "https://api.callmebot.com/whatsapp.php?phone=${{ secrets.CALLMEBOT_PHONE }}&text=${ENCODED}&apikey=${{ secrets.CALLMEBOT_APIKEY }}"
+          echo "✅ WhatsApp notification sent!"
 
-      - name: 📱 WhatsApp Notification (Twilio)
-        if: ${{ secrets.TWILIO_ACCOUNT_SID != '' && secrets.TWILIO_AUTH_TOKEN != '' }}
+      - name: ⚠️ No secrets configured
+        if: ${{ secrets.CALLMEBOT_PHONE == '' || secrets.CALLMEBOT_APIKEY == '' }}
         run: |
-          curl -s -X POST "https://api.twilio.com/2010-04-01/Accounts/${{ secrets.TWILIO_ACCOUNT_SID }}/Messages.json" \
-            -u "${{ secrets.TWILIO_ACCOUNT_SID }}:${{ secrets.TWILIO_AUTH_TOKEN }}" \
-            --data-urlencode "From=whatsapp:${{ secrets.TWILIO_WHATSAPP_FROM }}" \
-            --data-urlencode "To=whatsapp:${{ secrets.TWILIO_WHATSAPP_TO }}" \
-            --data-urlencode "Body=🚀 Nuevo Deploy en TRENS - ${{ steps.commit.outputs.message }}"
-
-      - name: ✅ Done
-        run: echo "✅ Notifications sent!"
+          echo "⚠️ WhatsApp secrets not configured. Add CALLMEBOT_PHONE and CALLMEBOT_APIKEY in Settings > Secrets"
