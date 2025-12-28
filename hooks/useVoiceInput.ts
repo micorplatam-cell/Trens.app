@@ -61,10 +61,14 @@ export function useVoiceInput(): UseVoiceInputReturn {
           return;
         }
 
-        // Configurar modo de audio
+        // Configurar modo de audio - permitir que otras apps sigan reproduciéndose
         await Audio.setAudioModeAsync({
           allowsRecordingIOS: true,
           playsInSilentModeIOS: true,
+          staysActiveInBackground: false,
+          interruptionModeIOS: 2, // MixWithOthers - NO interrumpir Spotify
+          shouldDuckAndroid: false, // NO reducir volumen
+          interruptionModeAndroid: 2,
         });
 
         // Crear y empezar grabación con metering habilitado

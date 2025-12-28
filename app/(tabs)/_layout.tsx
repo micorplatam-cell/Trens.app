@@ -12,6 +12,7 @@ import {
   Flag,
   Sailboat,
   Waves,
+  Music,
   LucideIcon,
 } from 'lucide-react-native';
 import Animated, {
@@ -24,7 +25,7 @@ import Animated, {
   Easing,
 } from 'react-native-reanimated';
 import { useEffect, useRef } from 'react';
-import { useAuth } from '../_layout';
+import { useAuth, useProRecording } from '../_layout';
 import { useSport } from '../../context/SportContext';
 import FloatingLoginButton from '../../components/auth/FloatingLoginButton';
 import { HankOverlay } from '../../components/hank/HankOverlay';
@@ -259,11 +260,89 @@ function ConnectionLine({
   );
 }
 
+// Componente para el icono PRO con indicadores dinámicos
+function ProTabIcon({ focused }: { focused: boolean }) {
+  const { isRecording, recordingTime, hasSpotify, exerciseName } = useProRecording();
+
+  const pulseScale = useSharedValue(1);
+
+  useEffect(() => {
+    if (isRecording) {
+      pulseScale.value = withRepeat(
+        withSequence(
+          withTiming(1.15, { duration: 600, easing: Easing.inOut(Easing.ease) }),
+          withTiming(1, { duration: 600, easing: Easing.inOut(Easing.ease) })
+        ),
+        -1,
+        true
+      );
+    } else {
+      pulseScale.value = withTiming(1, { duration: 200 });
+    }
+  }, [isRecording]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: pulseScale.value }],
+  }));
+
+  const formatTime = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  return (
+    <View style={{ alignItems: 'center' }}>
+      {/* Botón principal */}
+      <Animated.View style={animatedStyle}>
+        <View
+          style={{
+            padding: 16,
+            borderRadius: 999,
+            backgroundColor: isRecording
+              ? ED_HARDY.fireRed
+              : focused
+                ? ED_HARDY.fireRed
+                : ED_HARDY.zinc800,
+            marginBottom: 20,
+            shadowColor: isRecording
+              ? ED_HARDY.neonRed
+              : focused
+                ? ED_HARDY.neonRed
+                : 'transparent',
+            shadowOffset: { width: 0, height: 0 },
+            shadowOpacity: isRecording ? 1 : focused ? 0.8 : 0,
+            shadowRadius: isRecording ? 20 : 15,
+            elevation: isRecording ? 20 : focused ? 15 : 0,
+            borderWidth: isRecording ? 3 : focused ? 2 : 0,
+            borderColor: isRecording ? '#fff' : ED_HARDY.fireOrange,
+          }}
+        >
+          {isRecording ? (
+            // Icono de STOP cuando está grabando
+            <View
+              style={{
+                width: 28,
+                height: 28,
+                backgroundColor: '#fff',
+                borderRadius: 4,
+              }}
+            />
+          ) : (
+            <Crosshair color="#FFFFFF" size={28} strokeWidth={2.5} />
+          )}
+        </View>
+      </Animated.View>
+    </View>
+  );
+}
+
 export default function TabsLayout() {
   const { isProActive, previousModule } = useProNavigation();
   const { user, loading } = useAuth();
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
+  const { isRecording, startRecording, stopRecording } = useProRecording();
 
   // Obtener configuración de tabs según deporte activo
   const { activeSport, getTabConfig } = useSport();
@@ -368,32 +447,26 @@ export default function TabsLayout() {
           }}
         />
 
-        {/* PRO - Botón central de cámara con FIRE GLOW */}
+        {/* PRO - Botón central de cámara con indicadores dinámicos */}
         <Tabs.Screen
           name="pro/index"
           options={{
             title: '',
-            tabBarIcon: ({ focused }) => (
-              <View
-                style={{
-                  padding: 16,
-                  borderRadius: 999,
-                  backgroundColor: focused ? ED_HARDY.fireRed : ED_HARDY.zinc800,
-                  marginBottom: 20,
-                  // ED HARDY: Intense fire glow when active
-                  shadowColor: focused ? ED_HARDY.neonRed : 'transparent',
-                  shadowOffset: { width: 0, height: 0 },
-                  shadowOpacity: focused ? 0.8 : 0,
-                  shadowRadius: 15,
-                  elevation: focused ? 15 : 0,
-                  // Fire border
-                  borderWidth: focused ? 2 : 0,
-                  borderColor: ED_HARDY.fireOrange,
-                }}
-              >
-                <Crosshair color="#FFFFFF" size={28} strokeWidth={2.5} />
-              </View>
-            ),
+            tabBarIcon: ({ focused }) => <ProTabIcon focused={focused} />,
+          }}
+          listeners={{
+            tabPress: (e) => {
+              // Si ya estamos en PRO, controlar grabación
+              if (isProActive) {
+                e.preventDefault(); // No navegar de nuevo
+                if (isRecording) {
+                  stopRecording();
+                } else {
+                  startRecording();
+                }
+              }
+              // Si no estamos en PRO, navegar normalmente (comportamiento por defecto)
+            },
           }}
         />
 

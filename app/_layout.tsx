@@ -7,6 +7,7 @@ import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { HankProvider } from '../context/HankContext';
 import { ProContextProvider } from '../context/ProContext';
+import { ProRecordingProvider } from '../context/ProRecordingContext';
 import { UserRoleProvider, useUserRoleContext } from '../context/UserRoleContext';
 import { SaveGuardProvider } from '../context/SaveGuardContext';
 import { useDeepLinkHandler } from '../services/share/deepLinkHandler';
@@ -75,6 +76,12 @@ export { useHank } from '../context/HankContext';
 export { useProContext } from '../context/ProContext';
 
 // ============================================================================
+// 4.5. PRO RECORDING CONTEXT - Estado de grabación compartido
+// Re-exportamos useProRecording para acceso global
+// ============================================================================
+export { useProRecording } from '../context/ProRecordingContext';
+
+// ============================================================================
 // 5. SAVE GUARD CONTEXT - Bloquea guardado para usuarios FREE
 // Re-exportamos useSaveGuard para acceso global
 // ============================================================================
@@ -115,15 +122,17 @@ export default function RootLayout() {
         <AuthProvider>
           <SportProvider>
             <ProContextProvider>
-              <SaveGuardWrapper>
-                <HankWrapper>
-                  <View className="flex-1 bg-savage-black">
-                    <Slot />
-                    {/* Overlays movidos a (tabs)/_layout.tsx donde hay contexto de navegación */}
-                    <StatusBar style="light" />
-                  </View>
-                </HankWrapper>
-              </SaveGuardWrapper>
+              <ProRecordingProvider>
+                <SaveGuardWrapper>
+                  <HankWrapper>
+                    <View className="flex-1 bg-savage-black">
+                      <Slot />
+                      {/* Overlays movidos a (tabs)/_layout.tsx donde hay contexto de navegación */}
+                      <StatusBar style="light" />
+                    </View>
+                  </HankWrapper>
+                </SaveGuardWrapper>
+              </ProRecordingProvider>
             </ProContextProvider>
           </SportProvider>
         </AuthProvider>

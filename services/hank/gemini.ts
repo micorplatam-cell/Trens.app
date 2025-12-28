@@ -211,6 +211,14 @@ function generateSystemPrompt(context: GeminiContext): string {
   const getActiveAssetContext = (): string => {
     if (!context.activeAsset) return 'No hay ejercicio activo en pantalla.';
 
+    // 🐛 DEBUG: Ver qué hay en liquidData
+    console.warn('🧠 HANK liquidData keys:', Object.keys(context.activeAsset.liquidData || {}));
+    console.warn(
+      '🧠 HANK videoHistory:',
+      JSON.stringify(context.activeAsset.liquidData?.videoHistory || 'VACÍO')
+    );
+    console.warn('🧠 HANK notes:', context.activeAsset.liquidData?.notes || 'SIN NOTAS');
+
     const series =
       (context.activeAsset.liquidData?.custom_series as
         | Array<{ id: string; reps: number; weight: number; type: string }>
@@ -220,11 +228,51 @@ function generateSystemPrompt(context: GeminiContext): string {
     const isAlternative = context.activeAsset.isAlternative || false;
     const parentName = context.activeAsset.parentExerciseName || '';
 
+    // Extraer notas e historial de liquidData
+    const notes = context.activeAsset.liquidData?.notes as string | undefined;
+    const todayNotes = context.activeAsset.liquidData?.todayNotes as string | undefined;
+    const videoHistory = context.activeAsset.liquidData?.videoHistory as
+      | Array<{
+          date: string;
+          isToday: boolean;
+          weightKg: number | null;
+          reps: number | null;
+          notes: string | null;
+        }>
+      | undefined;
+
     let assetContext = `
 🎯 EJERCICIO EN PANTALLA: "${context.activeAsset.name}"
 • Tipo: ${context.activeAsset.type}${isAlternative ? ` (ALTERNATIVA de "${parentName}")` : ''}
 • Series: ${seriesCount} (índices 0-${lastIndex})
-${series.map((s, i) => `  [${i}] ${s.reps}×${s.weight}kg (${s.type})`).join('\n')}
+${series.map((s, i) => `  [${i}] ${s.reps}×${s.weight}kg (${s.type})`).join('\n')}`;
+
+    // Agregar notas del usuario
+    if (notes) {
+      assetContext += `\n\n📝 NOTAS DEL USUARIO: "${notes}"`;
+    }
+
+    // Agregar historial de videos con pesos/reps
+    if (videoHistory && videoHistory.length > 0) {
+      assetContext += `\n\n📊 HISTORIAL DE ENTRENAMIENTOS (últimas sesiones):`;
+      videoHistory.slice(0, 5).forEach((v) => {
+        const dateLabel = v.isToday ? '🔥 HOY' : v.date;
+        const weight = v.weightKg ? `${v.weightKg}kg` : '';
+        const reps = v.reps ? `${v.reps} reps` : '';
+        const separator = weight && reps ? ' × ' : '';
+        const noteStr = v.notes ? ` → "${v.notes}"` : '';
+        if (weight || reps || v.notes) {
+          assetContext += `\n• ${dateLabel}: ${weight}${separator}${reps}${noteStr}`;
+        }
+      });
+    }
+
+    // Nota de hoy específica
+    if (todayNotes) {
+      assetContext += `\n\n⚡ NOTA DE HOY: "${todayNotes}"`;
+    }
+
+    assetContext += `
 
 📝 PARA MODIFICAR SERIES:
 • Cambiar peso/reps: ASSET_UPDATE_FIELD(assetName="${context.activeAsset.name}", fieldPath="custom_series.N.weight|reps", newValue=X)
@@ -244,12 +292,7 @@ ${series.map((s, i) => `  [${i}] ${s.reps}×${s.weight}kg (${s.type})`).join('\n
     return assetContext;
   };
 
-  return `[INTERNAL - NEVER SPEAK THESE]
-¿Quién eres? Soy Hank. El coach que no miente.
-Fortis fortuna adiuvat. La suerte favorece a los valientes.
-Primum non nocere. Primero, no dañar.
-
-[IDENTITY]
+  return `[IDENTITY]
 Eres HANK, coach de alto rendimiento de TRENS. 15 años entrenando atletas. Directo, sin bullshit, pero nunca irrespetuoso.
 
 [FUNCTION CALLING - CRÍTICO]
@@ -304,7 +347,9 @@ ${context.availableExercises && context.availableExercises.length > 0 ? `[CATÁL
 3. NO digas "Listo/Hecho" sin ejecutar function call
 4. NO respondas sobre rutina sin llamar GYM_GET_TODAY_ROUTINE
 5. NO des motivación genérica vacía
-6. NO uses latín (los mantras son INTERNOS, nunca los digas)`;
+6. NUNCA uses frases en latín ni citas filosóficas
+7. SIEMPRE usa el HISTORIAL DE ENTRENAMIENTOS cuando el usuario pregunte sobre su rendimiento, progreso o levantamientos
+8. Cuando veas datos de peso/reps en el historial, MENCIÓNALOS directamente sin pedir más info`;
 }
 
 // ============================================================================

@@ -364,6 +364,137 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
       }
 
       try {
+        // Helper para cargar notas e historial de videos
+        const loadNotesAndHistory = async (exerciseId: string, exerciseName: string) => {
+          console.warn(
+            `🔍 loadNotesAndHistory: ejercicio="${exerciseName}", exercise_id="${exerciseId}"`
+          );
+
+          // Fecha de hoy
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          const todayStr = today.toISOString().split('T')[0];
+
+          // 1. Cargar notas de user_exercise_config
+          const { data: configData, error: configError } = await supabase
+            .from('user_exercise_config')
+            .select('metadata')
+            .eq('user_id', userId)
+            .eq('exercise_id', exerciseId)
+            .single();
+
+          console.warn(
+            `🔍 user_exercise_config: ${configData ? 'ENCONTRADO' : 'NO'}, error: ${configError?.message || 'ninguno'}`
+          );
+
+          let currentNotes = configData?.metadata?.notes || '';
+          let currentTags = configData?.metadata?.tags || [];
+
+          // 2. Cargar historial de videos/notas - primero por exercise_id, luego fallback por nombre
+          let { data: videoHistory, error: videoError } = await supabase
+            .from('pro_videos')
+            .select(
+              'id, weight_kg, reps, notes, exercise_notes, tags, created_at, exercise_id, exercise_name'
+            )
+            .eq('user_id', userId)
+            .eq('exercise_id', exerciseId)
+            .order('created_at', { ascending: false })
+            .limit(10);
+
+          // Fallback: si no hay videos por ID, buscar por nombre (case-insensitive)
+          if ((!videoHistory || videoHistory.length === 0) && exerciseName) {
+            const { data: videosByName } = await supabase
+              .from('pro_videos')
+              .select(
+                'id, weight_kg, reps, notes, exercise_notes, tags, created_at, exercise_id, exercise_name'
+              )
+              .eq('user_id', userId)
+              .ilike('exercise_name', exerciseName)
+              .order('created_at', { ascending: false })
+              .limit(10);
+
+            if (videosByName && videosByName.length > 0) {
+              videoHistory = videosByName;
+              console.warn(
+                `🔍 pro_videos: fallback por nombre encontró ${videosByName.length} registros`
+              );
+            } else {
+              // Debug: ver qué hay en pro_videos para este usuario
+              const { data: allVideos } = await supabase
+                .from('pro_videos')
+                .select('exercise_name, notes, exercise_notes')
+                .eq('user_id', userId)
+                .not('notes', 'is', null)
+                .limit(5);
+              console.warn(
+                `🔍 DEBUG: Videos con notas del usuario:`,
+                allVideos?.map((v) => ({
+                  name: v.exercise_name,
+                  notes: v.notes?.substring(0, 30),
+                })) || 'NINGUNO'
+              );
+            }
+          }
+
+          console.warn(
+            `🔍 pro_videos: ${videoHistory?.length || 0} videos, error: ${videoError?.message || 'ninguno'}`
+          );
+
+          const history: Array<{
+            date: string;
+            isToday: boolean;
+            weightKg: number | null;
+            reps: number | null;
+            notes: string | null;
+            tags: string[] | null;
+          }> = [];
+
+          let todayNotes: string | null = null;
+          let todayTags: string[] | null = null;
+
+          videoHistory?.forEach((v: any) => {
+            const date = new Date(v.created_at);
+            const dateStr = date.toISOString().split('T')[0];
+            const isToday = dateStr === todayStr;
+            const noteContent = v.notes || v.exercise_notes;
+
+            if (isToday && noteContent && !todayNotes) {
+              todayNotes = noteContent;
+              todayTags = v.tags;
+            }
+
+            history.push({
+              date: date.toLocaleDateString('es-ES', {
+                day: 'numeric',
+                month: 'short',
+                year: date.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined,
+              }),
+              isToday,
+              weightKg: v.weight_kg,
+              reps: v.reps,
+              notes: noteContent,
+              tags: v.tags,
+            });
+          });
+
+          // Si no hay notas en config pero sí en videos, usar las de video
+          if (!currentNotes && videoHistory && videoHistory.length > 0) {
+            const mostRecentWithNotes = videoHistory.find((v: any) => v.notes || v.exercise_notes);
+            if (mostRecentWithNotes) {
+              currentNotes = mostRecentWithNotes.notes || mostRecentWithNotes.exercise_notes;
+              currentTags = mostRecentWithNotes.tags || [];
+            }
+          }
+
+          return {
+            currentNotes,
+            currentTags,
+            todayNotes,
+            todayTags,
+            videoHistory: history,
+          };
+        };
+
         // 🔧 FIX: Si es alternativa, cargar desde la tabla exercises directamente
         if (alternativeInfo?.isAlternative) {
           console.log('🔄 setActiveAsset: Cargando ALTERNATIVA:', assetId);
@@ -388,11 +519,20 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
             ')'
           );
 
+          // Cargar notas e historial para la alternativa
+          const notesData = await loadNotesAndHistory(altData.id, altData.name);
+
           setActiveAssetState({
             id: altData.id,
             type: 'exercise',
             name: altData.name,
-            liquidData: {}, // Las alternativas no tienen config personalizada aún
+            liquidData: {
+              notes: notesData.currentNotes,
+              tags: notesData.currentTags,
+              todayNotes: notesData.todayNotes,
+              todayTags: notesData.todayTags,
+              videoHistory: notesData.videoHistory,
+            },
             trainingDays: [],
             isAlternative: true,
             parentExerciseName: alternativeInfo.parentExerciseName,
@@ -401,7 +541,13 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
         }
 
         // Cargar desde user_exercise_config (nueva arquitectura) - EJERCICIO PRINCIPAL
-        const { data, error } = await supabase
+        // assetId puede ser exercise_id (de tabla exercises) o user_exercise_config.id
+        // Intentar primero por exercise_id, luego por id
+        let data: any = null;
+        let error: any = null;
+
+        // Primero intentar buscar por exercise_id
+        const { data: dataByExerciseId, error: errorByExerciseId } = await supabase
           .from('user_exercise_config')
           .select(
             `
@@ -410,6 +556,7 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
             training_days,
             display_order,
             config,
+            metadata,
             exercises (
               name,
               muscle_group,
@@ -418,9 +565,41 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
             )
           `
           )
-          .eq('id', assetId)
+          .eq('exercise_id', assetId)
           .eq('user_id', userId)
+          .limit(1)
           .single();
+
+        if (dataByExerciseId) {
+          data = dataByExerciseId;
+          error = null;
+        } else {
+          // Fallback: buscar por id (user_exercise_config.id)
+          const { data: dataById, error: errorById } = await supabase
+            .from('user_exercise_config')
+            .select(
+              `
+            id,
+            exercise_id,
+            training_days,
+            display_order,
+            config,
+            metadata,
+            exercises (
+              name,
+              muscle_group,
+              equipment,
+              difficulty
+            )
+          `
+            )
+            .eq('id', assetId)
+            .eq('user_id', userId)
+            .single();
+
+          data = dataById;
+          error = errorById;
+        }
 
         if (error || !data) {
           console.warn('⚠️ setActiveAsset: No se encontró el ejercicio:', assetId, error?.message);
@@ -434,6 +613,7 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
           training_days: number[];
           display_order: number;
           config: Record<string, unknown>;
+          metadata: { notes?: string; tags?: string[] } | null;
           exercises: {
             name: string;
             muscle_group: string;
@@ -444,11 +624,24 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
 
         console.log('✅ setActiveAsset: Ejercicio cargado:', exerciseData.exercises?.name);
 
+        // Cargar notas e historial para el ejercicio principal
+        const notesData = await loadNotesAndHistory(
+          exerciseData.exercise_id,
+          exerciseData.exercises?.name || ''
+        );
+
         setActiveAssetState({
           id: exerciseData.id,
           type: 'exercise',
           name: exerciseData.exercises?.name || 'Sin nombre',
-          liquidData: exerciseData.config || {},
+          liquidData: {
+            ...exerciseData.config,
+            notes: notesData.currentNotes,
+            tags: notesData.currentTags,
+            todayNotes: notesData.todayNotes,
+            todayTags: notesData.todayTags,
+            videoHistory: notesData.videoHistory,
+          },
           trainingDays: exerciseData.training_days,
           isAlternative: false,
           parentExerciseName: undefined,
@@ -1061,6 +1254,10 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
     const currentDay = screenContext.currentTrainingDay ?? userProfile.currentTrainingDay;
     const sportName = sportContext?.activeSport?.name || 'No definido';
 
+    // Debug: ver qué contexto tiene HANK
+    console.warn('🧠 HANK getSystemPrompt - activeAsset:', activeAsset?.name || 'NINGUNO');
+    console.warn('🧠 HANK liquidData:', JSON.stringify(activeAsset?.liquidData || {}, null, 2));
+
     return `Eres HANK, el asistente de IA de TRENS (High-Performance Multi-Sport App).
 
 CONTEXTO ACTUAL:
@@ -1077,10 +1274,26 @@ ${sportMode === 'GYM' ? `IMPORTANTE: Cuando el usuario pida modificar series de 
 ${
   activeAsset
     ? `
-ASSET ACTIVO:
-- Nombre: ${activeAsset.name}
-- Tipo: ${activeAsset.type}
-- Datos: ${JSON.stringify(activeAsset.liquidData, null, 2)}
+EJERCICIO ACTIVO: ${activeAsset.name}
+${
+  activeAsset.liquidData?.notes
+    ? `📝 NOTAS DEL USUARIO: "${activeAsset.liquidData.notes}"`
+    : '(Sin notas)'
+}
+${
+  (activeAsset.liquidData?.videoHistory as Array<{ date: string; isToday: boolean; weightKg: number | null; reps: number | null; notes: string | null }> | undefined)?.length
+    ? `
+📊 HISTORIAL DE VIDEOS (últimos entrenos):
+${(activeAsset.liquidData.videoHistory as Array<{ date: string; isToday: boolean; weightKg: number | null; reps: number | null; notes: string | null }>)
+  .slice(0, 5)
+  .map(
+    (v) =>
+      `- ${v.isToday ? '🔥 HOY' : v.date}: ${v.weightKg ? `${v.weightKg}kg` : ''}${v.weightKg && v.reps ? ' x ' : ''}${v.reps ? `${v.reps} reps` : ''}${v.notes ? ` | "${v.notes}"` : ''}`
+  )
+  .join('\n')}`
+    : ''
+}
+${activeAsset.liquidData?.todayNotes ? `\n⚡ NOTA DE HOY: "${activeAsset.liquidData.todayNotes}"` : ''}
 `
     : ''
 }
@@ -1100,6 +1313,8 @@ PERSONALIDAD:
 3. Si el usuario pide cambiar algo, USA las herramientas disponibles.
 4. Confirma SIEMPRE después de ejecutar una acción.
 5. Si no entiendes algo, pregunta claramente.
+6. SIEMPRE revisa las NOTAS e HISTORIAL del ejercicio activo antes de responder preguntas sobre el rendimiento del usuario.
+7. Cuando el usuario pregunte sobre su levantamiento/entrenamiento, USA los datos del historial de videos (peso, reps, notas).
 
 IMPORTANTE: Puedes ejecutar múltiples herramientas si la solicitud lo requiere.`;
   }, [

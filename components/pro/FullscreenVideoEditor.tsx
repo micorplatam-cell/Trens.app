@@ -80,8 +80,12 @@ interface FullscreenVideoEditorProps {
     videoTrimEnd: number;
     spotifyTrack: SpotifyMetadata | null;
     isPublic: boolean;
+    weightKg: number | null;
+    reps: number | null;
+    caption: string | null;
   }) => void;
   saving: boolean;
+  keepSpotifyPlaying?: boolean; // No pausar Spotify al cerrar (ej: después de guardar)
 }
 
 // ============================================================================
@@ -142,6 +146,7 @@ export function FullscreenVideoEditor({
   onClose,
   onSave,
   saving,
+  keepSpotifyPlaying = false,
 }: FullscreenVideoEditorProps) {
   // -------------------------------------------------------------------------
   // VIDEO STATE
@@ -169,6 +174,9 @@ export function FullscreenVideoEditor({
   // UI STATE
   // -------------------------------------------------------------------------
   const [isPublic, setIsPublic] = useState(true);
+  const [weightKg, setWeightKg] = useState<string>('');
+  const [reps, setReps] = useState<string>('');
+  const [caption, setCaption] = useState<string>('');
 
   // -------------------------------------------------------------------------
   // REFS
@@ -177,6 +185,7 @@ export function FullscreenVideoEditor({
   const spotifyTimelineRef = useRef<View>(null);
   const spotifyTimelineLayoutRef = useRef({ x: 0, y: 0, width: 0, height: 0 });
   const videoPlayerRef = useRef<any>(null);
+  const wasEditorOpenRef = useRef(false); // Track if editor was actually open
   const currentValuesRef = useRef({
     videoTrimStart: 0,
     videoTrimEnd: 100,
@@ -285,12 +294,18 @@ export function FullscreenVideoEditor({
     }
   }, [visible, spotifyMetadata]);
 
-  // Pausar Spotify al cerrar editor
+  // Pausar Spotify al cerrar editor (solo si realmente estaba abierto y no se indicó mantener)
   useEffect(() => {
-    if (!visible) {
-      spotify.pause().catch(() => {});
+    if (visible) {
+      wasEditorOpenRef.current = true;
+    } else if (wasEditorOpenRef.current) {
+      // Solo pausar si el editor REALMENTE estaba abierto antes Y no se indicó mantener Spotify
+      wasEditorOpenRef.current = false;
+      if (!keepSpotifyPlaying) {
+        spotify.pause().catch(() => {});
+      }
     }
-  }, [visible]);
+  }, [visible, keepSpotifyPlaying]);
 
   // Load liked songs when browser opens
   useEffect(() => {
@@ -640,8 +655,21 @@ export function FullscreenVideoEditor({
       videoTrimEnd,
       spotifyTrack: spotifyEnabled && selectedTrack ? selectedTrack : null,
       isPublic,
+      weightKg: weightKg.trim() ? parseFloat(weightKg) : null,
+      reps: reps.trim() ? parseInt(reps, 10) : null,
+      caption: caption.trim() || null,
     });
-  }, [videoTrimStart, videoTrimEnd, spotifyEnabled, selectedTrack, isPublic, onSave]);
+  }, [
+    videoTrimStart,
+    videoTrimEnd,
+    spotifyEnabled,
+    selectedTrack,
+    isPublic,
+    weightKg,
+    reps,
+    caption,
+    onSave,
+  ]);
 
   // -------------------------------------------------------------------------
   // RENDER
@@ -773,6 +801,52 @@ export function FullscreenVideoEditor({
                     <Text className="text-white text-xs font-bold">›</Text>
                   </View>
                 </View>
+              </View>
+            </View>
+
+            {/* WORKOUT DATA SECTION (opcional) */}
+            <View className="mb-4">
+              <View className="flex-row gap-2 mb-2">
+                {/* Weight Input */}
+                <View className="flex-1 bg-zinc-800/50 rounded-xl p-3">
+                  <Text className="text-zinc-400 text-xs font-bold mb-1">PESO (KG)</Text>
+                  <TextInput
+                    value={weightKg}
+                    onChangeText={setWeightKg}
+                    placeholder="—"
+                    placeholderTextColor="#71717A"
+                    keyboardType="decimal-pad"
+                    className="text-white text-xl font-bold font-mono"
+                    style={{ padding: 0, height: 28 }}
+                  />
+                </View>
+
+                {/* Reps Input */}
+                <View className="flex-1 bg-zinc-800/50 rounded-xl p-3">
+                  <Text className="text-zinc-400 text-xs font-bold mb-1">REPS</Text>
+                  <TextInput
+                    value={reps}
+                    onChangeText={setReps}
+                    placeholder="—"
+                    placeholderTextColor="#71717A"
+                    keyboardType="number-pad"
+                    className="text-white text-xl font-bold font-mono"
+                    style={{ padding: 0, height: 28 }}
+                  />
+                </View>
+              </View>
+
+              {/* Caption Input */}
+              <View className="bg-zinc-800/50 rounded-xl p-3">
+                <TextInput
+                  value={caption}
+                  onChangeText={setCaption}
+                  placeholder="Añadir caption... (opcional)"
+                  placeholderTextColor="#71717A"
+                  className="text-white text-sm"
+                  style={{ padding: 0, height: 20 }}
+                  maxLength={100}
+                />
               </View>
             </View>
 

@@ -30,10 +30,12 @@ export interface UserRoleContextValue {
   // Spotify
   spotifyConnected: boolean;
   spotifyPremium: boolean;
+  spotifyFeedSync: boolean;
 
   // Acciones
   refetch: () => Promise<void>;
   updateSpotifyStatus: (connected: boolean, premium: boolean) => Promise<void>;
+  updateSpotifyFeedSync: (enabled: boolean) => Promise<void>;
 
   // Permisos explícitos (según MASTER)
   permissions: {
@@ -62,6 +64,7 @@ export function UserRoleProvider({ children }: { children: ReactNode }) {
   const [role, setRole] = useState<UserRole>('free');
   const [spotifyConnected, setSpotifyConnected] = useState(false);
   const [spotifyPremium, setSpotifyPremium] = useState(false);
+  const [spotifyFeedSync, setSpotifyFeedSync] = useState(true);
 
   // -------------------------------------------------------------------------
   // FETCH USER ROLE + SPOTIFY STATUS
@@ -70,7 +73,7 @@ export function UserRoleProvider({ children }: { children: ReactNode }) {
     try {
       const { data: roleData, error: roleError } = await supabase
         .from('user_roles')
-        .select('role, spotify_connected, spotify_premium')
+        .select('role, spotify_connected, spotify_premium, spotify_feed_sync')
         .eq('user_id', userId)
         .single();
 
@@ -85,6 +88,7 @@ export function UserRoleProvider({ children }: { children: ReactNode }) {
             setRole('free');
             setSpotifyConnected(false);
             setSpotifyPremium(false);
+            setSpotifyFeedSync(true);
           }
         }
       } else if (roleData) {
@@ -92,9 +96,11 @@ export function UserRoleProvider({ children }: { children: ReactNode }) {
         // Cargar estado de Spotify desde la DB
         setSpotifyConnected(roleData.spotify_connected ?? false);
         setSpotifyPremium(roleData.spotify_premium ?? false);
+        setSpotifyFeedSync(roleData.spotify_feed_sync ?? true);
         spotifyLogger.debug('Status cargado:', {
           connected: roleData.spotify_connected,
           premium: roleData.spotify_premium,
+          feedSync: roleData.spotify_feed_sync,
         });
       }
     } catch (err) {
@@ -132,6 +138,7 @@ export function UserRoleProvider({ children }: { children: ReactNode }) {
         setRole('free');
         setSpotifyConnected(false);
         setSpotifyPremium(false);
+        setSpotifyFeedSync(true);
       }
     });
 
@@ -164,6 +171,40 @@ export function UserRoleProvider({ children }: { children: ReactNode }) {
         }
       } catch (err) {
         spotifyLogger.error('Error updating status:', err);
+      }
+    },
+    [user]
+  );
+
+  // -------------------------------------------------------------------------
+  // UPDATE SPOTIFY FEED SYNC PREFERENCE
+  // -------------------------------------------------------------------------
+  const updateSpotifyFeedSync = useCallback(
+    async (enabled: boolean) => {
+      if (!user) return;
+
+      // Actualizar estado local inmediatamente (optimistic update)
+      setSpotifyFeedSync(enabled);
+
+      try {
+        const { error: updateError } = await supabase
+          .from('user_roles')
+          .update({
+            spotify_feed_sync: enabled,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('user_id', user.id);
+
+        if (updateError) {
+          spotifyLogger.error('Error updating feed sync:', updateError);
+          // Revertir si falla
+          setSpotifyFeedSync(!enabled);
+        } else {
+          spotifyLogger.debug('Feed sync actualizado en DB:', { enabled });
+        }
+      } catch (err) {
+        spotifyLogger.error('Error updating feed sync:', err);
+        setSpotifyFeedSync(!enabled);
       }
     },
     [user]
@@ -210,8 +251,10 @@ export function UserRoleProvider({ children }: { children: ReactNode }) {
     isFree,
     spotifyConnected,
     spotifyPremium,
+    spotifyFeedSync,
     refetch,
     updateSpotifyStatus,
+    updateSpotifyFeedSync,
     permissions,
   };
 

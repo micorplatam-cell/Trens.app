@@ -19,6 +19,7 @@ import Animated, {
 import { supabase } from '../../../lib/supabase';
 import { useUserRoleContext } from '../../../context/UserRoleContext';
 import { useProContext } from '../../../context/ProContext';
+import { useProRecording } from '../../../context/ProRecordingContext';
 import { useHank } from '../../../context/HankContext';
 import { useSaveGuard } from '../../_layout';
 import { ProUpgradeModal } from '../../../components/pro/ProUpgradeModal';
@@ -52,6 +53,8 @@ interface SpotifyMetadata {
 export default function ProScreen() {
   const { user, isPro, spotifyPremium, spotifyConnected } = useUserRoleContext();
   const { context: proContext, clearContext } = useProContext();
+  const { registerHandlers, setRecordingState, setSpotifyState, setExerciseState } =
+    useProRecording();
   const { triggerRefresh, setScreenContext } = useHank();
   const { canSave } = useSaveGuard();
 
@@ -84,15 +87,20 @@ export default function ProScreen() {
   // Editor Modal State
   const [editorVisible, setEditorVisible] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [keepSpotifyPlaying, setKeepSpotifyPlaying] = useState(false); // No pausar Spotify al cerrar editor
 
   // Spotify State - solo para auto-detección inicial
   const [spotifyMetadata, setSpotifyMetadata] = useState<SpotifyMetadata | null>(null);
+
+  // Toast de confirmación
+  const [showSaveToast, setShowSaveToast] = useState(false);
+  const [saveToastMessage, setSaveToastMessage] = useState('');
 
   // Timer ref
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const recordingTimeRef = useRef(0);
 
-  // Capturar metadata de Spotify al montar (solo PRO y solo si está reproduciendo)
+  // Capturar metadata de Spotify al montar y actualizar periódicamente
   useEffect(() => {
     const captureSpotifyMetadata = async () => {
       if (isPro && spotifyConnected && spotifyPremium) {
@@ -100,14 +108,21 @@ export default function ProScreen() {
           const playbackState = await spotify.getPlaybackState();
           // Solo capturar si está REPRODUCIENDO activamente
           if (playbackState?.isPlaying && playbackState.track) {
-            setSpotifyMetadata({
-              enabled: true,
-              trackUri: playbackState.track.uri,
-              positionMs: playbackState.track.positionMs || 0,
-              trackName: playbackState.track.name,
-              artist: playbackState.track.artist,
-              albumArt: playbackState.track.albumArt,
-              durationMs: playbackState.track.durationMs || 240000,
+            const track = playbackState.track;
+            setSpotifyMetadata((prev) => {
+              // Solo actualizar si cambió la canción
+              if (prev?.trackUri !== track.uri) {
+                return {
+                  enabled: true,
+                  trackUri: track.uri,
+                  positionMs: track.positionMs || 0,
+                  trackName: track.name,
+                  artist: track.artist,
+                  albumArt: track.albumArt,
+                  durationMs: track.durationMs || 240000,
+                };
+              }
+              return prev;
             });
           } else {
             // No hay música reproduciéndose - no auto-detectar
@@ -119,7 +134,13 @@ export default function ProScreen() {
       }
     };
 
+    // Capturar inmediatamente
     captureSpotifyMetadata();
+
+    // Actualizar cada 2 segundos mientras está en PRO (para detectar cambios de canción)
+    const interval = setInterval(captureSpotifyMetadata, 2000);
+
+    return () => clearInterval(interval);
   }, [isPro, spotifyConnected, spotifyPremium]);
 
   // Animation - Breathing effect para el shutter
@@ -159,7 +180,7 @@ export default function ProScreen() {
   }));
 
   // -------------------------------------------------------------------------
-  // AUDIO SETUP - NO grabar audio de Spotify, SOLO video + audio ambiente
+  // AUDIO SETUP - Permitir que Spotify siga reproduciéndose
   // -------------------------------------------------------------------------
   useEffect(() => {
     const setupAudio = async () => {
@@ -168,9 +189,9 @@ export default function ProScreen() {
           allowsRecordingIOS: true,
           playsInSilentModeIOS: true,
           staysActiveInBackground: false,
-          interruptionModeIOS: 1, // DuckOthers - permite que música siga
-          shouldDuckAndroid: true,
-          interruptionModeAndroid: 1,
+          interruptionModeIOS: 2, // MixWithOthers - NO interrumpe Spotify
+          shouldDuckAndroid: false, // NO reducir volumen en Android
+          interruptionModeAndroid: 2, // DoNotMix pero no interrumpir
           playThroughEarpieceAndroid: false,
         });
       } catch (error) {
@@ -298,6 +319,43 @@ export default function ProScreen() {
     }
   };
 
+  // Refs para las funciones (para que el contexto siempre tenga la versión actual)
+  const startRecordingRef = useRef(startRecording);
+  const stopRecordingRef = useRef(stopRecording);
+
+  useEffect(() => {
+    startRecordingRef.current = startRecording;
+    stopRecordingRef.current = stopRecording;
+  });
+
+  // -------------------------------------------------------------------------
+  // SINCRONIZAR CON CONTEXTO GLOBAL DE GRABACIÓN
+  // -------------------------------------------------------------------------
+
+  // Registrar handlers en el contexto global (una sola vez)
+  useEffect(() => {
+    registerHandlers({
+      start: () => startRecordingRef.current(),
+      stop: () => stopRecordingRef.current(),
+    });
+  }, [registerHandlers]);
+
+  // Sincronizar estado de grabación con contexto
+  useEffect(() => {
+    setRecordingState(isRecording, recordingTime);
+  }, [isRecording, recordingTime, setRecordingState]);
+
+  // Sincronizar estado de Spotify con contexto
+  useEffect(() => {
+    setSpotifyState(!!spotifyMetadata);
+  }, [spotifyMetadata, setSpotifyState]);
+
+  // Sincronizar nombre del ejercicio con contexto
+  useEffect(() => {
+    const name = proContext.type === 'tactical' ? proContext.exerciseName || null : null;
+    setExerciseState(name);
+  }, [proContext, setExerciseState]);
+
   // -------------------------------------------------------------------------
   // EDITOR HANDLERS
   // -------------------------------------------------------------------------
@@ -306,6 +364,8 @@ export default function ProScreen() {
     setEditorVisible(false);
     setSpotifyMetadata(null);
     clearContext();
+    // Reset keepSpotifyPlaying después de cerrar (para próximo uso)
+    setTimeout(() => setKeepSpotifyPlaying(false), 100);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
@@ -317,6 +377,9 @@ export default function ProScreen() {
     videoTrimEnd: number;
     spotifyTrack: SpotifyMetadata | null;
     isPublic: boolean;
+    weightKg: number | null;
+    reps: number | null;
+    caption: string | null;
   }) => {
     // Guard: Verificar si puede guardar (muestra modal persuasivo)
     if (!canSave('save_video_pro')) return;
@@ -325,6 +388,15 @@ export default function ProScreen() {
 
     setSaving(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    // DEBUG: Verificar qué contexto tenemos
+    console.log('📹 GUARDANDO VIDEO - ProContext:', {
+      type: proContext.type,
+      exerciseId: proContext.exerciseId,
+      exerciseName: proContext.exerciseName,
+      exerciseNotes: proContext.exerciseNotes,
+      exerciseTags: proContext.exerciseTags,
+    });
 
     try {
       // 1. SUBIR VIDEO A CLOUDFLARE STREAM
@@ -356,6 +428,9 @@ export default function ProScreen() {
           exercise_name: proContext.type === 'tactical' ? proContext.exerciseName : null,
           exercise_notes: proContext.type === 'tactical' ? proContext.exerciseNotes : null,
           tags: proContext.type === 'tactical' ? proContext.exerciseTags : null,
+          weight_kg: data.weightKg,
+          reps: data.reps,
+          free_text: data.caption,
           spotify: data.spotifyTrack
             ? {
                 enabled: true,
@@ -397,6 +472,18 @@ export default function ProScreen() {
 
       triggerRefresh();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+      // Mostrar toast de confirmación
+      const exerciseInfo =
+        proContext.type === 'tactical' && proContext.exerciseName
+          ? proContext.exerciseName
+          : 'Entrenamiento';
+      setSaveToastMessage(`✅ Video guardado: ${exerciseInfo}`);
+      setShowSaveToast(true);
+      setTimeout(() => setShowSaveToast(false), 3000);
+
+      // Mantener Spotify sonando después de guardar
+      setKeepSpotifyPlaying(true);
       discardVideo();
     } catch (error) {
       console.error('Error saving:', error);
@@ -528,7 +615,7 @@ export default function ProScreen() {
               />
             </Animated.View>
             <Text className="text-fire-orange font-bold text-sm tracking-wide">
-              {isRecording ? getContextLabel() : '🔥 PRO'}
+              {getContextLabel()}
             </Text>
           </View>
 
@@ -581,9 +668,9 @@ export default function ProScreen() {
           </View>
         )}
 
-        {/* SPOTIFY INDICATOR (Solo si hay música capturada) - ED HARDY */}
-        {isRecording && spotifyMetadata && (
-          <View className="absolute top-44 left-4 right-4 z-10">
+        {/* SPOTIFY INDICATOR - Visible en pre-grabación y grabando */}
+        {spotifyMetadata && (
+          <View className={`absolute ${isRecording ? 'top-44' : 'top-28'} left-4 right-4 z-10`}>
             <View
               className="rounded-xl p-3 flex-row items-center"
               style={{
@@ -606,66 +693,26 @@ export default function ProScreen() {
               <View
                 className="px-2 py-1 rounded"
                 style={{
-                  backgroundColor: 'rgba(30, 215, 96, 0.2)',
+                  backgroundColor: isRecording
+                    ? 'rgba(30, 215, 96, 0.2)'
+                    : 'rgba(30, 215, 96, 0.1)',
                   borderWidth: 1,
                   borderColor: '#1DB954',
                 }}
               >
-                <Text className="text-green-500 text-xs font-bold">SYNC</Text>
+                <Text className="text-green-500 text-xs font-bold">
+                  {isRecording ? 'SYNC' : '🎵 DETECTADO'}
+                </Text>
               </View>
             </View>
           </View>
         )}
 
-        {/* CONTROLES INFERIORES - ED HARDY FIRE */}
+        {/* GRADIENTE INFERIOR - Solo decorativo, sin botón */}
         <LinearGradient
-          colors={['transparent', 'rgba(10,0,0,0.9)']}
-          className="absolute bottom-0 left-0 right-0 h-40"
+          colors={['transparent', 'rgba(10,0,0,0.7)']}
+          className="absolute bottom-0 left-0 right-0 h-24"
         />
-        <View className="absolute bottom-12 left-0 right-0 items-center z-10">
-          {/* SHUTTER BUTTON - FIRE RING */}
-          <Animated.View style={shutterAnimatedStyle}>
-            <TouchableOpacity
-              onPress={isRecording ? stopRecording : startRecording}
-              activeOpacity={0.8}
-            >
-              <View
-                className="w-24 h-24 rounded-full items-center justify-center"
-                style={{
-                  borderWidth: 4,
-                  borderColor: '#F97316',
-                  backgroundColor: 'rgba(10, 0, 0, 0.5)',
-                  shadowColor: '#F97316',
-                  shadowOffset: { width: 0, height: 0 },
-                  shadowOpacity: 1,
-                  shadowRadius: 20,
-                }}
-              >
-                {isRecording ? (
-                  <View
-                    className="w-8 h-8 rounded-md"
-                    style={{
-                      backgroundColor: '#DC2626',
-                      shadowColor: '#DC2626',
-                      shadowOffset: { width: 0, height: 0 },
-                      shadowOpacity: 1,
-                      shadowRadius: 10,
-                    }}
-                  />
-                ) : (
-                  <View
-                    className="w-16 h-16 rounded-full"
-                    style={{
-                      borderWidth: 2,
-                      borderColor: '#F97316',
-                      backgroundColor: 'rgba(249, 115, 22, 0.1)',
-                    }}
-                  />
-                )}
-              </View>
-            </TouchableOpacity>
-          </Animated.View>
-        </View>
 
         {/* Overlay post-grabación */}
         <FullscreenVideoEditor
@@ -676,6 +723,7 @@ export default function ProScreen() {
           onClose={discardVideo}
           onSave={handleEditorSave}
           saving={saving}
+          keepSpotifyPlaying={keepSpotifyPlaying}
         />
 
         {/* PRO Upgrade Modal para usuarios FREE */}
@@ -684,6 +732,31 @@ export default function ProScreen() {
           onClose={() => setShowUpgradeModal(false)}
           feature="camera"
         />
+
+        {/* TOAST DE CONFIRMACIÓN */}
+        {showSaveToast && (
+          <Animated.View
+            className="absolute top-20 left-4 right-4 z-50"
+            style={{
+              opacity: showSaveToast ? 1 : 0,
+            }}
+          >
+            <View
+              className="rounded-xl p-4 flex-row items-center"
+              style={{
+                backgroundColor: 'rgba(34, 197, 94, 0.95)',
+                borderWidth: 1,
+                borderColor: '#22C55E',
+                shadowColor: '#22C55E',
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.5,
+                shadowRadius: 12,
+              }}
+            >
+              <Text className="text-white font-bold text-sm flex-1">{saveToastMessage}</Text>
+            </View>
+          </Animated.View>
+        )}
       </View>
     </GestureHandlerRootView>
   );

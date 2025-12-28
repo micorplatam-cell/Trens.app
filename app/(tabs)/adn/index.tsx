@@ -101,6 +101,7 @@ interface Video {
   exercise_name?: string;
   weight_kg?: number;
   reps?: number;
+  free_text?: string;
   spotify?: {
     enabled: boolean;
     trackUri?: string;
@@ -363,6 +364,7 @@ export default function AdnScreen() {
         exercise_name: video.exercise_name,
         weight_kg: video.weight_kg,
         reps: video.reps,
+        free_text: video.free_text,
         spotify: video.spotify,
       }));
 
@@ -1019,10 +1021,21 @@ export default function AdnScreen() {
                           {vid.title}
                         </Text>
 
+                        {/* Caption si existe */}
+                        {vid.free_text && (
+                          <Text className="text-zinc-400 text-xs italic mb-1" numberOfLines={1}>
+                            {vid.free_text}
+                          </Text>
+                        )}
+
                         {/* Métricas si existen */}
-                        {vid.weight_kg && vid.reps && (
+                        {(vid.weight_kg || vid.reps) && (
                           <Text className="text-savage-red text-xs font-mono mb-1">
-                            {vid.weight_kg}kg × {vid.reps} reps
+                            {vid.weight_kg && vid.reps
+                              ? `${vid.weight_kg}kg × ${vid.reps} reps`
+                              : vid.weight_kg
+                                ? `${vid.weight_kg}kg`
+                                : `${vid.reps} reps`}
                           </Text>
                         )}
 
@@ -1163,9 +1176,18 @@ export default function AdnScreen() {
                 <Text className="text-white font-bold text-sm text-center" numberOfLines={1}>
                   {selectedVideo?.title || 'Video'}
                 </Text>
-                {selectedVideo?.weight_kg && selectedVideo?.reps && (
+                {selectedVideo?.free_text && (
+                  <Text className="text-zinc-400 text-xs text-center italic" numberOfLines={1}>
+                    {selectedVideo.free_text}
+                  </Text>
+                )}
+                {(selectedVideo?.weight_kg || selectedVideo?.reps) && (
                   <Text className="text-savage-red text-xs text-center font-mono mt-0.5">
-                    {selectedVideo.weight_kg}kg × {selectedVideo.reps}
+                    {selectedVideo.weight_kg && selectedVideo.reps
+                      ? `${selectedVideo.weight_kg}kg × ${selectedVideo.reps}`
+                      : selectedVideo.weight_kg
+                        ? `${selectedVideo.weight_kg}kg`
+                        : `${selectedVideo.reps} reps`}
                   </Text>
                 )}
               </View>

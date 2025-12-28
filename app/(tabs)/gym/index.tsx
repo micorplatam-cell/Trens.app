@@ -231,6 +231,7 @@ interface VideoRecord {
   cloudflare_video_id?: string;
   weight: number;
   reps: number;
+  free_text?: string; // Caption del video
   date: string;
   is_public: boolean;
   spotify?: {
@@ -247,6 +248,7 @@ interface VideoRecord {
 
 interface Exercise {
   id: string;
+  exercise_id: string; // ID del ejercicio en tabla exercises (para pro_videos)
   name: string;
   sets: string;
   image_url: string;
@@ -538,9 +540,15 @@ function GymScreen() {
   // Ref para rastrear si Spotify ya se sincronizó (evita re-sync al reanudar de pausa)
   const spotifySyncedRef = useRef(false);
 
+  // Ref para rastrear si el video viewer estaba abierto (detectar cierre real)
+  const wasVideoViewerOpenRef = useRef(false);
+
   // Controlar play/pause del video cuando abre/cierra el viewer
   useEffect(() => {
     if (videoViewerVisible && historialPlayer) {
+      // Marcar que el viewer está abierto
+      wasVideoViewerOpenRef.current = true;
+
       // Determinar si hay Spotify para este video
       const hasSpotify = !!(
         isPro &&
@@ -586,12 +594,16 @@ function GymScreen() {
           console.log('🔊 Reproduciendo audio ambiente del video');
         }
       }
-    } else if (historialPlayer && !videoViewerVisible) {
+    } else if (historialPlayer && !videoViewerVisible && wasVideoViewerOpenRef.current) {
+      // Solo pausar si el viewer REALMENTE estaba abierto antes (no en mount inicial)
+      wasVideoViewerOpenRef.current = false;
       historialPlayer.pause();
       setIsVideoManuallyPaused(false); // Reset al cerrar
+      // Solo pausar Spotify si realmente sincronizamos una canción
+      if (spotifySyncedRef.current) {
+        spotify.pauseForSwipe();
+      }
       spotifySyncedRef.current = false; // Reset para próxima apertura
-      // Pausar Spotify al cerrar video viewer
-      spotify.pauseForSwipe();
     }
   }, [videoViewerVisible, historialPlayer, selectedVideo, isPro, spotifyPremium]);
 
@@ -868,6 +880,7 @@ function GymScreen() {
   const [currentVariationId, setCurrentVariationId] = useState<string | null>(null);
 
   // Helper: Obtener el ID y nombre del ejercicio activo (considerando alternativas)
+  // IMPORTANTE: Devuelve exercise_id (de tabla exercises), NO user_exercise_config.id
   const getActiveExerciseInfo = (exerciseIndex: number = currentExerciseIndex) => {
     const exercise = exercises[exerciseIndex];
     if (!exercise) return { id: '', name: '' };
@@ -880,21 +893,25 @@ function GymScreen() {
       return { id: alt.id, name: alt.name };
     }
 
-    return { id: exercise.id, name: exercise.name };
+    // Usar exercise_id (ID real del ejercicio en tabla exercises)
+    return { id: exercise.exercise_id, name: exercise.name };
   };
 
   // Helper: Obtener TODOS los IDs de ejercicios con el mismo nombre (para sincronizar notas/videos)
+  // Devuelve exercise_id (de tabla exercises), NO user_exercise_config.id
   const getAllExerciseIdsByName = (targetName: string): string[] => {
     const normalizedTarget = targetName.toLowerCase().trim();
     const matchingIds: string[] = [];
 
     exercises.forEach((ex) => {
-      // Verificar ejercicio principal
+      // Verificar ejercicio principal - usar exercise_id
       if (ex.name.toLowerCase().trim() === normalizedTarget) {
-        if (!matchingIds.includes(ex.id)) matchingIds.push(ex.id);
+        if (ex.exercise_id && !matchingIds.includes(ex.exercise_id)) {
+          matchingIds.push(ex.exercise_id);
+        }
       }
 
-      // Verificar alternativas
+      // Verificar alternativas - alt.id ya es exercise_id
       if (ex.alternatives) {
         ex.alternatives.forEach((alt) => {
           if (alt.name.toLowerCase().trim() === normalizedTarget) {
@@ -953,19 +970,13 @@ function GymScreen() {
     // Sincronizar ejercicio activo con HANK (considerando alternativas)
     // Y actualizar ProContext para Smart Trigger
     const currentExercise = exercises[activeExerciseIndex];
-    if (currentExercise && isFocused && viewMode === 'FOCUS') {
+    if (currentExercise && isFocused) {
       const altIndex = activeAlternatives[activeExerciseIndex] || 0;
-
-      console.log(
-        '🔍 DEBUG ALTERNATIVAS: exerciseIndex=',
-        activeExerciseIndex,
-        'altIndex=',
-        altIndex
-      );
 
       // Determinar nombre del ejercicio actual (principal o alternativa)
       let exerciseName = currentExercise.name;
-      let exerciseId = currentExercise.id;
+      // Para PRO: usar exercise_id (ID real del ejercicio, NO user_exercise_config.id)
+      let exerciseId = currentExercise.exercise_id;
 
       // Si altIndex > 0, estamos en una alternativa
       if (
@@ -973,51 +984,44 @@ function GymScreen() {
         currentExercise.alternatives &&
         currentExercise.alternatives[altIndex - 1]
       ) {
-        // Usar el ID de la alternativa, marcando que ES alternativa
         const alternativeId = currentExercise.alternatives[altIndex - 1].id;
         const alternativeName = currentExercise.alternatives[altIndex - 1].name;
         exerciseId = alternativeId;
         exerciseName = alternativeName;
-        console.log('🔄 ALTERNATIVA DETECTADA:', alternativeName, 'de', currentExercise.name);
       }
 
-      // Solo actualizar si el exerciseId realmente cambió (evitar loops)
-      if (lastSyncedExerciseId.current !== exerciseId) {
+      // SIEMPRE actualizar el contexto táctico cuando GYM está enfocado
+      // (Para que PRO tenga el contexto correcto al entrar)
+      const relatedIds = getAllExerciseIdsByName(exerciseName);
+      let notes = '';
+      let tags: string[] = [];
+
+      for (const id of relatedIds) {
+        if (!notes && exerciseNotes[id]) {
+          notes = exerciseNotes[id];
+        }
+        if (tags.length === 0 && exerciseTags[id] && exerciseTags[id].length > 0) {
+          tags = exerciseTags[id];
+        }
+        if (notes && tags.length > 0) break;
+      }
+
+      setTacticalContext(exerciseId, exerciseName, notes, tags);
+
+      // Solo sincronizar con HANK si el ejercicio cambió (para evitar logs excesivos)
+      if (lastSyncedExerciseId.current !== exerciseId && viewMode === 'FOCUS') {
         lastSyncedExerciseId.current = exerciseId;
         console.log('🎯 SINCRONIZANDO CON HANK:', exerciseId, exerciseName);
 
-        // Actualizar HANK context
         if (altIndex > 0 && currentExercise.alternatives?.[altIndex - 1]) {
-          console.log('🔄 HANK: Cambiando a alternativa:', exerciseName);
           setActiveAsset(exerciseId, {
             isAlternative: true,
             parentExerciseName: currentExercise.name,
           });
         } else {
-          setActiveAsset(currentExercise.id);
+          // Usar exercise_id (ID real del ejercicio), no user_exercise_config.id
+          setActiveAsset(currentExercise.exercise_id);
         }
-
-        // Actualizar ProContext para Smart Trigger (Contexto Táctico)
-        // Buscar notas de TODOS los IDs con el mismo nombre (sincronización por nombre)
-        console.log('🏋️ GYM: Estableciendo contexto táctico:', exerciseId, exerciseName);
-
-        // Buscar notas en todos los IDs relacionados por nombre
-        const relatedIds = getAllExerciseIdsByName(exerciseName);
-        let notes = '';
-        let tags: string[] = [];
-
-        // Buscar la primera nota/tags que encontremos en cualquier ID relacionado
-        for (const id of relatedIds) {
-          if (!notes && exerciseNotes[id]) {
-            notes = exerciseNotes[id];
-          }
-          if (tags.length === 0 && exerciseTags[id] && exerciseTags[id].length > 0) {
-            tags = exerciseTags[id];
-          }
-          if (notes && tags.length > 0) break;
-        }
-
-        setTacticalContext(exerciseId, exerciseName, notes, tags);
       }
     }
   }, [
@@ -1038,6 +1042,7 @@ function GymScreen() {
   const translateYCatalog = useSharedValue(0);
   const translateYSeriesConfig = useSharedValue(0);
   const translateYNotes = useSharedValue(0);
+  const translateYVideoNotes = useSharedValue(0);
 
   const animatedStyleHistorial = useAnimatedStyle(() => ({
     transform: [{ translateY: translateYHistorial.value }],
@@ -1057,6 +1062,10 @@ function GymScreen() {
 
   const animatedStyleNotes = useAnimatedStyle(() => ({
     transform: [{ translateY: translateYNotes.value }],
+  }));
+
+  const animatedStyleVideoNotes = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateYVideoNotes.value }],
   }));
 
   const closeHistorialWithAnimation = () => setHistorialModalVisible(false);
@@ -1233,6 +1242,39 @@ function GymScreen() {
     })
   ).current;
 
+  // Ref para saber si debemos guardar video notes al cerrar
+  const shouldSaveVideoNotesOnCloseRef = useRef(false);
+
+  const closeVideoNotesWithAnimation = () => {
+    shouldSaveVideoNotesOnCloseRef.current = true;
+    setVideoNotesModalVisible(false);
+  };
+
+  const panResponderVideoNotes = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 5,
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0) {
+          translateYVideoNotes.value = gestureState.dy;
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 150) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          translateYVideoNotes.value = withTiming(
+            800,
+            { duration: 200, easing: Easing.out(Easing.ease) },
+            () => runOnJS(closeVideoNotesWithAnimation)()
+          );
+        } else {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          translateYVideoNotes.value = withTiming(0, { duration: 150 });
+        }
+      },
+    })
+  ).current;
+
   // Resetear translateY y animar entrada cuando los modales se abren
   useEffect(() => {
     if (historialModalVisible) {
@@ -1260,6 +1302,30 @@ function GymScreen() {
       setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium), 100);
     }
   }, [notesModalVisible]);
+
+  // Animar entrada del modal de video notes
+  useEffect(() => {
+    if (videoNotesModalVisible) {
+      translateYVideoNotes.value = 800;
+      translateYVideoNotes.value = withTiming(0, {
+        duration: 300,
+        easing: Easing.out(Easing.ease),
+      });
+      setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium), 100);
+    }
+  }, [videoNotesModalVisible]);
+
+  // Auto-save video notes al cerrar con gesto
+  const prevVideoNotesModalVisibleRef = useRef(videoNotesModalVisible);
+  useEffect(() => {
+    if (prevVideoNotesModalVisibleRef.current && !videoNotesModalVisible) {
+      if (shouldSaveVideoNotesOnCloseRef.current) {
+        saveVideoNotes();
+      }
+      shouldSaveVideoNotesOnCloseRef.current = false;
+    }
+    prevVideoNotesModalVisibleRef.current = videoNotesModalVisible;
+  }, [videoNotesModalVisible]);
 
   useEffect(() => {
     if (seriesConfigModalVisible) {
@@ -1364,7 +1430,7 @@ function GymScreen() {
           // Obtener notas de videos de TODOS los ejercicios con el mismo nombre
           const { data: videoNotes, error } = await supabase
             .from('pro_videos')
-            .select('id, notes, exercise_notes, tags, created_at')
+            .select('id, exercise_id, notes, exercise_notes, tags, created_at')
             .eq('user_id', user.id)
             .in('exercise_id', allRelatedIds)
             .or('notes.not.is.null,exercise_notes.not.is.null')
@@ -1396,8 +1462,12 @@ function GymScreen() {
               const dateStr = date.toISOString().split('T')[0];
               const isToday = dateStr === todayStr;
 
-              // Si es de hoy, guardar referencia
-              if (isToday && !foundTodayNote) {
+              // IMPORTANTE: Solo marcar como "nota de hoy" si:
+              // 1. Es del día de hoy (fecha)
+              // 2. Pertenece al ejercicio ACTUAL específico (no solo mismo nombre en otro día)
+              const isCurrentExerciseToday = isToday && v.exercise_id === exerciseId;
+
+              if (isCurrentExerciseToday && !foundTodayNote) {
                 foundTodayNote = v.id;
                 todayNoteContent = noteContent;
                 todayNoteTags = v.tags || [];
@@ -1415,7 +1485,7 @@ function GymScreen() {
                 tags: v.tags,
                 type: 'video',
                 videoId: v.id,
-                isToday,
+                isToday: isCurrentExerciseToday, // Solo es "de hoy" si es del ejercicio actual
               });
             }
           });
@@ -1494,15 +1564,17 @@ function GymScreen() {
       if (!user || exercises.length === 0) return;
 
       try {
-        // Recopilar IDs de ejercicios principales Y alternativas
+        // Recopilar IDs de ejercicios (exercise_id de tabla exercises, NO user_exercise_config.id)
         const allExerciseIds: string[] = [];
         exercises.forEach((ex) => {
-          allExerciseIds.push(ex.id);
+          // Usar exercise_id (ID real del ejercicio en tabla exercises)
+          if (ex.exercise_id) allExerciseIds.push(ex.exercise_id);
           if (ex.alternatives) {
             ex.alternatives.forEach((alt) => allExerciseIds.push(alt.id));
           }
         });
 
+        // 1. Primero cargar notas de user_exercise_config
         const { data, error } = await supabase
           .from('user_exercise_config')
           .select('exercise_id, metadata')
@@ -1523,6 +1595,31 @@ function GymScreen() {
           }
         });
 
+        // 2. Buscar notas de pro_videos para ejercicios que NO tienen notas en user_exercise_config
+        const exercisesWithoutNotes = allExerciseIds.filter((id) => !notesMap[id]);
+        if (exercisesWithoutNotes.length > 0) {
+          const { data: videoNotes, error: videoError } = await supabase
+            .from('pro_videos')
+            .select('exercise_id, notes, exercise_notes, tags')
+            .eq('user_id', user.id)
+            .in('exercise_id', exercisesWithoutNotes)
+            .or('notes.not.is.null,exercise_notes.not.is.null')
+            .order('created_at', { ascending: false });
+
+          if (!videoError && videoNotes) {
+            // Usar la nota más reciente por ejercicio
+            videoNotes.forEach((v: any) => {
+              const noteContent = v.notes || v.exercise_notes;
+              if (noteContent && !notesMap[v.exercise_id]) {
+                notesMap[v.exercise_id] = noteContent;
+              }
+              if (v.tags && v.tags.length > 0 && !tagsMap[v.exercise_id]) {
+                tagsMap[v.exercise_id] = v.tags;
+              }
+            });
+          }
+        }
+
         setExerciseNotes(notesMap);
         setExerciseTags(tagsMap);
       } catch (err) {
@@ -1540,10 +1637,13 @@ function GymScreen() {
 
       setLoadingVideos(true);
       try {
+        // Usar exercise_id (de tabla exercises), no el id de user_exercise_config
+        const exerciseId = modalExercise.exercise_id || modalExercise.id;
+
         const { data, error } = await supabase
           .from('pro_videos')
           .select('*')
-          .eq('exercise_id', modalExercise.id)
+          .eq('exercise_id', exerciseId)
           .order('created_at', { ascending: false });
 
         if (error) throw error;
@@ -1558,6 +1658,7 @@ function GymScreen() {
           }),
           weight: v.weight_kg || 0,
           reps: v.reps || 0,
+          free_text: v.free_text,
           is_public: v.is_public,
           videoUrl: v.video_url,
           video_url: v.video_url,
@@ -1625,8 +1726,20 @@ function GymScreen() {
 
               if (error) throw error;
 
-              // Actualizar lista local
+              // Actualizar lista local del modal historial
               setExerciseVideos((prev) => prev.filter((v) => v.id !== selectedVideo.id));
+
+              // También actualizar la lista de ejercicios para que el video desaparezca de las cards
+              setExercises((prevExercises) =>
+                prevExercises.map((ex) => ({
+                  ...ex,
+                  videos: ex.videos.filter((v) => v.id !== selectedVideo.id),
+                  alternatives: ex.alternatives?.map((alt) => ({
+                    ...alt,
+                    videos: alt.videos.filter((v) => v.id !== selectedVideo.id),
+                  })),
+                }))
+              );
 
               // Cerrar viewer
               setVideoViewerVisible(false);
@@ -2130,7 +2243,7 @@ function GymScreen() {
           const { data: videosData, error: videosError } = await supabase
             .from('pro_videos')
             .select(
-              'id, exercise_id, video_url, thumbnail_url, weight_kg, reps, is_public, created_at, spotify, cloudflare_video_id, notes, exercise_notes, tags'
+              'id, exercise_id, video_url, thumbnail_url, weight_kg, reps, free_text, is_public, created_at, spotify, cloudflare_video_id, notes, exercise_notes, tags'
             )
             .in('exercise_id', allExerciseIds)
             .order('created_at', { ascending: false });
@@ -2150,6 +2263,7 @@ function GymScreen() {
                 cloudflare_video_id: v.cloudflare_video_id,
                 weight: v.weight_kg || 0,
                 reps: v.reps || 0,
+                free_text: v.free_text,
                 date: new Date(v.created_at).toLocaleDateString('es-ES', {
                   day: '2-digit',
                   month: 'short',
@@ -2270,6 +2384,7 @@ function GymScreen() {
 
             return {
               id: item.id,
+              exercise_id: item.exercise_id, // ID del ejercicio real para pro_videos
               name: item.name || 'UNNAMED',
               sets: item.metadata?.sets || '0x0',
               image_url: item.media_url || '',
@@ -2284,6 +2399,7 @@ function GymScreen() {
             // Retornar un ejercicio válido mínimo para no romper el array
             return {
               id: item.id || `error-${index}`,
+              exercise_id: item.exercise_id || '',
               name: item.name || 'ERROR',
               sets: '0x0',
               image_url: '',
@@ -3052,6 +3168,7 @@ function GymScreen() {
 
         const newExercise: Exercise = {
           id: data.id,
+          exercise_id: template.id, // ID del ejercicio en tabla exercises
           name: template.name,
           sets: data.config?.sets || template.default_metadata.sets,
           image_url: template.image_url,
@@ -3284,6 +3401,7 @@ function GymScreen() {
 
         const newExercise: Exercise = {
           id: data.id, // user_exercise_config.id
+          exercise_id: template.id, // ID del ejercicio en tabla exercises
           name: template.name,
           sets: data.config?.sets || template.default_metadata.sets,
           image_url: template.image_url,
@@ -5178,6 +5296,11 @@ function GymScreen() {
         prev.map((v) => (v.id === selectedVideo.id ? { ...v, notes: videoNoteText } : v))
       );
 
+      // Actualizar en notesHistory para que se refleje inmediatamente en el modal principal
+      setNotesHistory((prev) =>
+        prev.map((n) => (n.id === selectedVideo.id ? { ...n, notes: videoNoteText } : n))
+      );
+
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setVideoNotesModalVisible(false);
     } catch (error) {
@@ -5186,6 +5309,54 @@ function GymScreen() {
     } finally {
       setSavingVideoNotes(false);
     }
+  };
+
+  // Eliminar nota de un video específico
+  const deleteVideoNote = (noteId: string, noteDate: string) => {
+    Alert.alert(
+      '🗑️ ELIMINAR NOTA',
+      `¿Eliminar la nota del ${noteDate}? Esta acción no se puede deshacer.`,
+      [
+        { text: 'CANCELAR', style: 'cancel' },
+        {
+          text: 'ELIMINAR',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+
+              // Eliminar notas del registro en pro_videos
+              const { error } = await supabase
+                .from('pro_videos')
+                .update({ notes: null, exercise_notes: null })
+                .eq('id', noteId);
+
+              if (error) throw error;
+
+              // Actualizar notesHistory (eliminar de la lista)
+              setNotesHistory((prev) => prev.filter((n) => n.id !== noteId));
+
+              // También actualizar exerciseVideos si está cargado
+              setExerciseVideos((prev) =>
+                prev.map((v) =>
+                  v.id === noteId ? { ...v, notes: undefined, exercise_notes: undefined } : v
+                )
+              );
+
+              // Si es el video seleccionado, cerrar el modal
+              if (selectedVideo?.id === noteId) {
+                setVideoNotesModalVisible(false);
+              }
+
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            } catch (error) {
+              console.error('Error eliminando nota:', error);
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            }
+          },
+        },
+      ]
+    );
   };
 
   // Toggle tag
@@ -5386,6 +5557,11 @@ function GymScreen() {
                                 setVideoNotesModalVisible(true);
                               }
                             }}
+                            onLongPress={() => {
+                              // Eliminar nota con long press
+                              deleteVideoNote(note.id, note.date);
+                            }}
+                            delayLongPress={500}
                             className="rounded-xl p-3"
                             style={{
                               backgroundColor: '#18181b',
@@ -5471,48 +5647,41 @@ function GymScreen() {
     return (
       <Modal
         visible={videoNotesModalVisible}
-        animationType="slide"
+        animationType="none"
         transparent={true}
-        onRequestClose={() => setVideoNotesModalVisible(false)}
+        onRequestClose={() => {
+          shouldSaveVideoNotesOnCloseRef.current = true;
+          setVideoNotesModalVisible(false);
+        }}
       >
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           className="flex-1"
         >
-          <View className="flex-1 bg-black/80 justify-end">
-            <View className="bg-zinc-900 rounded-t-3xl" style={{ maxHeight: '70%' }}>
-              {/* Header */}
-              <View className="items-center pt-4 pb-3 border-b border-zinc-800">
-                <View className="w-12 h-1 bg-zinc-600 rounded-full mb-3" />
+          <View className="flex-1 bg-transparent justify-end">
+            <Animated.View
+              className="rounded-t-3xl"
+              style={[{ height: '50%', backgroundColor: '#0a0a0a' }, animatedStyleVideoNotes]}
+            >
+              {/* Drag Handle + Header (Área para arrastrar) */}
+              <Animated.View
+                className="items-center pt-4 pb-4 border-b border-zinc-800"
+                {...panResponderVideoNotes.panHandlers}
+              >
+                <View className="w-12 h-1 bg-zinc-600 rounded-full mb-4" />
 
-                <View className="px-4 pb-2 w-full flex-row items-center justify-between">
-                  <TouchableOpacity
-                    onPress={() => setVideoNotesModalVisible(false)}
-                    className="px-3 py-1"
-                  >
-                    <Text className="text-zinc-500 font-medium">Cerrar</Text>
-                  </TouchableOpacity>
-
-                  <View className="flex-1 items-center">
-                    <Text className="text-white text-lg font-bold">📝 Notas</Text>
-                    <Text className="text-zinc-500 text-[10px]">{selectedVideo.date}</Text>
-                  </View>
-
-                  <TouchableOpacity
-                    onPress={saveVideoNotes}
-                    disabled={savingVideoNotes}
-                    className="bg-savage-red px-4 py-1.5 rounded-full"
-                    style={{ opacity: savingVideoNotes ? 0.5 : 1 }}
-                  >
-                    <Text className="text-white font-bold text-sm">
-                      {savingVideoNotes ? '...' : 'Guardar'}
-                    </Text>
-                  </TouchableOpacity>
+                {/* Header centrado */}
+                <View className="px-6 pb-2 w-full">
+                  <Text className="text-white text-xl font-bold text-center" numberOfLines={1}>
+                    📝 Nota del {selectedVideo.date}
+                  </Text>
+                  <Text className="text-zinc-500 text-xs mt-1 tracking-wider text-center uppercase">
+                    Desliza hacia abajo para guardar y cerrar
+                  </Text>
                 </View>
-              </View>
+              </Animated.View>
 
-              {/* Contenido */}
-              <View className="p-4">
+              <ScrollView className="flex-1 px-4 py-4" keyboardShouldPersistTaps="handled">
                 {/* Tags del video (solo lectura) */}
                 {selectedVideo.tags && selectedVideo.tags.length > 0 && (
                   <View className="flex-row flex-wrap gap-2 mb-4">
@@ -5536,7 +5705,7 @@ function GymScreen() {
 
                 {/* Editor de notas */}
                 <Text className="text-zinc-400 text-xs uppercase tracking-wider mb-2">
-                  Nota de esta sesión
+                  Contenido de la nota
                 </Text>
                 <View
                   className="rounded-xl"
@@ -5557,12 +5726,21 @@ function GymScreen() {
                   />
                 </View>
 
-                {/* Info */}
-                <Text className="text-zinc-600 text-xs text-center mt-4">
-                  📅 {selectedVideo.date}
-                </Text>
-              </View>
-            </View>
+                {/* Botón de eliminar */}
+                <TouchableOpacity
+                  onPress={() => deleteVideoNote(selectedVideo.id, selectedVideo.date)}
+                  className="flex-row items-center justify-center gap-2 mt-6 py-3 rounded-xl"
+                  style={{
+                    backgroundColor: '#DC262620',
+                    borderWidth: 1,
+                    borderColor: '#DC262640',
+                  }}
+                >
+                  <Trash2 color="#DC2626" size={18} />
+                  <Text className="text-red-500 font-bold">Eliminar esta nota</Text>
+                </TouchableOpacity>
+              </ScrollView>
+            </Animated.View>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -6017,18 +6195,37 @@ function GymScreen() {
                     </Text>
                   )}
 
-                  {/* Datos: Peso x Reps */}
-                  <View className="flex-row items-baseline mb-4">
-                    <Text className="text-savage-red text-5xl font-black font-mono">
-                      {selectedVideo.weight}
+                  {/* Datos: Peso x Reps (solo si hay datos) */}
+                  {(selectedVideo.weight > 0 || selectedVideo.reps > 0) && (
+                    <View className="flex-row items-baseline mb-4">
+                      {selectedVideo.weight > 0 && (
+                        <>
+                          <Text className="text-savage-red text-5xl font-black font-mono">
+                            {selectedVideo.weight}
+                          </Text>
+                          <Text className="text-white text-xl font-bold ml-1">KG</Text>
+                        </>
+                      )}
+                      {selectedVideo.weight > 0 && selectedVideo.reps > 0 && (
+                        <Text className="text-zinc-500 text-3xl mx-3">×</Text>
+                      )}
+                      {selectedVideo.reps > 0 && (
+                        <>
+                          <Text className="text-savage-red text-5xl font-black font-mono">
+                            {selectedVideo.reps}
+                          </Text>
+                          <Text className="text-white text-xl font-bold ml-1">REPS</Text>
+                        </>
+                      )}
+                    </View>
+                  )}
+
+                  {/* Caption del video (si tiene) */}
+                  {selectedVideo.free_text && (
+                    <Text className="text-zinc-300 text-base italic mb-4">
+                      "{selectedVideo.free_text}"
                     </Text>
-                    <Text className="text-white text-xl font-bold ml-1">KG</Text>
-                    <Text className="text-zinc-500 text-3xl mx-3">×</Text>
-                    <Text className="text-savage-red text-5xl font-black font-mono">
-                      {selectedVideo.reps}
-                    </Text>
-                    <Text className="text-white text-xl font-bold ml-1">REPS</Text>
-                  </View>
+                  )}
 
                   {/* Spotify Track (si tiene) */}
                   {selectedVideo.spotify?.enabled && (
@@ -6818,9 +7015,11 @@ function GymScreen() {
         }
         renderItem={({ item, index }) => {
           // Preparar array de ejercicios: principal + alternativas
+          // IMPORTANTE: Para notas usamos exercise_id (de tabla exercises)
           const allVariations = [
             {
-              id: item.id,
+              id: item.exercise_id, // Usar exercise_id para que coincida con las notas guardadas
+              configId: item.id, // Guardar el user_exercise_config.id por si se necesita
               name: item.name,
               image_url: item.image_url,
               videos: item.videos,
@@ -7111,12 +7310,26 @@ function GymScreen() {
                                   </View>
 
                                   <View className="absolute bottom-1.5 left-1.5 right-1.5">
-                                    <Text
-                                      className="text-white font-bold text-[11px]"
-                                      numberOfLines={1}
-                                    >
-                                      {video.weight}kg × {video.reps}
-                                    </Text>
+                                    {(video.weight > 0 || video.reps > 0) && (
+                                      <Text
+                                        className="text-white font-bold text-[11px]"
+                                        numberOfLines={1}
+                                      >
+                                        {video.weight > 0 && video.reps > 0
+                                          ? `${video.weight}kg × ${video.reps}`
+                                          : video.weight > 0
+                                            ? `${video.weight}kg`
+                                            : `${video.reps} reps`}
+                                      </Text>
+                                    )}
+                                    {video.free_text && (
+                                      <Text
+                                        className="text-zinc-300 text-[9px] italic"
+                                        numberOfLines={1}
+                                      >
+                                        {video.free_text}
+                                      </Text>
+                                    )}
                                     <Text className="text-zinc-400 text-[9px]">{video.date}</Text>
                                   </View>
                                 </View>

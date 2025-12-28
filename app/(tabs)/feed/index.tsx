@@ -75,6 +75,7 @@ const FeedVideoItem = memo(
     isPro,
     onSpotifyUpgrade,
     spotifySyncEnabled,
+    contextReady,
   }: {
     item: FeedVideo;
     isActive: boolean;
@@ -88,6 +89,7 @@ const FeedVideoItem = memo(
     isPro: boolean;
     onSpotifyUpgrade: () => void;
     spotifySyncEnabled: boolean;
+    contextReady: boolean;
   }) => {
     // Helper: Arreglar URLs de Cloudflare Stream incompletas
     const fixCloudflareUrl = (url: string): string => {
@@ -108,8 +110,9 @@ const FeedVideoItem = memo(
     // Estado 3: Sin Spotify → Video con AUDIO AMBIENTE
     // =====================================================================
 
-    // ¿Puede sincronizar canción? (tiene track + conectado + premium + pro + sync ON)
+    // ¿Puede sincronizar canción? (tiene track + conectado + premium + pro + sync ON + contexto listo)
     const canSyncTrack = !!(
+      contextReady &&
       item.spotify?.enabled &&
       item.spotify.trackUri &&
       spotifyConnected &&
@@ -197,11 +200,12 @@ const FeedVideoItem = memo(
       } else if (!isActive) {
         player.pause();
         setIsManuallyPaused(false); // Reset manual pause cuando cambia de video
-        spotifySyncedRef.current = false; // Reset para próxima activación
-        // Solo pausar Spotify si estábamos sincronizando canción del video
-        if (canSyncTrack) {
+        // Solo pausar Spotify si REALMENTE sincronizamos la canción del video
+        // (spotifySyncedRef.current = true significa que hicimos syncWithVideo)
+        if (spotifySyncedRef.current) {
           spotify.pauseForSwipe().catch(console.warn);
         }
+        spotifySyncedRef.current = false; // Reset para próxima activación
       }
     }, [isActive, player, item.spotify, canSyncTrack, shouldMuteVideo, spotifyConnected]);
 
@@ -348,7 +352,7 @@ const FeedVideoItem = memo(
               >
                 {item.exercise_name}
               </Text>
-              {item.weight_kg && item.reps && (
+              {(item.weight_kg || item.reps) && (
                 <Text
                   className="text-fire-orange text-2xl font-bold font-mono"
                   style={{
@@ -357,13 +361,20 @@ const FeedVideoItem = memo(
                     textShadowRadius: 15,
                   }}
                 >
-                  {item.weight_kg}kg × {item.reps} 🔥
+                  {item.weight_kg ? `${item.weight_kg}kg` : ''}
+                  {item.weight_kg && item.reps ? ' × ' : ''}
+                  {item.reps ? `${item.reps}` : ''} 🔥
+                </Text>
+              )}
+              {item.free_text && (
+                <Text className="text-zinc-300 text-sm mt-1" numberOfLines={2}>
+                  {item.free_text}
                 </Text>
               )}
             </View>
           )}
 
-          {/* Texto libre */}
+          {/* Texto libre (cuando NO hay ejercicio) */}
           {item.free_text && !item.exercise_name && (
             <Text className="text-white text-base mb-2">{item.free_text}</Text>
           )}
@@ -521,37 +532,45 @@ const FeedVideoItem = memo(
 // MAIN COMPONENT
 // ============================================================================
 export default function FeedScreen() {
-  const { user, spotifyPremium, spotifyConnected, isPro } = useUserRoleContext();
+  const {
+    user,
+    spotifyPremium,
+    spotifyConnected,
+    isPro,
+    spotifyFeedSync,
+    updateSpotifyFeedSync,
+    loading: contextLoading,
+  } = useUserRoleContext();
   const { setScreenContext } = useHank();
 
   const [videos, setVideos] = useState<FeedVideo[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
-  // Toggle para sincronizar Spotify con videos - por defecto ON si está conectado
-  const [spotifySyncEnabled, setSpotifySyncEnabled] = useState(true);
   // Estado para rastrear si el Feed está enfocado
   const [isFeedFocused, setIsFeedFocused] = useState(true);
 
   const flatListRef = useRef<FlatList>(null);
 
+  // Ref para tener siempre el valor actual de spotifyFeedSync (evita closure stale en cleanup)
+  const spotifyFeedSyncRef = useRef(spotifyFeedSync);
+  useEffect(() => {
+    spotifyFeedSyncRef.current = spotifyFeedSync;
+  }, [spotifyFeedSync]);
+
   // -------------------------------------------------------------------------
-  // TOGGLE SPOTIFY SYNC
+  // TOGGLE SPOTIFY SYNC (ahora persiste en Supabase)
   // -------------------------------------------------------------------------
   const handleToggleSpotifySync = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setSpotifySyncEnabled((prev) => {
-      const newValue = !prev;
-      // Si se ACTIVA el sync, la sincronización ocurrirá en el próximo ciclo
-      // Si se DESACTIVA el sync, no pausamos Spotify - el usuario sigue escuchando su música
-      // (En ambos casos el video permanece muteado porque Spotify está conectado)
-      console.log(
-        '🎵 Spotify SYNC toggled:',
-        newValue ? 'ON (auto-sync canción del video)' : 'OFF (tu música)'
-      );
-      return newValue;
-    });
-  }, []);
+    const newValue = !spotifyFeedSync;
+    // Guardar en Supabase
+    updateSpotifyFeedSync(newValue);
+    console.log(
+      '🎵 Spotify SYNC toggled:',
+      newValue ? 'ON (auto-sync canción del video)' : 'OFF (tu música)'
+    );
+  }, [spotifyFeedSync, updateSpotifyFeedSync]);
 
   // -------------------------------------------------------------------------
   // PAUSAR AL SALIR DEL FEED (Videos + Spotify si sincronizando)
@@ -575,11 +594,12 @@ export default function FeedScreen() {
 
         // Solo pausar Spotify si estaba en modo SYNC
         // Si el usuario escucha su propia música (SYNC OFF), no interrumpimos
-        if (spotifyConnected && spotifySyncEnabled) {
+        // Usamos ref para obtener el valor actual (evita closure stale)
+        if (spotifyConnected && spotifyFeedSyncRef.current) {
           spotify.pauseForSwipe().catch(() => {});
         }
       };
-    }, [spotifyConnected, spotifySyncEnabled])
+    }, [spotifyConnected])
   );
 
   // -------------------------------------------------------------------------
@@ -843,7 +863,8 @@ export default function FeedScreen() {
         spotifyConnected={spotifyConnected ?? false}
         isPro={isPro}
         onSpotifyUpgrade={handleSpotifyUpgrade}
-        spotifySyncEnabled={spotifySyncEnabled}
+        spotifySyncEnabled={spotifyFeedSync}
+        contextReady={!contextLoading}
       />
     ),
     [
@@ -858,7 +879,8 @@ export default function FeedScreen() {
       spotifyConnected,
       isPro,
       handleSpotifyUpgrade,
-      spotifySyncEnabled,
+      spotifyFeedSync,
+      contextLoading,
     ]
   );
 
@@ -905,20 +927,20 @@ export default function FeedScreen() {
               <TouchableOpacity
                 onPress={handleToggleSpotifySync}
                 className={`px-3 py-1.5 rounded-full flex-row items-center ${
-                  spotifySyncEnabled ? 'bg-green-500/20' : 'bg-black/50'
+                  spotifyFeedSync ? 'bg-green-500/20' : 'bg-black/50'
                 }`}
               >
-                {spotifySyncEnabled ? (
+                {spotifyFeedSync ? (
                   <Music size={14} color="#1DB954" />
                 ) : (
                   <Unlink size={14} color="#71717a" />
                 )}
                 <Text
                   className={`ml-1.5 text-xs font-bold ${
-                    spotifySyncEnabled ? 'text-green-500' : 'text-zinc-500'
+                    spotifyFeedSync ? 'text-green-500' : 'text-zinc-500'
                   }`}
                 >
-                  {spotifySyncEnabled ? 'SYNC' : 'OFF'}
+                  {spotifyFeedSync ? 'SYNC' : 'OFF'}
                 </Text>
               </TouchableOpacity>
             )}
