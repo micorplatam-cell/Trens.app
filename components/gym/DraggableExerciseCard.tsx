@@ -224,16 +224,26 @@ export const DraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
       } else {
         translateX.value = withSpring(0, { damping: 20 });
       }
+    })
+    .onFinalize(() => {
+      // Mantener el flag un poco más para evitar que el tap se active
+      // El flag se resetea en onEnd, así que aquí solo lo forzamos a false
     });
 
-  // Tap gesture for edit
-  const tapGesture = Gesture.Tap().onEnd(() => {
-    runOnJS(triggerLightHaptic)();
-    runOnJS(onEdit)();
-  });
+  // Tap gesture for edit - Solo si NO hubo swipe
+  const tapGesture = Gesture.Tap()
+    .maxDuration(250)
+    .onEnd(() => {
+      // Solo ejecutar edit si no estamos en medio de un swipe
+      if (!isSwipingShared.value && Math.abs(translateX.value) < 10) {
+        runOnJS(triggerLightHaptic)();
+        runOnJS(onEdit)();
+      }
+    });
 
-  // Compose gestures
-  const composedGesture = Gesture.Race(panGesture, Gesture.Simultaneous(tapGesture, swipeGesture));
+  // Compose gestures: Pan (reorder) tiene prioridad, luego Swipe, luego Tap
+  // Usamos Exclusive para que Swipe y Tap no se ejecuten simultáneamente
+  const composedGesture = Gesture.Race(panGesture, Gesture.Exclusive(swipeGesture, tapGesture));
 
   // Animated styles for main card
   const animatedStyle = useAnimatedStyle(() => ({

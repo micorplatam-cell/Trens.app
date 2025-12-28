@@ -354,6 +354,8 @@ export default function ProScreen() {
           context_type: proContext.type,
           exercise_id: proContext.type === 'tactical' ? proContext.exerciseId : null,
           exercise_name: proContext.type === 'tactical' ? proContext.exerciseName : null,
+          exercise_notes: proContext.type === 'tactical' ? proContext.exerciseNotes : null,
+          tags: proContext.type === 'tactical' ? proContext.exerciseTags : null,
           spotify: data.spotifyTrack
             ? {
                 enabled: true,

@@ -17,45 +17,115 @@ NC='\033[0m'
 # 🗄️ SUPABASE HELPERS
 # =============================================================================
 
-# Ejecutar SQL directamente en Supabase
-# Uso: db-sql "SELECT * FROM profiles LIMIT 5"
-db-sql() {
-  local query="$1"
-  
-  if [ -z "$EXPO_PUBLIC_SUPABASE_URL" ]; then
-    echo -e "${RED}❌ EXPO_PUBLIC_SUPABASE_URL no configurada${NC}"
+# Login a Supabase CLI (necesario antes de ejecutar migraciones)
+# Uso: db-login
+db-login() {
+  if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then
+    echo -e "${RED}❌ SUPABASE_ACCESS_TOKEN no configurada en .env${NC}"
+    return 1
+  fi
+  echo -e "${CYAN}🔐 Autenticando en Supabase...${NC}"
+  npx supabase login --token "$SUPABASE_ACCESS_TOKEN"
+  echo -e "${GREEN}✅ Autenticado!${NC}"
+}
+
+# Push todas las migraciones pendientes
+# Uso: db-push
+db-push() {
+  echo -e "${CYAN}🚀 Aplicando migraciones pendientes...${NC}"
+  npx supabase db push
+}
+
+# Push migraciones (dry-run para ver qué se aplicaría)
+# Uso: db-push-dry
+db-push-dry() {
+  echo -e "${YELLOW}👀 Verificando migraciones pendientes (dry-run)...${NC}"
+  npx supabase db push --dry-run
+}
+
+# Crear nueva migración SQL y aplicarla inmediatamente
+# Uso: db-exec "ALTER TABLE users ADD COLUMN avatar TEXT;"
+db-exec() {
+  local sql="$1"
+  if [ -z "$sql" ]; then
+    echo -e "${RED}❌ Uso: db-exec \"SQL QUERY\"${NC}"
     return 1
   fi
   
-  # Extraer project ref de la URL
-  local project_ref=$(echo "$EXPO_PUBLIC_SUPABASE_URL" | sed 's|https://||' | sed 's|.supabase.co||')
+  # Crear archivo de migración temporal
+  local timestamp=$(date +%Y%m%d%H%M%S)
+  local migration_file="supabase/migrations/${timestamp}_copilot_exec.sql"
   
-  echo -e "${CYAN}🗄️ Ejecutando SQL...${NC}"
-  curl -s -X POST \
-    "${EXPO_PUBLIC_SUPABASE_URL}/rest/v1/rpc/exec_sql" \
-    -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY:-$EXPO_PUBLIC_SUPABASE_ANON_KEY}" \
-    -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY:-$EXPO_PUBLIC_SUPABASE_ANON_KEY}" \
-    -H "Content-Type: application/json" \
-    -d "{\"query\": \"$query\"}" | jq .
+  echo -e "${CYAN}🗄️ Creando migración temporal...${NC}"
+  echo "-- Auto-generated migration by Copilot" > "$migration_file"
+  echo "-- $(date)" >> "$migration_file"
+  echo "" >> "$migration_file"
+  echo "$sql" >> "$migration_file"
+  
+  echo -e "${CYAN}📄 Archivo: $migration_file${NC}"
+  echo -e "${CYAN}🚀 Ejecutando en producción...${NC}"
+  
+  npx supabase db push --yes
+  
+  if [ $? -eq 0 ]; then
+    echo -e "${GREEN}✅ SQL ejecutado exitosamente!${NC}"
+  else
+    echo -e "${RED}❌ Error ejecutando SQL${NC}"
+    rm -f "$migration_file"
+    return 1
+  fi
 }
 
-# Ejecutar archivo SQL
-# Uso: db-file ./supabase/migrations/001_create_table.sql
-db-file() {
+# Ejecutar archivo de migración SQL existente
+# Uso: db-migrate supabase/migrations/20250101_mi_migracion.sql
+db-migrate() {
   local file="$1"
   if [ ! -f "$file" ]; then
     echo -e "${RED}❌ Archivo no encontrado: $file${NC}"
     return 1
   fi
   
-  echo -e "${CYAN}🗄️ Ejecutando: $file${NC}"
-  local query=$(cat "$file")
-  db-sql "$query"
+  echo -e "${CYAN}🗄️ Aplicando migración: $file${NC}"
+  npx supabase db push --yes
+  echo -e "${GREEN}✅ Migración aplicada!${NC}"
 }
 
-# Ver tablas
+# Query rápido con curl (para selects simples, no necesita login)
+# Uso: db-query "pro_videos?select=id,exercise_name&limit=5"
+db-query() {
+  local query="$1"
+  if [ -z "$query" ]; then
+    echo -e "${RED}❌ Uso: db-query \"tabla?select=col1,col2&limit=10\"${NC}"
+    return 1
+  fi
+  
+  echo -e "${CYAN}🔍 Ejecutando query...${NC}"
+  curl -s "${EXPO_PUBLIC_SUPABASE_URL}/rest/v1/${query}" \
+    -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+    -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" | jq .
+}
+
+# Ver todas las tablas
+# Uso: db-tables
 db-tables() {
-  db-sql "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name"
+  echo -e "${CYAN}📋 Tablas en la base de datos:${NC}"
+  db-query "?select=*" 2>/dev/null || echo "Usa: db-query \"nombre_tabla?select=*&limit=5\""
+}
+
+# Ver estructura de una tabla (columnas)
+# Uso: db-describe pro_videos  
+db-describe() {
+  local table="$1"
+  if [ -z "$table" ]; then
+    echo -e "${RED}❌ Uso: db-describe nombre_tabla${NC}"
+    return 1
+  fi
+  
+  echo -e "${CYAN}📋 Probando columnas de: $table${NC}"
+  # Hacer un select limitado para ver las columnas
+  curl -s "${EXPO_PUBLIC_SUPABASE_URL}/rest/v1/${table}?select=*&limit=1" \
+    -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+    -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" | jq 'if type == "array" and length > 0 then .[0] | keys else . end'
 }
 
 # =============================================================================

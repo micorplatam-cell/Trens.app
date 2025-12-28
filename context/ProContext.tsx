@@ -9,12 +9,19 @@ export interface ProContextData {
   type: ProContextType;
   exerciseId?: string;
   exerciseName?: string;
+  exerciseNotes?: string;
+  exerciseTags?: string[];
   moduleName: 'GYM' | 'NUCLEO' | 'ADN' | 'PLAN';
 }
 
 interface ProContextValue {
   context: ProContextData;
-  setTacticalContext: (exerciseId: string, exerciseName: string) => void;
+  setTacticalContext: (
+    exerciseId: string,
+    exerciseName: string,
+    notes?: string,
+    tags?: string[]
+  ) => void;
   setFreeContext: (moduleName: 'NUCLEO' | 'ADN' | 'PLAN') => void;
   clearContext: () => void;
 }
@@ -33,20 +40,30 @@ export function ProContextProvider({ children }: { children: ReactNode }) {
     moduleName: 'NUCLEO',
   });
 
-  const setTacticalContext = useCallback((exerciseId: string, exerciseName: string) => {
-    setContext((prev) => {
-      // Evitar actualización si el contexto es el mismo
-      if (prev.type === 'tactical' && prev.exerciseId === exerciseId) {
-        return prev;
-      }
-      return {
-        type: 'tactical',
-        exerciseId,
-        exerciseName,
-        moduleName: 'GYM',
-      };
-    });
-  }, []);
+  const setTacticalContext = useCallback(
+    (exerciseId: string, exerciseName: string, notes?: string, tags?: string[]) => {
+      setContext((prev) => {
+        // Evitar actualización si el contexto es el mismo (excepto notas/tags que siempre actualizamos)
+        if (
+          prev.type === 'tactical' &&
+          prev.exerciseId === exerciseId &&
+          prev.exerciseNotes === notes &&
+          JSON.stringify(prev.exerciseTags) === JSON.stringify(tags)
+        ) {
+          return prev;
+        }
+        return {
+          type: 'tactical',
+          exerciseId,
+          exerciseName,
+          exerciseNotes: notes,
+          exerciseTags: tags,
+          moduleName: 'GYM',
+        };
+      });
+    },
+    []
+  );
 
   const setFreeContext = useCallback((moduleName: 'NUCLEO' | 'ADN' | 'PLAN') => {
     setContext((prev) => {

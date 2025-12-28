@@ -13,6 +13,8 @@ import {
   TextInput,
   RefreshControl,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { Image } from 'expo-image';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
@@ -52,7 +54,9 @@ import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withSpring,
+  withTiming,
   runOnJS,
+  Easing,
 } from 'react-native-reanimated';
 import Slider from '@react-native-community/slider';
 import { useHank } from '../../../context/HankContext';
@@ -236,6 +240,9 @@ interface VideoRecord {
     trackUri?: string;
     positionMs?: number;
   };
+  notes?: string; // Notas del video capturadas al grabar
+  exercise_notes?: string; // Notas del ejercicio al momento de grabar
+  tags?: string[]; // Tags del video (PR, dolor, etc)
 }
 
 interface Exercise {
@@ -439,7 +446,33 @@ function GymScreen() {
   // Modals State
   const [hankModalVisible, setHankModalVisible] = useState(false);
   const [notesModalVisible, setNotesModalVisible] = useState(false);
+  const [exerciseNotes, setExerciseNotes] = useState<Record<string, string>>({});
+  const [exerciseTags, setExerciseTags] = useState<Record<string, string[]>>({});
+  const [currentNoteText, setCurrentNoteText] = useState('');
+  const [savingNotes, setSavingNotes] = useState(false);
   const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
+
+  // Historial de notas del ejercicio
+  const [notesHistory, setNotesHistory] = useState<
+    Array<{
+      id: string;
+      date: string;
+      rawDate: string;
+      notes: string;
+      tags?: string[];
+      type: 'video' | 'session';
+      videoId?: string;
+      isToday: boolean;
+    }>
+  >([]);
+  const [loadingNotesHistory, setLoadingNotesHistory] = useState(false);
+  const [todayNoteId, setTodayNoteId] = useState<string | null>(null); // ID de nota de hoy si existe
+
+  // Video Notes Modal State (para editar notas de un video específico)
+  const [videoNotesModalVisible, setVideoNotesModalVisible] = useState(false);
+  const [videoNoteText, setVideoNoteText] = useState('');
+  const [savingVideoNotes, setSavingVideoNotes] = useState(false);
+  const [videoNotesExpanded, setVideoNotesExpanded] = useState(false);
 
   // Spotify State (solo para captura durante grabación)
   const [spotifyConnected, setSpotifyConnected] = useState(false);
@@ -582,6 +615,10 @@ function GymScreen() {
   const [modalExercise, setModalExercise] = useState<Exercise | null>(null);
   const [exerciseVideos, setExerciseVideos] = useState<VideoRecord[]>([]);
   const [loadingVideos, setLoadingVideos] = useState(false);
+
+  // Estado para el modal de estructura editable (FOCUS mode)
+  const [focusSeriesConfig, setFocusSeriesConfig] = useState<SeriesConfig[]>([]);
+  const [savingFocusSeries, setSavingFocusSeries] = useState(false);
 
   // Camera State
   const [cameraModalVisible, setCameraModalVisible] = useState(false);
@@ -830,6 +867,46 @@ function GymScreen() {
   // ID del ejercicio actual (puede ser principal o alternativa)
   const [currentVariationId, setCurrentVariationId] = useState<string | null>(null);
 
+  // Helper: Obtener el ID y nombre del ejercicio activo (considerando alternativas)
+  const getActiveExerciseInfo = (exerciseIndex: number = currentExerciseIndex) => {
+    const exercise = exercises[exerciseIndex];
+    if (!exercise) return { id: '', name: '' };
+
+    const altIndex = activeAlternatives[exerciseIndex] || 0;
+
+    // Si altIndex > 0, estamos en una alternativa
+    if (altIndex > 0 && exercise.alternatives && exercise.alternatives[altIndex - 1]) {
+      const alt = exercise.alternatives[altIndex - 1];
+      return { id: alt.id, name: alt.name };
+    }
+
+    return { id: exercise.id, name: exercise.name };
+  };
+
+  // Helper: Obtener TODOS los IDs de ejercicios con el mismo nombre (para sincronizar notas/videos)
+  const getAllExerciseIdsByName = (targetName: string): string[] => {
+    const normalizedTarget = targetName.toLowerCase().trim();
+    const matchingIds: string[] = [];
+
+    exercises.forEach((ex) => {
+      // Verificar ejercicio principal
+      if (ex.name.toLowerCase().trim() === normalizedTarget) {
+        if (!matchingIds.includes(ex.id)) matchingIds.push(ex.id);
+      }
+
+      // Verificar alternativas
+      if (ex.alternatives) {
+        ex.alternatives.forEach((alt) => {
+          if (alt.name.toLowerCase().trim() === normalizedTarget) {
+            if (!matchingIds.includes(alt.id)) matchingIds.push(alt.id);
+          }
+        });
+      }
+    });
+
+    return matchingIds;
+  };
+
   // Auto-repair flag para evitar loops infinitos
   const autoRepairDone = useRef(false);
 
@@ -921,8 +998,26 @@ function GymScreen() {
         }
 
         // Actualizar ProContext para Smart Trigger (Contexto Táctico)
+        // Buscar notas de TODOS los IDs con el mismo nombre (sincronización por nombre)
         console.log('🏋️ GYM: Estableciendo contexto táctico:', exerciseId, exerciseName);
-        setTacticalContext(exerciseId, exerciseName);
+
+        // Buscar notas en todos los IDs relacionados por nombre
+        const relatedIds = getAllExerciseIdsByName(exerciseName);
+        let notes = '';
+        let tags: string[] = [];
+
+        // Buscar la primera nota/tags que encontremos en cualquier ID relacionado
+        for (const id of relatedIds) {
+          if (!notes && exerciseNotes[id]) {
+            notes = exerciseNotes[id];
+          }
+          if (tags.length === 0 && exerciseTags[id] && exerciseTags[id].length > 0) {
+            tags = exerciseTags[id];
+          }
+          if (notes && tags.length > 0) break;
+        }
+
+        setTacticalContext(exerciseId, exerciseName, notes, tags);
       }
     }
   }, [
@@ -933,6 +1028,8 @@ function GymScreen() {
     viewMode,
     setTacticalContext,
     setActiveAsset,
+    exerciseNotes,
+    exerciseTags,
   ]);
 
   // Modal drag state
@@ -940,6 +1037,7 @@ function GymScreen() {
   const translateYStructure = useSharedValue(0);
   const translateYCatalog = useSharedValue(0);
   const translateYSeriesConfig = useSharedValue(0);
+  const translateYNotes = useSharedValue(0);
 
   const animatedStyleHistorial = useAnimatedStyle(() => ({
     transform: [{ translateY: translateYHistorial.value }],
@@ -957,6 +1055,12 @@ function GymScreen() {
     transform: [{ translateY: translateYSeriesConfig.value }],
   }));
 
+  const animatedStyleNotes = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateYNotes.value }],
+  }));
+
+  const closeHistorialWithAnimation = () => setHistorialModalVisible(false);
+
   const panResponderHistorial = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
@@ -968,16 +1072,29 @@ function GymScreen() {
       },
       onPanResponderRelease: (_, gestureState) => {
         if (gestureState.dy > 150) {
-          setHistorialModalVisible(false);
-          setTimeout(() => {
-            translateYHistorial.value = 0;
-          }, 300);
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          // Animar hacia abajo y luego cerrar
+          translateYHistorial.value = withTiming(
+            800,
+            { duration: 200, easing: Easing.out(Easing.ease) },
+            () => runOnJS(closeHistorialWithAnimation)()
+          );
         } else {
-          translateYHistorial.value = withSpring(0);
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          translateYHistorial.value = withTiming(0, { duration: 150 });
         }
       },
     })
   ).current;
+
+  // Ref para guardar series al cerrar con gesto
+  const saveFocusSeriesRef = useRef<() => void>(() => {});
+
+  const closeStructureWithAnimation = () => {
+    // Guardar automáticamente al cerrar
+    saveFocusSeriesRef.current();
+    setStructureModalVisible(false);
+  };
 
   const panResponderStructure = useRef(
     PanResponder.create({
@@ -990,12 +1107,16 @@ function GymScreen() {
       },
       onPanResponderRelease: (_, gestureState) => {
         if (gestureState.dy > 150) {
-          setStructureModalVisible(false);
-          setTimeout(() => {
-            translateYStructure.value = 0;
-          }, 300);
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          // Animar hacia abajo y luego cerrar
+          translateYStructure.value = withTiming(
+            800,
+            { duration: 200, easing: Easing.out(Easing.ease) },
+            () => runOnJS(closeStructureWithAnimation)()
+          );
         } else {
-          translateYStructure.value = withSpring(0);
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          translateYStructure.value = withTiming(0, { duration: 150 });
         }
       },
     })
@@ -1025,17 +1146,31 @@ function GymScreen() {
     })
   ).current;
 
-  const closeSeriesConfigModal = () => {
+  // Ref para guardar series config al cerrar
+  const saveSeriesConfigRef = useRef<() => Promise<void>>(async () => {});
+
+  const closeSeriesConfigModal = async () => {
+    // Guardar automáticamente antes de cerrar
+    await saveSeriesConfigRef.current();
     setSeriesConfigModalVisible(false);
-    // Solo abrir catálogo si vino del catálogo (usar ref porque se llama desde panResponder)
+    // Solo abrir catálogo si vino del catálogo
     if (seriesConfigFromCatalogRef.current) {
       setModalVisible(true);
     }
     setSeriesConfigFromCatalog(false);
     seriesConfigFromCatalogRef.current = false;
-    setTimeout(() => {
-      translateYSeriesConfig.value = 0;
-    }, 300);
+  };
+
+  const closeSeriesConfigWithAnimation = () => {
+    // Guardar y cerrar
+    saveSeriesConfigRef.current().then(() => {
+      setSeriesConfigModalVisible(false);
+      if (seriesConfigFromCatalogRef.current) {
+        setModalVisible(true);
+      }
+      setSeriesConfigFromCatalog(false);
+      seriesConfigFromCatalogRef.current = false;
+    });
   };
 
   const panResponderSeriesConfig = useRef(
@@ -1050,23 +1185,353 @@ function GymScreen() {
       onPanResponderRelease: (_, gestureState) => {
         if (gestureState.dy > 150) {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          // Cerrar usando la función que respeta el origen
-          closeSeriesConfigModal();
+          // Animar hacia abajo y luego cerrar
+          translateYSeriesConfig.value = withTiming(
+            800,
+            { duration: 200, easing: Easing.out(Easing.ease) },
+            () => runOnJS(closeSeriesConfigWithAnimation)()
+          );
         } else {
-          translateYSeriesConfig.value = withSpring(0);
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          translateYSeriesConfig.value = withTiming(0, { duration: 150 });
         }
       },
     })
   ).current;
 
-  // Vibración al abrir modales
+  // Flag para indicar que el modal de notas se cerró con gesto (debe guardar)
+  const shouldSaveNotesOnCloseRef = useRef(false);
+
+  const closeNotesWithAnimation = () => {
+    shouldSaveNotesOnCloseRef.current = true;
+    setNotesModalVisible(false);
+  };
+
+  const panResponderNotes = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 5,
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0) {
+          translateYNotes.value = gestureState.dy;
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 150) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          // Animar hacia abajo y luego cerrar
+          translateYNotes.value = withTiming(
+            800,
+            { duration: 200, easing: Easing.out(Easing.ease) },
+            () => runOnJS(closeNotesWithAnimation)()
+          );
+        } else {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          translateYNotes.value = withTiming(0, { duration: 150 });
+        }
+      },
+    })
+  ).current;
+
+  // Resetear translateY y animar entrada cuando los modales se abren
   useEffect(() => {
-    if (historialModalVisible || structureModalVisible) {
-      setTimeout(() => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      }, 300);
+    if (historialModalVisible) {
+      // Empezar fuera de pantalla y animar hacia arriba
+      translateYHistorial.value = 800;
+      translateYHistorial.value = withTiming(0, { duration: 300, easing: Easing.out(Easing.ease) });
+      setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium), 100);
     }
-  }, [historialModalVisible, structureModalVisible]);
+  }, [historialModalVisible]);
+
+  useEffect(() => {
+    if (structureModalVisible) {
+      // Empezar fuera de pantalla y animar hacia arriba
+      translateYStructure.value = 800;
+      translateYStructure.value = withTiming(0, { duration: 300, easing: Easing.out(Easing.ease) });
+      setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium), 100);
+    }
+  }, [structureModalVisible]);
+
+  useEffect(() => {
+    if (notesModalVisible) {
+      // Empezar fuera de pantalla y animar hacia arriba
+      translateYNotes.value = 800;
+      translateYNotes.value = withTiming(0, { duration: 300, easing: Easing.out(Easing.ease) });
+      setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium), 100);
+    }
+  }, [notesModalVisible]);
+
+  useEffect(() => {
+    if (seriesConfigModalVisible) {
+      // Empezar fuera de pantalla y animar hacia arriba
+      translateYSeriesConfig.value = 800;
+      translateYSeriesConfig.value = withTiming(0, {
+        duration: 300,
+        easing: Easing.out(Easing.ease),
+      });
+      setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium), 100);
+    }
+  }, [seriesConfigModalVisible]);
+
+  // Asignar función de guardado al ref para auto-save al cerrar con gesto
+  useEffect(() => {
+    saveSeriesConfigRef.current = async () => {
+      if (seriesConfig.length === 0 || !selectedTemplate) return;
+
+      const existingExercise = exercises.find((ex) => ex.id === selectedTemplate.id);
+      if (existingExercise) {
+        try {
+          const { data: currentConfig } = await supabase
+            .from('user_exercise_config')
+            .select('config')
+            .eq('id', selectedTemplate.id)
+            .single();
+
+          const currentConfigData = currentConfig?.config || {};
+          const seriesByDay = (currentConfigData.series_by_day as Record<string, unknown[]>) || {};
+          seriesByDay[String(selectedDayIndex)] = seriesConfig;
+
+          await supabase
+            .from('user_exercise_config')
+            .update({
+              config: {
+                ...selectedTemplate.default_metadata,
+                ...currentConfigData,
+                sets: `${seriesConfig.length}x${seriesConfig[0]?.reps || 10}`,
+                series_by_day: seriesByDay,
+              },
+            })
+            .eq('id', selectedTemplate.id);
+
+          await loadExercises();
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        } catch (error) {
+          console.error('Error guardando series:', error);
+        }
+      } else {
+        await addExerciseFromTemplate(selectedTemplate, seriesConfig);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+    };
+  }, [seriesConfig, selectedTemplate, selectedDayIndex, exercises]);
+
+  // Cargar series cuando se abre el modal de estructura (FOCUS mode)
+  useEffect(() => {
+    if (structureModalVisible && modalExercise) {
+      // Convertir Series[] a SeriesConfig[]
+      const mappedSeries: SeriesConfig[] = (modalExercise.series || [])
+        .filter((s) => s && typeof s === 'object')
+        .map((s) => ({
+          id: s.id || Date.now().toString() + Math.random(),
+          reps: parseInt(String(s.reps)) || 10,
+          type: s.type as SeriesType,
+          note: s.note || '',
+          weight: s.weight || 0,
+        }));
+      setFocusSeriesConfig(
+        mappedSeries.length > 0
+          ? mappedSeries
+          : [{ id: '1', reps: 10, type: 'EFECTIVA', note: '', weight: 0 }]
+      );
+    }
+  }, [structureModalVisible, modalExercise]);
+
+  // Cargar notas cuando se abre el modal de notas
+  useEffect(() => {
+    if (notesModalVisible && exercises[currentExerciseIndex]) {
+      // Usar helper para obtener el ejercicio activo (principal o alternativa)
+      const { id: exerciseId, name: exerciseName } = getActiveExerciseInfo(currentExerciseIndex);
+      if (!exerciseId) return;
+
+      // Obtener TODOS los IDs de ejercicios con el mismo nombre (para sincronizar notas)
+      const allRelatedIds = getAllExerciseIdsByName(exerciseName);
+      console.log(
+        `📝 Cargando notas para "${exerciseName}" - IDs relacionados:`,
+        allRelatedIds.length
+      );
+
+      // Cargar historial de notas del ejercicio
+      const loadNotesHistory = async () => {
+        if (!user) return;
+        setLoadingNotesHistory(true);
+
+        try {
+          // Fecha de hoy (inicio del día)
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          const todayStr = today.toISOString().split('T')[0];
+
+          // Obtener notas de videos de TODOS los ejercicios con el mismo nombre
+          const { data: videoNotes, error } = await supabase
+            .from('pro_videos')
+            .select('id, notes, exercise_notes, tags, created_at')
+            .eq('user_id', user.id)
+            .in('exercise_id', allRelatedIds)
+            .or('notes.not.is.null,exercise_notes.not.is.null')
+            .order('created_at', { ascending: false })
+            .limit(20);
+
+          if (error) throw error;
+
+          const history: Array<{
+            id: string;
+            date: string;
+            rawDate: string;
+            notes: string;
+            tags?: string[];
+            type: 'video' | 'session';
+            videoId?: string;
+            isToday: boolean;
+          }> = [];
+
+          let foundTodayNote: string | null = null;
+          let todayNoteContent = '';
+          let todayNoteTags: string[] = [];
+
+          // Agregar notas de videos
+          videoNotes?.forEach((v: any) => {
+            const noteContent = v.notes || v.exercise_notes;
+            if (noteContent) {
+              const date = new Date(v.created_at);
+              const dateStr = date.toISOString().split('T')[0];
+              const isToday = dateStr === todayStr;
+
+              // Si es de hoy, guardar referencia
+              if (isToday && !foundTodayNote) {
+                foundTodayNote = v.id;
+                todayNoteContent = noteContent;
+                todayNoteTags = v.tags || [];
+              }
+
+              history.push({
+                id: v.id,
+                date: date.toLocaleDateString('es-ES', {
+                  day: 'numeric',
+                  month: 'short',
+                  year: date.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined,
+                }),
+                rawDate: dateStr,
+                notes: noteContent,
+                tags: v.tags,
+                type: 'video',
+                videoId: v.id,
+                isToday,
+              });
+            }
+          });
+
+          setNotesHistory(history);
+          setTodayNoteId(foundTodayNote);
+
+          // Si hay nota de hoy, cargar su contenido
+          if (foundTodayNote) {
+            setCurrentNoteText(todayNoteContent);
+            setExerciseTags((prev) => ({ ...prev, [exerciseId]: todayNoteTags }));
+          } else {
+            // Si no hay nota de hoy, cargar desde metadata (user_exercise_config)
+            // Hacer fetch directo para asegurar datos actualizados
+            // Buscar en TODOS los IDs relacionados por nombre
+            const { data: configData } = await supabase
+              .from('user_exercise_config')
+              .select('metadata')
+              .eq('user_id', user.id)
+              .in('exercise_id', allRelatedIds);
+
+            // Buscar la primera nota/tags que encontremos
+            let savedNotes = '';
+            let savedTags: string[] = [];
+
+            configData?.forEach((cfg: any) => {
+              if (!savedNotes && cfg.metadata?.notes) {
+                savedNotes = cfg.metadata.notes;
+              }
+              if (savedTags.length === 0 && cfg.metadata?.tags) {
+                savedTags = cfg.metadata.tags;
+              }
+            });
+
+            setCurrentNoteText(savedNotes);
+            setExerciseTags((prev) => ({ ...prev, [exerciseId]: savedTags }));
+
+            // Actualizar cache local para todos los IDs relacionados
+            if (savedNotes) {
+              const notesUpdate: Record<string, string> = {};
+              allRelatedIds.forEach((id) => {
+                notesUpdate[id] = savedNotes;
+              });
+              setExerciseNotes((prev) => ({ ...prev, ...notesUpdate }));
+            }
+          }
+        } catch (err) {
+          console.error('Error loading notes history:', err);
+          setCurrentNoteText(exerciseNotes[exerciseId] || '');
+        } finally {
+          setLoadingNotesHistory(false);
+        }
+      };
+
+      loadNotesHistory();
+    }
+  }, [notesModalVisible, currentExerciseIndex, exercises, user, activeAlternatives]);
+
+  // Guardar notas automáticamente cuando el modal se cierra con gesto
+  const prevNotesModalVisibleRef = useRef(notesModalVisible);
+  useEffect(() => {
+    // Detectar cuando el modal pasa de visible a no visible
+    if (prevNotesModalVisibleRef.current && !notesModalVisible) {
+      // El modal se cerró - guardar si fue por gesto o botón Android
+      if (shouldSaveNotesOnCloseRef.current) {
+        saveExerciseNotes();
+        shouldSaveNotesOnCloseRef.current = false;
+      }
+    }
+    prevNotesModalVisibleRef.current = notesModalVisible;
+  }, [notesModalVisible]);
+
+  // Cargar notas de ejercicios desde la base de datos
+  useEffect(() => {
+    const loadExerciseNotes = async () => {
+      if (!user || exercises.length === 0) return;
+
+      try {
+        // Recopilar IDs de ejercicios principales Y alternativas
+        const allExerciseIds: string[] = [];
+        exercises.forEach((ex) => {
+          allExerciseIds.push(ex.id);
+          if (ex.alternatives) {
+            ex.alternatives.forEach((alt) => allExerciseIds.push(alt.id));
+          }
+        });
+
+        const { data, error } = await supabase
+          .from('user_exercise_config')
+          .select('exercise_id, metadata')
+          .eq('user_id', user.id)
+          .in('exercise_id', allExerciseIds);
+
+        if (error) throw error;
+
+        const notesMap: Record<string, string> = {};
+        const tagsMap: Record<string, string[]> = {};
+
+        data?.forEach((config: any) => {
+          if (config.metadata?.notes) {
+            notesMap[config.exercise_id] = config.metadata.notes;
+          }
+          if (config.metadata?.tags) {
+            tagsMap[config.exercise_id] = config.metadata.tags;
+          }
+        });
+
+        setExerciseNotes(notesMap);
+        setExerciseTags(tagsMap);
+      } catch (err) {
+        console.error('Error loading exercise notes:', err);
+      }
+    };
+
+    loadExerciseNotes();
+  }, [user, exercises.length]);
 
   // Cargar videos del ejercicio cuando se abre el historial
   useEffect(() => {
@@ -1099,6 +1564,9 @@ function GymScreen() {
           thumbnail_url: v.thumbnail_url || v.video_url,
           cloudflare_video_id: v.cloudflare_video_id,
           spotify: v.spotify,
+          notes: v.notes,
+          exercise_notes: v.exercise_notes,
+          tags: v.tags,
         }));
 
         setExerciseVideos(mappedVideos);
@@ -1622,14 +2090,47 @@ function GymScreen() {
         }
 
         // Cargar videos de pro_videos para todos los ejercicios del usuario
-        const allExerciseIds = filteredData.map((item: any) => item.id);
+        // Incluir ejercicios principales Y alternativas
+        const allExerciseIds = [...filteredData.map((item: any) => item.id), ...allAlternativeIds];
         let exerciseVideosMap: Record<string, VideoRecord[]> = {};
+
+        // Crear mapa de nombre -> IDs para sincronizar videos por nombre de ejercicio
+        const exerciseNameToIds: Record<string, string[]> = {};
+
+        // Agregar ejercicios principales al mapa nombre -> IDs
+        filteredData.forEach((item: any) => {
+          const name = item.name?.toLowerCase()?.trim();
+          if (name) {
+            if (!exerciseNameToIds[name]) exerciseNameToIds[name] = [];
+            if (!exerciseNameToIds[name].includes(item.id)) {
+              exerciseNameToIds[name].push(item.id);
+            }
+          }
+        });
+
+        // Agregar alternativas al mapa nombre -> IDs
+        alternativeExercisesData.forEach((alt: any) => {
+          const name = alt.name?.toLowerCase()?.trim();
+          if (name) {
+            if (!exerciseNameToIds[name]) exerciseNameToIds[name] = [];
+            if (!exerciseNameToIds[name].includes(alt.id)) {
+              exerciseNameToIds[name].push(alt.id);
+            }
+          }
+        });
+
+        console.log(
+          '🔗 Ejercicios por nombre:',
+          Object.entries(exerciseNameToIds)
+            .filter(([, ids]) => ids.length > 1)
+            .map(([name, ids]) => `${name}: ${ids.length} IDs`)
+        );
 
         if (allExerciseIds.length > 0) {
           const { data: videosData, error: videosError } = await supabase
             .from('pro_videos')
             .select(
-              'id, exercise_id, video_url, thumbnail_url, weight_kg, reps, is_public, created_at'
+              'id, exercise_id, video_url, thumbnail_url, weight_kg, reps, is_public, created_at, spotify, cloudflare_video_id, notes, exercise_notes, tags'
             )
             .in('exercise_id', allExerciseIds)
             .order('created_at', { ascending: false });
@@ -1646,6 +2147,7 @@ function GymScreen() {
                 video_url: v.video_url,
                 videoUrl: v.video_url,
                 thumbnail_url: v.thumbnail_url || v.video_url,
+                cloudflare_video_id: v.cloudflare_video_id,
                 weight: v.weight_kg || 0,
                 reps: v.reps || 0,
                 date: new Date(v.created_at).toLocaleDateString('es-ES', {
@@ -1653,8 +2155,42 @@ function GymScreen() {
                   month: 'short',
                 }),
                 is_public: v.is_public,
+                spotify: v.spotify,
+                notes: v.notes,
+                exercise_notes: v.exercise_notes,
+                tags: v.tags,
               });
             });
+
+            // SINCRONIZAR videos entre ejercicios con el mismo nombre
+            // Si "Flexiones" tiene IDs [A, B] y A tiene videos, B también los tendrá
+            Object.entries(exerciseNameToIds).forEach(([, ids]) => {
+              if (ids.length > 1) {
+                // Combinar todos los videos de todos los IDs con este nombre
+                const allVideosForName: VideoRecord[] = [];
+                ids.forEach((id) => {
+                  if (exerciseVideosMap[id]) {
+                    allVideosForName.push(...exerciseVideosMap[id]);
+                  }
+                });
+
+                // Eliminar duplicados por ID de video
+                const uniqueVideos = allVideosForName.filter(
+                  (v, i, arr) => arr.findIndex((x) => x.id === v.id) === i
+                );
+
+                // Ordenar por fecha (más reciente primero)
+                uniqueVideos.sort(
+                  (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+                );
+
+                // Asignar los videos combinados a TODOS los IDs con este nombre
+                ids.forEach((id) => {
+                  exerciseVideosMap[id] = uniqueVideos;
+                });
+              }
+            });
+
             console.log(
               '🎥 Videos cargados para',
               Object.keys(exerciseVideosMap).length,
@@ -1683,15 +2219,13 @@ function GymScreen() {
                 ? customSeriesData.map((s: SeriesConfig) => ({
                     id: s.id,
                     // Normalizar tipos a español (el tipo almacenado puede ser legacy en inglés)
-                    type: (
-                      s.type === 'CALENTAMIENTO' || (s.type as string) === 'WARMUP'
-                        ? 'CALENTAMIENTO'
-                        : s.type === 'APROXIMACION' || (s.type as string) === 'APPROACH'
-                          ? 'APROXIMACION'
-                          : s.type === 'FALLO' || (s.type as string) === 'FAILURE'
-                            ? 'FALLO'
-                            : 'EFECTIVA'
-                    ) as SeriesType,
+                    type: (s.type === 'CALENTAMIENTO' || (s.type as string) === 'WARMUP'
+                      ? 'CALENTAMIENTO'
+                      : s.type === 'APROXIMACION' || (s.type as string) === 'APPROACH'
+                        ? 'APROXIMACION'
+                        : s.type === 'FALLO' || (s.type as string) === 'FAILURE'
+                          ? 'FALLO'
+                          : 'EFECTIVA') as SeriesType,
                     reps: String(s.reps),
                     note: s.note || undefined,
                     weight: s.weight || 0,
@@ -1701,7 +2235,22 @@ function GymScreen() {
             // Mapear alternativas desde exercises.alternative_exercises
             const alternatives: ExerciseAlternative[] = alternativeIds
               .map((altId: string) => {
-                const altExercise = alternativeExercisesData.find((a: any) => a.id === altId);
+                // Buscar primero en alternativeExercisesData
+                let altExercise = alternativeExercisesData.find((a: any) => a.id === altId);
+
+                // Si no está ahí, puede ser un ejercicio principal usado como alternativa
+                if (!altExercise) {
+                  const mainExercise = filteredData.find((e: any) => e.id === altId);
+                  if (mainExercise) {
+                    altExercise = {
+                      id: mainExercise.id,
+                      name: mainExercise.name,
+                      default_media_url: mainExercise.media_url,
+                      thumbnail_url: mainExercise.media_url,
+                    };
+                  }
+                }
+
                 if (!altExercise) return null;
 
                 // Usar imagen personalizada si existe, sino usar la del catálogo
@@ -1713,7 +2262,7 @@ function GymScreen() {
                   id: altExercise.id,
                   name: altExercise.name,
                   image_url: imageUrl,
-                  videos: [],
+                  videos: exerciseVideosMap[altId] || [], // Cargar videos de esta alternativa
                   series: seriesForState, // Usar las mismas series del ejercicio principal
                 };
               })
@@ -2489,15 +3038,13 @@ function GymScreen() {
         const seriesForState: Series[] = customSeries
           ? customSeries.map((s) => ({
               id: s.id,
-              type: (
-                s.type === 'CALENTAMIENTO' || (s.type as string) === 'WARMUP'
-                  ? 'CALENTAMIENTO'
-                  : s.type === 'APROXIMACION' || (s.type as string) === 'APPROACH'
-                    ? 'APROXIMACION'
-                    : s.type === 'FALLO' || (s.type as string) === 'FAILURE'
-                      ? 'FALLO'
-                      : 'EFECTIVA'
-              ) as SeriesType,
+              type: (s.type === 'CALENTAMIENTO' || (s.type as string) === 'WARMUP'
+                ? 'CALENTAMIENTO'
+                : s.type === 'APROXIMACION' || (s.type as string) === 'APPROACH'
+                  ? 'APROXIMACION'
+                  : s.type === 'FALLO' || (s.type as string) === 'FAILURE'
+                    ? 'FALLO'
+                    : 'EFECTIVA') as SeriesType,
               reps: String(s.reps),
               note: s.note || undefined,
             }))
@@ -2723,15 +3270,13 @@ function GymScreen() {
           ? customSeries.map((s) => ({
               id: s.id,
               // Normalizar tipos a español (el tipo almacenado puede ser legacy en inglés)
-              type: (
-                s.type === 'CALENTAMIENTO' || (s.type as string) === 'WARMUP'
-                  ? 'CALENTAMIENTO'
-                  : s.type === 'APROXIMACION' || (s.type as string) === 'APPROACH'
-                    ? 'APROXIMACION'
-                    : s.type === 'FALLO' || (s.type as string) === 'FAILURE'
-                      ? 'FALLO'
-                      : 'EFECTIVA'
-              ) as SeriesType,
+              type: (s.type === 'CALENTAMIENTO' || (s.type as string) === 'WARMUP'
+                ? 'CALENTAMIENTO'
+                : s.type === 'APROXIMACION' || (s.type as string) === 'APPROACH'
+                  ? 'APROXIMACION'
+                  : s.type === 'FALLO' || (s.type as string) === 'FAILURE'
+                    ? 'FALLO'
+                    : 'EFECTIVA') as SeriesType,
               reps: String(s.reps),
               note: s.note || undefined,
             }))
@@ -2914,7 +3459,7 @@ function GymScreen() {
   const renderSeriesConfigModal = () => (
     <Modal
       visible={seriesConfigModalVisible}
-      animationType="slide"
+      animationType="none"
       transparent={true}
       onRequestClose={closeSeriesConfigModal}
     >
@@ -2933,92 +3478,27 @@ function GymScreen() {
               <View className="w-10 h-1 bg-zinc-600 rounded-full" />
             </View>
 
-            <View className="flex-row justify-between items-center">
-              <TouchableOpacity
-                onPress={() => {
-                  closeSeriesConfigModal();
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                }}
-                className="w-10 h-10 bg-zinc-900 rounded-full items-center justify-center"
-              >
-                <ChevronDown size={22} color="#fff" />
-              </TouchableOpacity>
-
-              {/* EXERCISE INFO COMPACTA */}
-              {selectedTemplate && (
-                <View className="flex-1 flex-row items-center mx-3">
-                  <Image
-                    source={{
-                      uri:
-                        exercises.find((ex) => ex.name === selectedTemplate.name)?.image_url ||
-                        selectedTemplate.image_url,
-                    }}
-                    style={{ width: 36, height: 36 }}
-                    className="rounded-lg mr-2"
-                    contentFit="cover"
-                  />
-                  <View className="flex-1">
-                    <Text className="text-white font-bold text-sm" numberOfLines={1}>
-                      {selectedTemplate.name}
-                    </Text>
-                    <Text className="text-zinc-600 text-[10px]">{selectedTemplate.category}</Text>
-                  </View>
+            {/* EXERCISE INFO CENTRADA */}
+            {selectedTemplate && (
+              <View className="flex-row items-center justify-center">
+                <Image
+                  source={{
+                    uri:
+                      exercises.find((ex) => ex.name === selectedTemplate.name)?.image_url ||
+                      selectedTemplate.image_url,
+                  }}
+                  style={{ width: 36, height: 36 }}
+                  className="rounded-lg mr-2"
+                  contentFit="cover"
+                />
+                <View>
+                  <Text className="text-white font-bold text-sm" numberOfLines={1}>
+                    {selectedTemplate.name}
+                  </Text>
+                  <Text className="text-zinc-600 text-[10px]">{selectedTemplate.category}</Text>
                 </View>
-              )}
-
-              <TouchableOpacity
-                onPress={async () => {
-                  if (seriesConfig.length === 0) {
-                    alert('Agrega al menos una serie');
-                    return;
-                  }
-                  if (!selectedTemplate) return;
-
-                  // Cerrar modal sin abrir catálogo (guardamos, no cancelamos)
-                  setSeriesConfigModalVisible(false);
-                  setSeriesConfigFromCatalog(false);
-                  seriesConfigFromCatalogRef.current = false;
-
-                  const existingExercise = exercises.find((ex) => ex.id === selectedTemplate.id);
-                  if (existingExercise) {
-                    try {
-                      const { data: currentConfig } = await supabase
-                        .from('user_exercise_config')
-                        .select('config')
-                        .eq('id', selectedTemplate.id)
-                        .single();
-
-                      const currentConfigData = currentConfig?.config || {};
-                      const seriesByDay =
-                        (currentConfigData.series_by_day as Record<string, unknown[]>) || {};
-                      seriesByDay[String(selectedDayIndex)] = seriesConfig;
-
-                      await supabase
-                        .from('user_exercise_config')
-                        .update({
-                          config: {
-                            ...selectedTemplate.default_metadata,
-                            ...currentConfigData,
-                            sets: `${seriesConfig.length}x${seriesConfig[0]?.reps || 10}`,
-                            series_by_day: seriesByDay,
-                          },
-                        })
-                        .eq('id', selectedTemplate.id);
-
-                      await loadExercises();
-                    } catch (error) {
-                      console.error('Error actualizando:', error);
-                    }
-                  } else {
-                    await addExerciseFromTemplate(selectedTemplate, seriesConfig);
-                  }
-                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                }}
-                className="bg-savage-red px-4 py-2 rounded-full"
-              >
-                <Text className="text-white font-bold text-sm">GUARDAR</Text>
-              </TouchableOpacity>
-            </View>
+              </View>
+            )}
           </View>
 
           {/* LEYENDA DE TIPOS */}
@@ -4492,34 +4972,602 @@ function GymScreen() {
   // ============================================================================
   // RENDER MODALS
   // ============================================================================
-  const renderNotesModal = () => (
-    <Modal
-      visible={notesModalVisible}
-      animationType="slide"
-      transparent={true}
-      onRequestClose={() => setNotesModalVisible(false)}
-    >
-      <View className="flex-1 bg-black/95 justify-center px-6">
-        <View className="bg-glass-strong rounded-savage p-6 border border-glass-border">
-          <Text className="text-savage-text text-2xl font-bold mb-4 tracking-wider">NOTAS</Text>
-          <Text className="text-zinc-500 text-sm mb-4">
-            Ejercicio: {exercises[currentExerciseIndex]?.name}
-          </Text>
 
-          <View className="bg-black border border-zinc-800 rounded-lg p-4 mb-4 min-h-32">
-            <Text className="text-zinc-600 text-sm">Toca para agregar notas...</Text>
+  // Constantes para tags de ejercicios
+  const EXERCISE_TAGS = [
+    { key: 'PR', label: '🔥 PR', color: '#F97316', description: 'Récord Personal' },
+    { key: 'DOLOR', label: '⚠️ Dolor', color: '#EF4444', description: 'Molestia/Lesión' },
+    { key: 'SUBIR', label: '💪 Subir Peso', color: '#22C55E', description: 'Próxima vez más peso' },
+    { key: 'TECNICA', label: '🔄 Técnica', color: '#3B82F6', description: 'Revisar técnica' },
+    { key: 'BOMBA', label: '💥 Bomba', color: '#A855F7', description: 'Buena congestión' },
+    { key: 'FATIGA', label: '😴 Fatiga', color: '#71717A', description: 'Cansancio acumulado' },
+  ] as const;
+
+  // Guardar notas del ejercicio (una por día)
+  const saveExerciseNotes = async () => {
+    if (!user || !exercises[currentExerciseIndex]) return;
+
+    // Usar helper para obtener el ejercicio activo (principal o alternativa)
+    const { id: exerciseId, name: exerciseName } = getActiveExerciseInfo(currentExerciseIndex);
+    if (!exerciseId) return;
+
+    const newTags = exerciseTags[exerciseId] || [];
+    setSavingNotes(true);
+
+    try {
+      // Si ya existe una nota de hoy, actualizar ese registro
+      if (todayNoteId) {
+        const { error } = await supabase
+          .from('pro_videos')
+          .update({
+            notes: currentNoteText,
+            exercise_notes: currentNoteText,
+            tags: newTags,
+          })
+          .eq('id', todayNoteId);
+
+        if (error) throw error;
+
+        // Actualizar en historial local
+        setNotesHistory((prev) =>
+          prev.map((n) =>
+            n.id === todayNoteId ? { ...n, notes: currentNoteText, tags: newTags } : n
+          )
+        );
+
+        // Actualizar en la lista de videos del ejercicio (para el reproductor)
+        setExerciseVideos((prev) =>
+          prev.map((v) =>
+            v.id === todayNoteId
+              ? { ...v, notes: currentNoteText, exercise_notes: currentNoteText, tags: newTags }
+              : v
+          )
+        );
+
+        // Actualizar selectedVideo si es el mismo
+        if (selectedVideo && selectedVideo.id === todayNoteId) {
+          setSelectedVideo((prev) =>
+            prev
+              ? { ...prev, notes: currentNoteText, exercise_notes: currentNoteText, tags: newTags }
+              : null
+          );
+        }
+      } else {
+        // No hay nota de hoy - crear un registro en pro_videos solo con notas (sin video)
+        // Esto permite guardar notas inmediatamente sin necesidad de grabar video
+
+        const { data: newNoteRecord, error: insertError } = await supabase
+          .from('pro_videos')
+          .insert({
+            user_id: user.id,
+            exercise_id: exerciseId,
+            exercise_name: exerciseName,
+            notes: currentNoteText,
+            exercise_notes: currentNoteText,
+            tags: newTags,
+            context_type: 'tactical',
+            // Sin video - es solo un registro de notas
+            video_url: null,
+            thumbnail_url: null,
+            is_public: false,
+          })
+          .select('id')
+          .single();
+
+        if (insertError) {
+          console.error('Error creando registro de notas:', insertError);
+          throw insertError;
+        }
+
+        // Guardar el ID como todayNoteId para futuras ediciones
+        if (newNoteRecord) {
+          setTodayNoteId(newNoteRecord.id);
+
+          // Agregar al historial local
+          const today = new Date();
+          setNotesHistory((prev) => [
+            {
+              id: newNoteRecord.id,
+              date: today.toLocaleDateString('es-ES', {
+                day: 'numeric',
+                month: 'short',
+              }),
+              rawDate: today.toISOString().split('T')[0],
+              notes: currentNoteText,
+              tags: newTags,
+              type: 'video',
+              videoId: newNoteRecord.id,
+              isToday: true,
+            },
+            ...prev,
+          ]);
+        }
+      }
+
+      // Obtener todos los IDs relacionados por nombre para sincronizar estado local
+      const allRelatedIds = getAllExerciseIdsByName(exerciseName);
+
+      // Actualizar estado local para TODOS los IDs relacionados
+      const notesUpdate: Record<string, string> = {};
+      const tagsUpdate: Record<string, string[]> = {};
+      allRelatedIds.forEach((id) => {
+        notesUpdate[id] = currentNoteText;
+        tagsUpdate[id] = newTags;
+      });
+
+      setExerciseNotes((prev) => ({ ...prev, ...notesUpdate }));
+      setExerciseTags((prev) => ({ ...prev, ...tagsUpdate }));
+
+      // Actualizar videos en TODOS los ejercicios con el mismo nombre
+      setExercises((prev) =>
+        prev.map((ex) => {
+          let updatedEx = ex;
+
+          // Verificar si el ejercicio principal tiene el mismo nombre
+          if (ex.name.toLowerCase().trim() === exerciseName.toLowerCase().trim()) {
+            updatedEx = {
+              ...ex,
+              videos: ex.videos.map((v) =>
+                v.id === todayNoteId
+                  ? { ...v, notes: currentNoteText, exercise_notes: currentNoteText, tags: newTags }
+                  : v
+              ),
+            };
+          }
+
+          // Verificar alternativas con el mismo nombre
+          if (updatedEx.alternatives) {
+            updatedEx = {
+              ...updatedEx,
+              alternatives: updatedEx.alternatives.map((alt) =>
+                alt.name.toLowerCase().trim() === exerciseName.toLowerCase().trim()
+                  ? {
+                      ...alt,
+                      videos: alt.videos.map((v) =>
+                        v.id === todayNoteId
+                          ? {
+                              ...v,
+                              notes: currentNoteText,
+                              exercise_notes: currentNoteText,
+                              tags: newTags,
+                            }
+                          : v
+                      ),
+                    }
+                  : alt
+              ),
+            };
+          }
+
+          return updatedEx;
+        })
+      );
+
+      // Actualizar ProContext para que si graban ahora, tenga las notas actualizadas
+      setTacticalContext(exerciseId, exerciseName, currentNoteText, newTags);
+
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setNotesModalVisible(false);
+    } catch (error) {
+      console.error('Error guardando notas:', error);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setSavingNotes(false);
+    }
+  };
+
+  // Guardar notas de un video específico
+  const saveVideoNotes = async () => {
+    if (!selectedVideo || !user) return;
+
+    setSavingVideoNotes(true);
+
+    try {
+      const { error } = await supabase
+        .from('pro_videos')
+        .update({ notes: videoNoteText })
+        .eq('id', selectedVideo.id);
+
+      if (error) throw error;
+
+      // Actualizar el video en estado local
+      setSelectedVideo((prev) => (prev ? { ...prev, notes: videoNoteText } : null));
+
+      // Actualizar en la lista de videos del historial
+      setExerciseVideos((prev) =>
+        prev.map((v) => (v.id === selectedVideo.id ? { ...v, notes: videoNoteText } : v))
+      );
+
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setVideoNotesModalVisible(false);
+    } catch (error) {
+      console.error('Error guardando notas del video:', error);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setSavingVideoNotes(false);
+    }
+  };
+
+  // Toggle tag
+  const toggleExerciseTag = (exerciseId: string, tagKey: string) => {
+    setExerciseTags((prev) => {
+      const currentTags = prev[exerciseId] || [];
+      const hasTag = currentTags.includes(tagKey);
+
+      return {
+        ...prev,
+        [exerciseId]: hasTag ? currentTags.filter((t) => t !== tagKey) : [...currentTags, tagKey],
+      };
+    });
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
+
+  const renderNotesModal = () => {
+    const currentExercise = exercises[currentExerciseIndex];
+    if (!currentExercise) return null;
+
+    // Usar helper para obtener el ejercicio activo (principal o alternativa)
+    const { id: activeExerciseId, name: activeExerciseName } =
+      getActiveExerciseInfo(currentExerciseIndex);
+
+    const currentTags = exerciseTags[activeExerciseId] || [];
+    const hasNotes = currentNoteText.trim().length > 0 || currentTags.length > 0;
+
+    return (
+      <Modal
+        visible={notesModalVisible}
+        animationType="none"
+        transparent={true}
+        onRequestClose={() => {
+          shouldSaveNotesOnCloseRef.current = true;
+          setNotesModalVisible(false);
+        }}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          className="flex-1"
+        >
+          <View className="flex-1 bg-transparent justify-end">
+            <Animated.View
+              className="bg-black rounded-t-3xl"
+              style={[{ height: '85%' }, animatedStyleNotes]}
+            >
+              {/* Drag Handle + Header (Área para arrastrar) */}
+              <Animated.View
+                className="items-center pt-4 pb-4 border-b border-zinc-800"
+                {...panResponderNotes.panHandlers}
+              >
+                <View className="w-12 h-1 bg-zinc-600 rounded-full mb-4" />
+
+                {/* Header centrado */}
+                <View className="px-6 pb-2 w-full">
+                  <Text className="text-white text-xl font-bold text-center" numberOfLines={1}>
+                    {activeExerciseName}
+                  </Text>
+                  <Text className="text-zinc-500 text-xs mt-1 tracking-wider text-center uppercase">
+                    Notas del Ejercicio
+                  </Text>
+                </View>
+              </Animated.View>
+
+              <ScrollView className="flex-1 px-4 py-4" keyboardShouldPersistTaps="handled">
+                {/* INDICADOR DE NOTA DE HOY */}
+                {todayNoteId && (
+                  <View
+                    className="flex-row items-center gap-2 mb-4 px-3 py-2 rounded-lg"
+                    style={{
+                      backgroundColor: '#22C55E20',
+                      borderWidth: 1,
+                      borderColor: '#22C55E40',
+                    }}
+                  >
+                    <Text className="text-green-500">✓</Text>
+                    <Text className="text-green-500 text-xs font-medium">Editando nota de hoy</Text>
+                  </View>
+                )}
+
+                {/* TAGS RÁPIDOS */}
+                <View className="mb-4">
+                  <Text className="text-zinc-400 text-xs uppercase tracking-wider mb-3">
+                    Etiquetas rápidas
+                  </Text>
+                  <View className="flex-row flex-wrap gap-2">
+                    {EXERCISE_TAGS.map((tag) => {
+                      const isSelected = currentTags.includes(tag.key);
+                      return (
+                        <TouchableOpacity
+                          key={tag.key}
+                          onPress={() => toggleExerciseTag(activeExerciseId, tag.key)}
+                          className="px-3 py-2 rounded-full flex-row items-center gap-1"
+                          style={{
+                            backgroundColor: isSelected ? tag.color + '30' : '#18181b',
+                            borderWidth: 1,
+                            borderColor: isSelected ? tag.color : '#27272a',
+                          }}
+                        >
+                          <Text style={{ fontSize: 14 }}>{tag.label.split(' ')[0]}</Text>
+                          <Text
+                            className="font-bold text-xs"
+                            style={{ color: isSelected ? tag.color : '#a1a1aa' }}
+                          >
+                            {tag.label.split(' ').slice(1).join(' ')}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+
+                {/* TEXTO DE NOTAS */}
+                <View className="mb-4">
+                  <Text className="text-zinc-400 text-xs uppercase tracking-wider mb-3">
+                    {todayNoteId ? 'Nota de hoy' : 'Nueva nota'}
+                  </Text>
+                  <View
+                    className="rounded-xl"
+                    style={{
+                      backgroundColor: '#0a0a0a',
+                      borderWidth: 1,
+                      borderColor: todayNoteId ? '#22C55E40' : '#27272a',
+                    }}
+                  >
+                    <TextInput
+                      className="text-white text-base p-4"
+                      style={{ minHeight: 120, textAlignVertical: 'top' }}
+                      placeholder={
+                        todayNoteId
+                          ? 'Edita tu nota de hoy...'
+                          : 'Escribe tus notas aquí...&#10;&#10;Ejemplos:&#10;• Dolor leve en hombro izquierdo&#10;• Probar agarre más cerrado&#10;• Subir a 50kg próxima sesión'
+                      }
+                      placeholderTextColor="#52525b"
+                      multiline
+                      value={currentNoteText}
+                      onChangeText={setCurrentNoteText}
+                    />
+                  </View>
+                </View>
+
+                {/* TIPS - Solo mostrar si no hay nota de hoy */}
+                {!todayNoteId && (
+                  <View
+                    className="p-4 rounded-xl mb-4"
+                    style={{ backgroundColor: '#0f0f0f', borderWidth: 1, borderColor: '#1a1a1a' }}
+                  >
+                    <Text className="text-zinc-400 text-xs mb-2">
+                      💡 Solo puedes guardar una nota por día por ejercicio
+                    </Text>
+                    <Text className="text-zinc-500 text-[10px]">
+                      La nota se guardará cuando grabes un video
+                    </Text>
+                  </View>
+                )}
+
+                {/* HISTORIAL DE NOTAS - Excluir la nota de hoy */}
+                <View className="mb-4">
+                  <Text className="text-zinc-400 text-xs uppercase tracking-wider mb-3">
+                    📜 Notas anteriores
+                  </Text>
+
+                  {loadingNotesHistory ? (
+                    <View className="py-4 items-center">
+                      <ActivityIndicator color="#DC2626" size="small" />
+                    </View>
+                  ) : notesHistory.filter((n) => !n.isToday).length === 0 ? (
+                    <View
+                      className="py-6 items-center rounded-xl"
+                      style={{ backgroundColor: '#0a0a0a', borderWidth: 1, borderColor: '#1a1a1a' }}
+                    >
+                      <Text className="text-zinc-600 text-sm">Sin notas anteriores</Text>
+                      <Text className="text-zinc-700 text-xs mt-1">
+                        Tus notas de días pasados aparecerán aquí
+                      </Text>
+                    </View>
+                  ) : (
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={{ gap: 12 }}
+                    >
+                      {notesHistory
+                        .filter((n) => !n.isToday)
+                        .map((note) => (
+                          <TouchableOpacity
+                            key={note.id}
+                            onPress={() => {
+                              // Abrir modal de edición de nota del video
+                              if (note.videoId) {
+                                setSelectedVideo({
+                                  id: note.videoId,
+                                  notes: note.notes,
+                                  tags: note.tags,
+                                  date: note.date,
+                                } as any);
+                                setVideoNoteText(note.notes);
+                                setVideoNotesModalVisible(true);
+                              }
+                            }}
+                            className="rounded-xl p-3"
+                            style={{
+                              backgroundColor: '#18181b',
+                              borderWidth: 1,
+                              borderColor: '#27272a',
+                              width: 200,
+                            }}
+                          >
+                            {/* Header con fecha */}
+                            <View className="flex-row items-center justify-between mb-2">
+                              <Text className="text-zinc-500 text-[10px] uppercase">
+                                {note.date}
+                              </Text>
+                              <View className="flex-row items-center gap-1">
+                                <Edit3 color="#71717A" size={10} />
+                                <Text className="text-zinc-600 text-[10px]">Editar</Text>
+                              </View>
+                            </View>
+
+                            {/* Tags si tiene */}
+                            {note.tags && note.tags.length > 0 && (
+                              <View className="flex-row flex-wrap gap-1 mb-2">
+                                {note.tags.slice(0, 2).map((tag: string) => {
+                                  const tagInfo = EXERCISE_TAGS.find((t) => t.key === tag);
+                                  if (!tagInfo) return null;
+                                  return (
+                                    <View
+                                      key={tag}
+                                      className="px-2 py-0.5 rounded-full"
+                                      style={{ backgroundColor: tagInfo.color + '20' }}
+                                    >
+                                      <Text
+                                        style={{
+                                          color: tagInfo.color,
+                                          fontSize: 10,
+                                          fontWeight: 'bold',
+                                        }}
+                                      >
+                                        {tagInfo.label.split(' ')[0]}
+                                      </Text>
+                                    </View>
+                                  );
+                                })}
+                                {note.tags.length > 2 && (
+                                  <Text className="text-zinc-600 text-[10px]">
+                                    +{note.tags.length - 2}
+                                  </Text>
+                                )}
+                              </View>
+                            )}
+
+                            {/* Texto de la nota (truncado) */}
+                            <Text className="text-zinc-300 text-xs" numberOfLines={3}>
+                              {note.notes}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                    </ScrollView>
+                  )}
+                </View>
+
+                {/* INDICADOR DE NOTAS ACTIVAS */}
+                {hasNotes && (
+                  <View className="flex-row items-center gap-2 py-2">
+                    <View className="w-2 h-2 bg-green-500 rounded-full" />
+                    <Text className="text-green-500 text-xs">
+                      Este ejercicio tiene notas activas
+                    </Text>
+                  </View>
+                )}
+              </ScrollView>
+            </Animated.View>
           </View>
+        </KeyboardAvoidingView>
+      </Modal>
+    );
+  };
 
-          <TouchableOpacity
-            onPress={() => setNotesModalVisible(false)}
-            className="bg-savage-red p-4 rounded-lg items-center"
-          >
-            <Text className="text-savage-text font-bold">GUARDAR</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
-  );
+  // Modal para ver/editar notas de un video específico
+  const renderVideoNotesModal = () => {
+    if (!selectedVideo) return null;
+
+    return (
+      <Modal
+        visible={videoNotesModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setVideoNotesModalVisible(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          className="flex-1"
+        >
+          <View className="flex-1 bg-black/80 justify-end">
+            <View className="bg-zinc-900 rounded-t-3xl" style={{ maxHeight: '70%' }}>
+              {/* Header */}
+              <View className="items-center pt-4 pb-3 border-b border-zinc-800">
+                <View className="w-12 h-1 bg-zinc-600 rounded-full mb-3" />
+
+                <View className="px-4 pb-2 w-full flex-row items-center justify-between">
+                  <TouchableOpacity
+                    onPress={() => setVideoNotesModalVisible(false)}
+                    className="px-3 py-1"
+                  >
+                    <Text className="text-zinc-500 font-medium">Cerrar</Text>
+                  </TouchableOpacity>
+
+                  <View className="flex-1 items-center">
+                    <Text className="text-white text-lg font-bold">📝 Notas</Text>
+                    <Text className="text-zinc-500 text-[10px]">{selectedVideo.date}</Text>
+                  </View>
+
+                  <TouchableOpacity
+                    onPress={saveVideoNotes}
+                    disabled={savingVideoNotes}
+                    className="bg-savage-red px-4 py-1.5 rounded-full"
+                    style={{ opacity: savingVideoNotes ? 0.5 : 1 }}
+                  >
+                    <Text className="text-white font-bold text-sm">
+                      {savingVideoNotes ? '...' : 'Guardar'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Contenido */}
+              <View className="p-4">
+                {/* Tags del video (solo lectura) */}
+                {selectedVideo.tags && selectedVideo.tags.length > 0 && (
+                  <View className="flex-row flex-wrap gap-2 mb-4">
+                    {selectedVideo.tags.map((tag: string) => {
+                      const tagInfo = EXERCISE_TAGS.find((t) => t.key === tag);
+                      if (!tagInfo) return null;
+                      return (
+                        <View
+                          key={tag}
+                          className="px-3 py-1.5 rounded-full"
+                          style={{ backgroundColor: tagInfo.color + '30' }}
+                        >
+                          <Text style={{ color: tagInfo.color, fontSize: 12, fontWeight: 'bold' }}>
+                            {tagInfo.label}
+                          </Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
+
+                {/* Editor de notas */}
+                <Text className="text-zinc-400 text-xs uppercase tracking-wider mb-2">
+                  Nota de esta sesión
+                </Text>
+                <View
+                  className="rounded-xl"
+                  style={{
+                    backgroundColor: '#0a0a0a',
+                    borderWidth: 1,
+                    borderColor: '#F9731640',
+                  }}
+                >
+                  <TextInput
+                    className="text-white text-base p-4"
+                    style={{ minHeight: 120, textAlignVertical: 'top' }}
+                    placeholder="Escribe tu nota aquí..."
+                    placeholderTextColor="#52525b"
+                    multiline
+                    value={videoNoteText}
+                    onChangeText={setVideoNoteText}
+                  />
+                </View>
+
+                {/* Info */}
+                <Text className="text-zinc-600 text-xs text-center mt-4">
+                  📅 {selectedVideo.date}
+                </Text>
+              </View>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+    );
+  };
 
   const renderHankModal = () => (
     <Modal
@@ -5018,8 +6066,71 @@ function GymScreen() {
                     </TouchableOpacity>
                   )}
 
+                  {/* Tags del video + Notas (en fila, todo presionable) */}
+                  <View className="flex-row flex-wrap gap-2 mb-4">
+                    {/* Tags predefinidos */}
+                    {selectedVideo.tags &&
+                      selectedVideo.tags.length > 0 &&
+                      selectedVideo.tags.map((tag: string) => {
+                        const tagInfo = EXERCISE_TAGS.find((t) => t.key === tag);
+                        if (!tagInfo) return null;
+                        return (
+                          <View
+                            key={tag}
+                            className="px-3 py-1.5 rounded-full"
+                            style={{ backgroundColor: tagInfo.color + '30' }}
+                          >
+                            <Text
+                              style={{ color: tagInfo.color, fontSize: 12, fontWeight: 'bold' }}
+                            >
+                              {tagInfo.label}
+                            </Text>
+                          </View>
+                        );
+                      })}
+
+                    {/* Notas (chip presionable para expandir) */}
+                    {(selectedVideo.exercise_notes || selectedVideo.notes) && (
+                      <TouchableOpacity
+                        onPress={() => setVideoNotesExpanded(!videoNotesExpanded)}
+                        style={{
+                          backgroundColor: videoNotesExpanded ? '#F97316' : '#F9731630',
+                          paddingHorizontal: 12,
+                          paddingVertical: 6,
+                          borderRadius: 9999,
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 4,
+                        }}
+                      >
+                        <Text style={{ fontSize: 12 }}>📝</Text>
+                        <Text
+                          style={{
+                            color: videoNotesExpanded ? '#000000' : '#F97316',
+                            fontSize: 12,
+                            fontWeight: 'bold',
+                          }}
+                        >
+                          {videoNotesExpanded ? 'Ocultar' : 'Ver notas'}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  {/* Nota completa (solo si está expandida) */}
+                  {videoNotesExpanded && (selectedVideo.exercise_notes || selectedVideo.notes) && (
+                    <View
+                      className="bg-zinc-900/80 rounded-xl px-4 py-3 mt-3"
+                      style={{ borderLeftWidth: 3, borderLeftColor: '#F97316' }}
+                    >
+                      <Text className="text-zinc-300 text-sm">
+                        {selectedVideo.notes || selectedVideo.exercise_notes}
+                      </Text>
+                    </View>
+                  )}
+
                   {/* Fecha */}
-                  <Text className="text-zinc-500 text-sm">{selectedVideo.date}</Text>
+                  <Text className="text-zinc-500 text-sm mt-3">{selectedVideo.date}</Text>
 
                   {/* ACTIONS */}
                   <View className="flex-row justify-around mt-6 pt-4 border-t border-zinc-800">
@@ -5074,7 +6185,7 @@ function GymScreen() {
     return (
       <Modal
         visible={historialModalVisible}
-        animationType="slide"
+        animationType="none"
         transparent={true}
         onRequestClose={() => setHistorialModalVisible(false)}
       >
@@ -5124,6 +6235,7 @@ function GymScreen() {
                     key={video.id}
                     onPress={() => {
                       setSelectedVideo(video);
+                      setVideoNotesExpanded(false);
                       setVideoViewerVisible(true);
                       setHistorialModalVisible(false);
                     }}
@@ -5188,105 +6300,373 @@ function GymScreen() {
     );
   };
 
+  // Funciones para editar series en FOCUS mode
+  const addFocusSeries = () => {
+    const newSeries: SeriesConfig = {
+      id: Date.now().toString(),
+      reps: 10,
+      type: 'EFECTIVA',
+      note: '',
+      weight: 0,
+    };
+    setFocusSeriesConfig([...focusSeriesConfig, newSeries]);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
+
+  const removeFocusSeries = (id: string) => {
+    setFocusSeriesConfig(focusSeriesConfig.filter((s) => s.id !== id));
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  };
+
+  const updateFocusSeries = (id: string, field: keyof SeriesConfig, value: any) => {
+    setFocusSeriesConfig(
+      focusSeriesConfig.map((s) => (s.id === id ? { ...s, [field]: value } : s))
+    );
+  };
+
+  // Guardar series del modal de estructura
+  const saveFocusSeries = async () => {
+    if (!modalExercise || !user) return;
+
+    setSavingFocusSeries(true);
+    try {
+      // modalExercise.id es el ID del registro en user_exercise_config
+      // Obtener config actual usando ese ID directamente
+      const { data: currentConfig } = await supabase
+        .from('user_exercise_config')
+        .select('config')
+        .eq('id', modalExercise.id)
+        .single();
+
+      const currentConfigData = currentConfig?.config || {};
+      const currentSeriesByDay = currentConfigData.series_by_day || {};
+
+      // Actualizar series para el día actual
+      const updatedSeriesByDay = {
+        ...currentSeriesByDay,
+        [String(selectedDayIndex)]: focusSeriesConfig,
+      };
+
+      // Actualizar el registro existente por su ID (no upsert con exercise_id)
+      const { error } = await supabase
+        .from('user_exercise_config')
+        .update({
+          config: {
+            ...currentConfigData,
+            series_by_day: updatedSeriesByDay,
+            custom_series: focusSeriesConfig, // También guardar como legacy
+          },
+        })
+        .eq('id', modalExercise.id);
+
+      if (error) {
+        console.error('Error Supabase guardando series:', error);
+        throw error;
+      }
+
+      console.log('✅ Series guardadas en Supabase:', focusSeriesConfig.length, 'series');
+
+      // Actualizar estado local de ejercicios
+      setExercises((prev) =>
+        prev.map((ex) =>
+          ex.id === modalExercise.id
+            ? {
+                ...ex,
+                series: focusSeriesConfig.map((s) => ({
+                  id: s.id,
+                  type: s.type,
+                  reps: String(s.reps),
+                  note: s.note,
+                  weight: s.weight,
+                })),
+              }
+            : ex
+        )
+      );
+
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setStructureModalVisible(false);
+    } catch (error) {
+      console.error('Error guardando series:', error);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setSavingFocusSeries(false);
+    }
+  };
+
+  // Mantener ref actualizada para el panResponder
+  saveFocusSeriesRef.current = saveFocusSeries;
+
   const renderStructureModal = () => {
     if (!modalExercise) return null;
+
+    const FOCUS_SERIES_TYPES = [
+      {
+        key: 'CALENTAMIENTO',
+        label: 'C',
+        fullLabel: 'Calentamiento',
+        color: '#3B82F6',
+        bg: '#1e3a5f',
+      },
+      {
+        key: 'APROXIMACION',
+        label: 'A',
+        fullLabel: 'Aproximación',
+        color: '#F59E0B',
+        bg: '#422006',
+      },
+      { key: 'EFECTIVA', label: 'E', fullLabel: 'Efectiva', color: '#22C55E', bg: '#052e16' },
+      { key: 'FALLO', label: 'F', fullLabel: 'Al Fallo', color: '#EF4444', bg: '#450a0a' },
+    ] as const;
+
+    const getFocusSeriesTypeConfig = (type: string) => {
+      return FOCUS_SERIES_TYPES.find((t) => t.key === type) || FOCUS_SERIES_TYPES[2];
+    };
 
     return (
       <Modal
         visible={structureModalVisible}
-        animationType="slide"
+        animationType="none"
         transparent={true}
-        onRequestClose={() => setStructureModalVisible(false)}
+        onRequestClose={() => {
+          saveFocusSeries();
+          setStructureModalVisible(false);
+        }}
       >
         <View className="flex-1 bg-transparent justify-end">
           <Animated.View
             className="bg-black rounded-t-3xl"
             style={[{ height: '85%' }, animatedStyleStructure]}
           >
-            {/* Drag Handle + Header (Área para arrastrar) */}
+            {/* Drag Handle + Header */}
             <Animated.View
               className="items-center pt-4 pb-4 border-b border-zinc-800"
               {...panResponderStructure.panHandlers}
             >
               <View className="w-12 h-1 bg-zinc-600 rounded-full mb-4" />
 
-              {/* Header */}
+              {/* Header centrado */}
               <View className="px-6 pb-2 w-full">
-                <Text className="text-savage-text text-xl font-bold text-center">
+                <Text className="text-white text-xl font-bold text-center" numberOfLines={1}>
                   {modalExercise.name}
                 </Text>
                 <Text className="text-zinc-500 text-xs mt-1 tracking-wider text-center uppercase">
-                  Estructura de Series
+                  Series de Hoy
                 </Text>
               </View>
             </Animated.View>
 
-            {/* Lista de Series */}
-            <ScrollView className="flex-1 px-4 py-4" showsVerticalScrollIndicator={false}>
-              {(modalExercise.series || [])
-                .filter((serie) => serie && typeof serie === 'object')
-                .map((serie, idx) => {
-                  const typeInfo = {
-                    WARMUP: { color: '#3b82f6', label: 'Calentamiento' },
-                    FEEDER: { color: '#eab308', label: 'Aproximación' },
-                    EFFECTIVE: { color: '#22c55e', label: 'Efectiva' },
-                    INTENSITY: { color: '#ef4444', label: 'Al Fallo' },
-                  };
-                  const info = typeInfo[serie.type as keyof typeof typeInfo] || {
-                    color: '#71717a',
-                    label: 'Efectiva',
-                  };
+            {/* Leyenda de tipos */}
+            <View className="flex-row justify-center gap-3 py-2 bg-zinc-950/50">
+              {FOCUS_SERIES_TYPES.map((type) => (
+                <View key={type.key} className="flex-row items-center gap-1">
+                  <View
+                    className="w-5 h-5 rounded items-center justify-center"
+                    style={{ backgroundColor: type.bg, borderWidth: 1, borderColor: type.color }}
+                  >
+                    <Text className="text-[10px] font-bold" style={{ color: type.color }}>
+                      {type.label}
+                    </Text>
+                  </View>
+                  <Text className="text-zinc-500 text-[10px]">{type.fullLabel}</Text>
+                </View>
+              ))}
+            </View>
 
-                  return (
+            <Text className="text-zinc-600 text-[10px] text-center py-1">
+              👈 Desliza izquierda para eliminar
+            </Text>
+
+            {/* Lista de Series Editable */}
+            <ScrollView className="flex-1 px-3" keyboardShouldPersistTaps="handled">
+              {focusSeriesConfig.map((serie, index) => {
+                const typeConfig = getFocusSeriesTypeConfig(serie.type);
+                return (
+                  <SwipeableSeriesRow key={serie.id} onDelete={() => removeFocusSeries(serie.id)}>
                     <View
-                      key={serie.id || String(idx)}
-                      className="flex-row items-center mb-3 bg-zinc-900/50 p-4 rounded-xl border border-zinc-800"
+                      className="flex-row items-stretch rounded-xl overflow-hidden mb-2"
+                      style={{ backgroundColor: '#0a0a0a', borderWidth: 1, borderColor: '#1a1a1a' }}
                     >
-                      {/* Número de Serie */}
-                      <View className="bg-savage-red rounded-full w-8 h-8 justify-center items-center mr-3">
-                        <Text className="text-white font-bold text-sm font-mono">{idx + 1}</Text>
-                      </View>
-
-                      {/* Color Tag - Esfera */}
-                      <View
-                        className="w-7 h-7 rounded-full mr-3 items-center justify-center"
-                        style={{ backgroundColor: info.color }}
+                      {/* NÚMERO DE SERIE + TIPO */}
+                      <TouchableOpacity
+                        onPress={() => {
+                          const currentIndex = FOCUS_SERIES_TYPES.findIndex(
+                            (t) => t.key === serie.type
+                          );
+                          const nextIndex = (currentIndex + 1) % FOCUS_SERIES_TYPES.length;
+                          updateFocusSeries(serie.id, 'type', FOCUS_SERIES_TYPES[nextIndex].key);
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        }}
+                        className="w-12 items-center justify-center py-2"
+                        style={{ backgroundColor: typeConfig.bg }}
                       >
-                        <Text className="text-white text-[10px] font-bold">
-                          {String(serie.reps || 0)}
+                        <Text className="text-zinc-500 text-[10px] font-mono">{index + 1}</Text>
+                        <Text className="text-lg font-bold" style={{ color: typeConfig.color }}>
+                          {typeConfig.label}
                         </Text>
-                      </View>
+                      </TouchableOpacity>
 
-                      {/* Info */}
-                      <View className="flex-1">
-                        <View className="flex-row items-baseline mb-0.5">
-                          <Text className="text-savage-text font-bold text-lg">
-                            {String(serie.reps || 0)}
-                          </Text>
-                          <Text className="text-zinc-500 text-xs ml-1">REPS</Text>
-                          {serie.weight && Number(serie.weight) > 0 ? (
-                            <>
-                              <Text className="text-zinc-700 text-base mx-1">×</Text>
-                              <Text className="text-savage-red font-bold text-lg">
-                                {String(serie.weight)}
+                      {/* CONTENIDO */}
+                      <View className="flex-1 py-2">
+                        {/* REPS + PESO */}
+                        <View className="flex-row items-center px-2">
+                          {/* REPS */}
+                          <View className="flex-1 flex-row items-center">
+                            <TouchableOpacity
+                              onPress={() => {
+                                updateFocusSeries(serie.id, 'reps', Math.max(1, serie.reps - 1));
+                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                              }}
+                              className="w-7 h-7 rounded-full bg-zinc-800 items-center justify-center"
+                            >
+                              <Text className="text-white font-bold">−</Text>
+                            </TouchableOpacity>
+                            <View className="flex-1 items-center">
+                              <Text className="text-white font-mono font-bold text-lg">
+                                {serie.reps}
                               </Text>
-                              <Text className="text-zinc-500 text-xs ml-1">kg</Text>
-                            </>
-                          ) : null}
+                              <Text className="text-zinc-600 text-[8px] -mt-1">REPS</Text>
+                            </View>
+                            <TouchableOpacity
+                              onPress={() => {
+                                updateFocusSeries(serie.id, 'reps', serie.reps + 1);
+                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                              }}
+                              className="w-7 h-7 rounded-full bg-zinc-800 items-center justify-center"
+                            >
+                              <Text className="text-white font-bold">+</Text>
+                            </TouchableOpacity>
+                          </View>
+
+                          {/* SEPARADOR */}
+                          <View className="w-px h-6 bg-zinc-800 mx-1" />
+
+                          {/* PESO */}
+                          <View className="flex-1 flex-row items-center">
+                            <TouchableOpacity
+                              onPress={() => {
+                                updateFocusSeries(
+                                  serie.id,
+                                  'weight',
+                                  Math.max(0, (serie.weight || 0) - 2.5)
+                                );
+                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                              }}
+                              className="w-7 h-7 rounded-full bg-zinc-800 items-center justify-center"
+                            >
+                              <Text className="text-white font-bold">−</Text>
+                            </TouchableOpacity>
+                            <View className="flex-1 items-center">
+                              <TextInput
+                                className="text-white font-mono font-bold text-lg text-center w-full p-0"
+                                keyboardType="numeric"
+                                placeholder="—"
+                                placeholderTextColor="#52525b"
+                                value={serie.weight ? String(serie.weight) : ''}
+                                onChangeText={(text) => {
+                                  const num = parseFloat(text) || 0;
+                                  updateFocusSeries(serie.id, 'weight', num);
+                                }}
+                              />
+                              <Text className="text-zinc-600 text-[8px] -mt-1">KG</Text>
+                            </View>
+                            <TouchableOpacity
+                              onPress={() => {
+                                updateFocusSeries(serie.id, 'weight', (serie.weight || 0) + 2.5);
+                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                              }}
+                              className="w-7 h-7 rounded-full bg-zinc-800 items-center justify-center"
+                            >
+                              <Text className="text-white font-bold">+</Text>
+                            </TouchableOpacity>
+                          </View>
                         </View>
-                        <Text className="text-zinc-500 text-[10px] uppercase tracking-wider">
-                          {String(info.label)}
-                        </Text>
-                        {serie.note ? (
-                          <Text className="text-zinc-600 text-xs mt-1 italic">
-                            "{String(serie.note)}"
-                          </Text>
-                        ) : null}
+
+                        {/* INDICACIÓN (opcional) */}
+                        <TextInput
+                          className="text-zinc-400 text-xs mx-2 mt-1 px-2 py-1 bg-zinc-900/50 rounded"
+                          placeholder="+ Indicación (opcional)"
+                          placeholderTextColor="#52525b"
+                          value={serie.note || ''}
+                          onChangeText={(text) => updateFocusSeries(serie.id, 'note', text)}
+                        />
                       </View>
                     </View>
-                  );
-                })}
+                  </SwipeableSeriesRow>
+                );
+              })}
+
+              {/* AGREGAR SERIE */}
+              <TouchableOpacity
+                onPress={addFocusSeries}
+                className="flex-row items-center justify-center gap-2 py-3 mb-4 rounded-xl"
+                style={{
+                  borderWidth: 2,
+                  borderStyle: 'dashed',
+                  borderColor: '#27272a',
+                  backgroundColor: '#050505',
+                }}
+              >
+                <Plus color="#71717a" size={20} />
+                <Text className="text-zinc-500 font-bold text-sm">AGREGAR SERIE</Text>
+              </TouchableOpacity>
             </ScrollView>
+
+            {/* Footer */}
+            <View
+              className="px-4 pt-3 border-t border-zinc-900"
+              style={{ paddingBottom: insets.bottom + 16 }}
+            >
+              <TouchableOpacity
+                onPress={() => {
+                  // Generar estructura recomendada
+                  const structures: Record<string, SeriesConfig[]> = {
+                    BEGINNER: [
+                      { id: '1', reps: 12, type: 'CALENTAMIENTO', note: '', weight: 0 },
+                      { id: '2', reps: 10, type: 'EFECTIVA', note: '', weight: 0 },
+                      { id: '3', reps: 10, type: 'EFECTIVA', note: '', weight: 0 },
+                      { id: '4', reps: 10, type: 'EFECTIVA', note: '', weight: 0 },
+                    ],
+                    INTERMEDIATE: [
+                      { id: '1', reps: 12, type: 'CALENTAMIENTO', note: '', weight: 0 },
+                      { id: '2', reps: 10, type: 'APROXIMACION', note: '', weight: 0 },
+                      { id: '3', reps: 8, type: 'EFECTIVA', note: '', weight: 0 },
+                      { id: '4', reps: 8, type: 'EFECTIVA', note: '', weight: 0 },
+                      { id: '5', reps: 8, type: 'EFECTIVA', note: '', weight: 0 },
+                    ],
+                    ADVANCED: [
+                      { id: '1', reps: 12, type: 'CALENTAMIENTO', note: '', weight: 0 },
+                      { id: '2', reps: 8, type: 'APROXIMACION', note: '', weight: 0 },
+                      { id: '3', reps: 6, type: 'APROXIMACION', note: '', weight: 0 },
+                      { id: '4', reps: 6, type: 'EFECTIVA', note: '', weight: 0 },
+                      { id: '5', reps: 6, type: 'EFECTIVA', note: '', weight: 0 },
+                      { id: '6', reps: 6, type: 'EFECTIVA', note: '', weight: 0 },
+                      { id: '7', reps: 12, type: 'FALLO', note: '', weight: 0 },
+                    ],
+                    PRO: [
+                      { id: '1', reps: 15, type: 'CALENTAMIENTO', note: '', weight: 0 },
+                      { id: '2', reps: 10, type: 'APROXIMACION', note: '', weight: 0 },
+                      { id: '3', reps: 8, type: 'APROXIMACION', note: '', weight: 0 },
+                      { id: '4', reps: 6, type: 'APROXIMACION', note: '', weight: 0 },
+                      { id: '5', reps: 5, type: 'EFECTIVA', note: '', weight: 0 },
+                      { id: '6', reps: 5, type: 'EFECTIVA', note: '', weight: 0 },
+                      { id: '7', reps: 5, type: 'EFECTIVA', note: '', weight: 0 },
+                      { id: '8', reps: 5, type: 'EFECTIVA', note: '', weight: 0 },
+                      { id: '9', reps: 15, type: 'FALLO', note: '', weight: 0 },
+                    ],
+                  };
+                  setFocusSeriesConfig(structures[userLevel] || structures.INTERMEDIATE);
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                }}
+                className="flex-row items-center justify-center gap-2 py-3 rounded-xl"
+                style={{ backgroundColor: '#0f0f0f', borderWidth: 1, borderColor: '#DC2626' }}
+              >
+                <Zap color="#DC2626" size={16} />
+                <Text className="text-savage-red font-bold text-sm">
+                  ESTRUCTURA RECOMENDADA POR HANK
+                </Text>
+              </TouchableOpacity>
+            </View>
           </Animated.View>
         </View>
       </Modal>
@@ -5455,28 +6835,29 @@ function GymScreen() {
           const activeAltIndex = activeAlternatives[index] || 0;
 
           return (
-            <FlatList
-              horizontal
-              data={allVariations}
-              keyExtractor={(variation) => variation.id}
-              pagingEnabled
-              showsHorizontalScrollIndicator={false}
-              initialScrollIndex={activeAltIndex}
-              getItemLayout={(_, idx) => ({
-                length: SCREEN_WIDTH,
-                offset: SCREEN_WIDTH * idx,
-                index: idx,
-              })}
-              onMomentumScrollEnd={(event) => {
-                const newIndex = Math.round(event.nativeEvent.contentOffset.x / SCREEN_WIDTH);
-                setActiveAlternatives((prev) => ({ ...prev, [index]: newIndex }));
-              }}
-              renderItem={({ item: variation }) => (
-                <View style={{ width: SCREEN_WIDTH, height: CONTENT_HEIGHT }} className="bg-black">
-                  {/* CONTENEDOR PRINCIPAL */}
-                  <View className="flex-1">
+            <View style={{ width: SCREEN_WIDTH, height: CONTENT_HEIGHT }} className="bg-black">
+              {/* PARTE SUPERIOR SCROLLEABLE - Imagen, nombre, historial */}
+              <FlatList
+                horizontal
+                data={allVariations}
+                keyExtractor={(variation) => variation.id}
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                initialScrollIndex={activeAltIndex}
+                getItemLayout={(_, idx) => ({
+                  length: SCREEN_WIDTH,
+                  offset: SCREEN_WIDTH * idx,
+                  index: idx,
+                })}
+                onMomentumScrollEnd={(event) => {
+                  const newIndex = Math.round(event.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+                  setActiveAlternatives((prev) => ({ ...prev, [index]: newIndex }));
+                }}
+                style={{ height: SCREEN_WIDTH * 0.85 + 170 }}
+                renderItem={({ item: variation }) => (
+                  <View style={{ width: SCREEN_WIDTH }} className="bg-black">
                     {/* IMAGEN/VIDEO HERO */}
-                    <View className="relative">
+                    <View className="relative" style={{ height: SCREEN_WIDTH * 0.85 }}>
                       {isVideoUrl(variation.image_url) ? (
                         <VideoHero
                           videoUrl={variation.image_url!}
@@ -5495,57 +6876,38 @@ function GymScreen() {
                       ) : (
                         <Image
                           source={{ uri: variation.image_url }}
-                          style={{ width: SCREEN_WIDTH, height: SCREEN_WIDTH }}
+                          style={{ width: SCREEN_WIDTH, height: '100%' }}
                           contentFit="cover"
                         />
                       )}
 
                       {/* OVERLAY GRADIENTE SUPERIOR */}
                       <LinearGradient
-                        colors={['rgba(0,0,0,0.8)', 'transparent']}
-                        className="absolute top-0 left-0 right-0 h-32"
+                        colors={['rgba(0,0,0,0.7)', 'transparent']}
+                        className="absolute top-0 left-0 right-0 h-28"
                       />
 
                       {/* OVERLAY GRADIENTE INFERIOR */}
                       <LinearGradient
-                        colors={['transparent', 'rgba(0,0,0,0.9)', '#000']}
-                        className="absolute bottom-0 left-0 right-0 h-24"
+                        colors={['transparent', 'rgba(0,0,0,0.95)', '#000']}
+                        className="absolute bottom-0 left-0 right-0 h-32"
                       />
 
-                      {/* TÍTULO EJERCICIO - Sobre la imagen */}
-                      <View className="absolute top-24 left-4 right-16">
-                        <Text
-                          className="text-white text-2xl font-bold uppercase tracking-wide"
-                          numberOfLines={2}
-                          adjustsFontSizeToFit
-                        >
-                          {variation.name}
-                        </Text>
-                        {!variation.isMain && (
-                          <View className="flex-row items-center mt-1">
-                            <View className="w-1.5 h-1.5 bg-savage-red rounded-sm mr-1.5" />
-                            <Text className="text-zinc-500 text-[10px] uppercase tracking-widest">
-                              Alternativa
-                            </Text>
-                          </View>
-                        )}
-
-                        {/* INDICADORES DE ALTERNATIVAS (DOTS) */}
-                        {allVariations.length > 1 && (
-                          <View className="flex-row gap-1.5 mt-2">
-                            {allVariations.map((_, dotIndex) => (
-                              <View
-                                key={dotIndex}
-                                className={`h-1.5 rounded-full ${
-                                  dotIndex === activeAltIndex
-                                    ? 'w-5 bg-savage-red'
-                                    : 'w-1.5 bg-zinc-600'
-                                }`}
-                              />
-                            ))}
-                          </View>
-                        )}
-                      </View>
+                      {/* INDICADORES DE ALTERNATIVAS (DOTS) */}
+                      {allVariations.length > 1 && (
+                        <View className="absolute top-24 left-4 flex-row gap-1.5">
+                          {allVariations.map((_, dotIndex) => (
+                            <View
+                              key={dotIndex}
+                              className={`h-1.5 rounded-full ${
+                                dotIndex === activeAltIndex
+                                  ? 'w-6 bg-fire-orange'
+                                  : 'w-1.5 bg-white/40'
+                              }`}
+                            />
+                          ))}
+                        </View>
+                      )}
 
                       {/* BOTÓN NOTAS */}
                       <TouchableOpacity
@@ -5553,9 +6915,33 @@ function GymScreen() {
                           setCurrentExerciseIndex(index);
                           setNotesModalVisible(true);
                         }}
-                        className="absolute top-24 right-4 z-50 bg-black/70 p-2.5 rounded-full border border-zinc-700"
+                        className="absolute bottom-40 right-4 z-50"
+                        style={{
+                          backgroundColor: 'rgba(0,0,0,0.6)',
+                          borderWidth: 1,
+                          borderColor: 'rgba(255,255,255,0.2)',
+                          borderRadius: 12,
+                          width: 48,
+                          height: 48,
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
                       >
-                        <Edit3 color="#FFFFFF" size={16} />
+                        <Edit3
+                          color={
+                            exerciseNotes[variation.id] || exerciseTags[variation.id]?.length
+                              ? '#F97316'
+                              : '#FFFFFF'
+                          }
+                          size={20}
+                        />
+                        {exerciseNotes[variation.id] ||
+                        (exerciseTags[variation.id]?.length ?? 0) > 0 ? (
+                          <View
+                            className="absolute -top-1 -right-1 w-3 h-3 bg-fire-orange rounded-full"
+                            style={{ borderWidth: 2, borderColor: '#000' }}
+                          />
+                        ) : null}
                       </TouchableOpacity>
 
                       {/* BOTÓN MUTE/AUDIO (solo para videos) */}
@@ -5565,9 +6951,20 @@ function GymScreen() {
                             setVideoMuted(!videoMuted);
                             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                           }}
-                          className="absolute bottom-20 left-4 bg-black/70 p-2.5 rounded-full border border-zinc-700"
+                          className="absolute bottom-24 left-4"
+                          style={{
+                            backgroundColor: 'rgba(0,0,0,0.6)',
+                            borderWidth: 1,
+                            borderColor: 'rgba(255,255,255,0.2)',
+                            borderRadius: 12,
+                            padding: 10,
+                          }}
                         >
-                          <Text className="text-white text-lg">{videoMuted ? '🔇' : '🔊'}</Text>
+                          {videoMuted ? (
+                            <Volume2 color="#FFFFFF" size={18} />
+                          ) : (
+                            <Volume2 color="#F97316" size={18} />
+                          )}
                         </TouchableOpacity>
                       )}
 
@@ -5578,136 +6975,328 @@ function GymScreen() {
                           setCurrentVariationId(variation.id);
                           openCamera();
                         }}
-                        className="absolute bottom-20 right-4 bg-savage-red p-3 rounded-full shadow-lg border-2 border-white"
+                        className="absolute bottom-24 right-4 items-center justify-center"
                         style={{
-                          shadowColor: '#DC2626',
-                          shadowOffset: { width: 0, height: 4 },
-                          shadowOpacity: 0.6,
-                          shadowRadius: 8,
-                          elevation: 8,
+                          width: 48,
+                          height: 48,
+                          backgroundColor: 'rgba(0,0,0,0.6)',
+                          borderWidth: 1,
+                          borderColor: 'rgba(255,255,255,0.2)',
+                          borderRadius: 12,
                         }}
                       >
-                        <CameraIcon color="#FFFFFF" size={22} strokeWidth={2.5} />
+                        <CameraIcon color="#FFFFFF" size={20} />
                       </TouchableOpacity>
-                    </View>
 
-                    {/* CARDS - Justo debajo de la imagen, sin flex-1 */}
-                    <View className="bg-black px-4 pt-2 pb-2">
-                      {/* CARD HISTORIAL */}
-                      <TouchableOpacity
-                        onPress={() => {
-                          setModalExercise(item);
-                          setHistorialModalVisible(true);
-                        }}
-                        className="bg-zinc-900/90 p-4 rounded-xl border border-zinc-800 mb-2"
-                      >
-                        <View className="flex-row items-center justify-between">
-                          <View className="flex-1">
-                            <View className="flex-row items-center gap-1.5 mb-1.5">
-                              <View className="w-1 h-1 bg-savage-red rounded-full" />
-                              <Text className="text-zinc-500 text-[10px] tracking-widest uppercase">
-                                Historial
-                              </Text>
-                            </View>
-                            {variation.videos.length > 0 ? (
-                              <>
-                                <Text className="text-white font-bold text-sm">
-                                  Último: {variation.videos[0].weight}kg ×{' '}
-                                  {variation.videos[0].reps} reps
-                                </Text>
-                                <Text className="text-zinc-600 text-xs mt-0.5">
-                                  {variation.videos[0].date}
-                                </Text>
-                              </>
-                            ) : (
-                              <Text className="text-zinc-600 text-sm">Sin registros</Text>
-                            )}
-                          </View>
-                          <View className="bg-zinc-800 px-2.5 py-1 rounded-full">
-                            <Text className="text-zinc-400 font-bold font-mono text-xs">
-                              {variation.videos.length}
+                      {/* TÍTULO EJERCICIO */}
+                      <View className="absolute bottom-4 left-4 right-20">
+                        <Text
+                          className="text-white font-bold uppercase tracking-wider"
+                          style={{
+                            fontSize: 28,
+                            textShadowColor: 'rgba(0,0,0,0.8)',
+                            textShadowOffset: { width: 0, height: 2 },
+                            textShadowRadius: 8,
+                          }}
+                          numberOfLines={2}
+                        >
+                          {variation.name}
+                        </Text>
+                        {!variation.isMain && (
+                          <View className="flex-row items-center mt-1">
+                            <View className="w-2 h-2 bg-fire-orange rounded-full mr-2" />
+                            <Text className="text-fire-orange text-xs uppercase tracking-widest font-bold">
+                              Alternativa
                             </Text>
                           </View>
-                        </View>
-                      </TouchableOpacity>
-
-                      {/* CARD ESTRUCTURA */}
-                      <TouchableOpacity
-                        onPress={() => {
-                          setModalExercise(item);
-                          setStructureModalVisible(true);
-                        }}
-                        className="bg-zinc-900/90 p-4 rounded-xl border border-zinc-800"
-                      >
-                        <View className="flex-row items-center justify-between">
-                          <View className="flex-1">
-                            <View className="flex-row items-center gap-1.5 mb-1.5">
-                              <View className="w-1 h-1 bg-savage-red rounded-full" />
-                              <Text className="text-zinc-500 text-[10px] tracking-widest uppercase">
-                                Estructura
-                              </Text>
-                            </View>
-                            <View className="flex-row flex-wrap gap-1">
-                              {((variation as any).series || (item as any).series || [])
-                                .filter((s: any) => s && typeof s === 'object')
-                                .map((s: any, idx: number) => {
-                                  const typeColors: Record<string, string> = {
-                                    WARMUP: 'bg-blue-500',
-                                    FEEDER: 'bg-yellow-500',
-                                    EFFECTIVE: 'bg-green-500',
-                                    INTENSITY: 'bg-red-500',
-                                  };
-                                  const colorClass = typeColors[s.type as string] || 'bg-zinc-500';
-                                  return (
-                                    <View
-                                      key={String(idx)}
-                                      className={`${colorClass} w-6 h-6 rounded-full items-center justify-center`}
-                                    >
-                                      <Text className="text-white text-[8px] font-bold">
-                                        {String(s.reps || 0)}
-                                      </Text>
-                                    </View>
-                                  );
-                                })}
-                            </View>
-                          </View>
-                          <View className="bg-zinc-800 px-2.5 py-1 rounded-full">
-                            <Text className="text-zinc-400 font-bold font-mono text-xs">
-                              {((variation as any).series || (item as any).series || []).length}
-                            </Text>
-                          </View>
-                        </View>
-                      </TouchableOpacity>
+                        )}
+                      </View>
                     </View>
 
-                    {/* ESPACIADOR FLEXIBLE */}
-                    <View className="flex-1" />
-
-                    {/* FOOTER "PRÓXIMO" */}
-                    {variation.isMain && index < exercises.length - 1 && (
-                      <View className="bg-zinc-900 py-3 px-4 border-t border-zinc-800">
+                    {/* SLIDER DE HISTORIAL */}
+                    <View className="bg-black px-4 pt-3">
+                      <View className="flex-row items-center justify-between mb-2">
                         <View className="flex-row items-center gap-2">
-                          <ChevronDown color="#DC2626" size={16} />
-                          <Text
-                            className="text-zinc-400 text-xs tracking-wider uppercase flex-1 font-medium"
-                            numberOfLines={1}
-                          >
-                            Siguiente:{' '}
-                            <Text className="text-white">{exercises[index + 1].name}</Text>
+                          <View className="w-1 h-4 bg-fire-orange rounded-full" />
+                          <Text className="text-white font-bold text-sm uppercase tracking-wider">
+                            Historial
                           </Text>
                         </View>
+                        <Text className="text-zinc-500 text-xs font-mono">
+                          {
+                            variation.videos.filter((v: VideoRecord) => v.video_url || v.videoUrl)
+                              .length
+                          }{' '}
+                          registros
+                        </Text>
                       </View>
-                    )}
+
+                      {variation.videos.filter((v: VideoRecord) => v.video_url || v.videoUrl)
+                        .length > 0 ? (
+                        <ScrollView
+                          horizontal
+                          showsHorizontalScrollIndicator={false}
+                          contentContainerStyle={{ paddingRight: 16 }}
+                          className="-mx-4 px-4"
+                        >
+                          {variation.videos
+                            .filter((v: VideoRecord) => v.video_url || v.videoUrl)
+                            .slice(0, 10)
+                            .map((video: VideoRecord, vIdx: number) => (
+                              <TouchableOpacity
+                                key={video.id || vIdx}
+                                onPress={() => {
+                                  setSelectedVideo(video);
+                                  setVideoNotesExpanded(false);
+                                  setVideoViewerVisible(true);
+                                }}
+                                className="mr-3"
+                                style={{
+                                  width: 75,
+                                  height: 133,
+                                  backgroundColor: '#0a0a0a',
+                                  borderRadius: 10,
+                                  borderWidth: 1.5,
+                                  borderColor: vIdx === 0 ? '#F97316' : '#27272a',
+                                  overflow: 'hidden',
+                                }}
+                              >
+                                <View className="relative flex-1">
+                                  {video.thumbnail_url || video.video_url ? (
+                                    <Image
+                                      source={{ uri: video.thumbnail_url || video.video_url }}
+                                      style={{ width: '100%', height: '100%' }}
+                                      contentFit="cover"
+                                    />
+                                  ) : (
+                                    <View className="w-full h-full bg-zinc-800 items-center justify-center">
+                                      <Video color="#52525b" size={20} />
+                                    </View>
+                                  )}
+
+                                  <LinearGradient
+                                    colors={['transparent', 'rgba(0,0,0,0.9)']}
+                                    className="absolute bottom-0 left-0 right-0 h-16"
+                                  />
+
+                                  <View className="absolute inset-0 items-center justify-center">
+                                    <View
+                                      className="w-8 h-8 rounded-full items-center justify-center"
+                                      style={{ backgroundColor: 'rgba(255,255,255,0.9)' }}
+                                    >
+                                      <Play color="#000" size={14} fill="#000" />
+                                    </View>
+                                  </View>
+
+                                  <View className="absolute top-1.5 left-1.5 right-1.5 flex-row justify-between">
+                                    <View
+                                      className="w-5 h-5 rounded-full items-center justify-center"
+                                      style={{ backgroundColor: 'rgba(0,0,0,0.7)' }}
+                                    >
+                                      {video.is_public ? (
+                                        <Eye color="#22c55e" size={11} />
+                                      ) : (
+                                        <EyeOff color="#71717a" size={11} />
+                                      )}
+                                    </View>
+
+                                    {video.spotify?.enabled && (
+                                      <View
+                                        className="w-5 h-5 rounded-full items-center justify-center"
+                                        style={{ backgroundColor: 'rgba(0,0,0,0.7)' }}
+                                      >
+                                        <Music color="#1DB954" size={11} />
+                                      </View>
+                                    )}
+                                  </View>
+
+                                  <View className="absolute bottom-1.5 left-1.5 right-1.5">
+                                    <Text
+                                      className="text-white font-bold text-[11px]"
+                                      numberOfLines={1}
+                                    >
+                                      {video.weight}kg × {video.reps}
+                                    </Text>
+                                    <Text className="text-zinc-400 text-[9px]">{video.date}</Text>
+                                  </View>
+                                </View>
+                              </TouchableOpacity>
+                            ))}
+
+                          {variation.videos.length > 5 && (
+                            <TouchableOpacity
+                              onPress={() => {
+                                setModalExercise(item);
+                                setHistorialModalVisible(true);
+                              }}
+                              className="items-center justify-center"
+                              style={{
+                                width: 75,
+                                height: 133,
+                                backgroundColor: '#18181b',
+                                borderRadius: 10,
+                                borderWidth: 1,
+                                borderColor: '#27272a',
+                              }}
+                            >
+                              <Text className="text-zinc-400 text-[10px] font-bold">Ver todo</Text>
+                              <Text className="text-fire-orange text-lg font-bold mt-0.5">
+                                +{variation.videos.length - 5}
+                              </Text>
+                            </TouchableOpacity>
+                          )}
+                        </ScrollView>
+                      ) : (
+                        <View
+                          className="items-center justify-center py-4 rounded-xl"
+                          style={{
+                            backgroundColor: '#0a0a0a',
+                            borderWidth: 1,
+                            borderColor: '#1a1a1a',
+                          }}
+                        >
+                          <Video color="#52525b" size={24} />
+                          <Text className="text-zinc-600 text-xs mt-2">Sin registros aún</Text>
+                          <Text className="text-zinc-700 text-[10px] mt-0.5">
+                            Graba tu primera serie
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                )}
+              />
+
+              {/* CARD ESTRUCTURA - FIJA (fuera del scroll horizontal) */}
+              <View className="bg-black px-4 pt-4" style={{ paddingRight: 90 }}>
+                <View
+                  className="p-4 rounded-xl"
+                  style={{
+                    backgroundColor: '#0a0a0a',
+                    borderWidth: 1,
+                    borderColor: '#1a1a1a',
+                  }}
+                >
+                  <TouchableOpacity
+                    onPress={() => {
+                      setModalExercise(item);
+                      setStructureModalVisible(true);
+                    }}
+                  >
+                    <View className="flex-row items-center justify-between mb-3">
+                      <View className="flex-row items-center gap-2">
+                        <View className="w-1 h-4 bg-fire-orange rounded-full" />
+                        <Text className="text-white font-bold text-sm uppercase tracking-wider">
+                          Series de Hoy
+                        </Text>
+                      </View>
+                      <View className="flex-row items-center gap-1">
+                        <Text className="text-zinc-500 text-xs">Editar</Text>
+                        <Sliders color="#71717a" size={14} />
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+
+                  {/* Series visuales - Slider horizontal */}
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={{ gap: 8 }}
+                    nestedScrollEnabled={true}
+                  >
+                    {(item.series || [])
+                      .filter((s: any) => s && typeof s === 'object')
+                      .map((s: any, idx: number) => {
+                        const typeConfig: Record<
+                          string,
+                          { bg: string; border: string; label: string }
+                        > = {
+                          CALENTAMIENTO: { bg: '#1e3a5f', border: '#3b82f6', label: 'C' },
+                          APROXIMACION: { bg: '#422006', border: '#f59e0b', label: 'A' },
+                          EFECTIVA: { bg: '#14532d', border: '#22c55e', label: 'E' },
+                          FALLO: { bg: '#450a0a', border: '#ef4444', label: 'F' },
+                        };
+                        const config = typeConfig[s.type as string] || typeConfig.EFECTIVA;
+                        return (
+                          <TouchableOpacity
+                            key={String(idx)}
+                            onPress={() => {
+                              setModalExercise(item);
+                              setStructureModalVisible(true);
+                            }}
+                            className="items-center justify-center rounded-lg"
+                            style={{
+                              width: 44,
+                              height: 44,
+                              backgroundColor: config.bg,
+                              borderWidth: 1,
+                              borderColor: config.border,
+                            }}
+                          >
+                            <Text className="text-white font-bold text-sm">
+                              {String(s.reps || 0)}
+                            </Text>
+                            <Text className="text-zinc-400 text-[8px] font-bold -mt-0.5">
+                              {config.label}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+
+                    {/* Agregar serie */}
+                    <TouchableOpacity
+                      onPress={() => {
+                        setModalExercise(item);
+                        setStructureModalVisible(true);
+                      }}
+                      className="items-center justify-center rounded-lg"
+                      style={{
+                        width: 44,
+                        height: 44,
+                        backgroundColor: 'transparent',
+                        borderWidth: 1,
+                        borderColor: '#3f3f46',
+                        borderStyle: 'dashed',
+                      }}
+                    >
+                      <Plus color="#71717a" size={18} />
+                    </TouchableOpacity>
+                  </ScrollView>
+                </View>
+              </View>
+
+              {/* ESPACIADOR FLEXIBLE */}
+              <View className="flex-1" />
+
+              {/* FOOTER "PRÓXIMO" */}
+              {index < exercises.length - 1 && (
+                <View
+                  className="py-3 px-4"
+                  style={{
+                    backgroundColor: 'rgba(23, 23, 23, 0.95)',
+                    borderTopWidth: 1,
+                    borderTopColor: '#27272a',
+                  }}
+                >
+                  <View className="flex-row items-center gap-2">
+                    <ChevronDown color="#F97316" size={16} />
+                    <Text className="text-zinc-500 text-xs tracking-wider uppercase">
+                      Siguiente:
+                    </Text>
+                    <Text className="text-white text-xs font-bold flex-1" numberOfLines={1}>
+                      {exercises[index + 1].name}
+                    </Text>
                   </View>
                 </View>
               )}
-            />
+            </View>
           );
         }}
       />
 
       {/* MODALS */}
       {renderNotesModal()}
+      {renderVideoNotesModal()}
       {renderHankModal()}
       {renderVideoViewer()}
       {renderHistorialModal()}
