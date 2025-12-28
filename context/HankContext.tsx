@@ -1281,10 +1281,28 @@ ${
     : '(Sin notas)'
 }
 ${
-  (activeAsset.liquidData?.videoHistory as Array<{ date: string; isToday: boolean; weightKg: number | null; reps: number | null; notes: string | null }> | undefined)?.length
+  (
+    activeAsset.liquidData?.videoHistory as
+      | Array<{
+          date: string;
+          isToday: boolean;
+          weightKg: number | null;
+          reps: number | null;
+          notes: string | null;
+        }>
+      | undefined
+  )?.length
     ? `
 📊 HISTORIAL DE VIDEOS (últimos entrenos):
-${(activeAsset.liquidData.videoHistory as Array<{ date: string; isToday: boolean; weightKg: number | null; reps: number | null; notes: string | null }>)
+${(
+  activeAsset.liquidData.videoHistory as Array<{
+    date: string;
+    isToday: boolean;
+    weightKg: number | null;
+    reps: number | null;
+    notes: string | null;
+  }>
+)
   .slice(0, 5)
   .map(
     (v) =>
