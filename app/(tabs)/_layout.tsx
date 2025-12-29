@@ -419,15 +419,21 @@ export default function TabsLayout() {
           name="feed/index"
           options={{
             title: 'TRENS',
-            tabBarIcon: ({ color }) => (
-              <SyncedGlowIcon
-                Icon={Play}
-                color={color}
-                size={26}
-                fill={color}
-                isSource={isSourceModule('feed')}
-              />
-            ),
+            tabBarIcon: ({ color, focused }) => {
+              // Si estamos en profile, mostrar Feed como activo
+              const isProfileView = pathname?.includes('profile');
+              const effectiveFocused = focused || isProfileView;
+              const effectiveColor = effectiveFocused ? sportColor : color;
+              return (
+                <SyncedGlowIcon
+                  Icon={Play}
+                  color={effectiveColor}
+                  size={26}
+                  fill={effectiveColor}
+                  isSource={isSourceModule('feed')}
+                />
+              );
+            },
           }}
         />
 
@@ -525,6 +531,12 @@ export default function TabsLayout() {
         />
         <Tabs.Screen
           name="spot/index"
+          options={{
+            href: null,
+          }}
+        />
+        <Tabs.Screen
+          name="profile/[userId]"
           options={{
             href: null,
           }}

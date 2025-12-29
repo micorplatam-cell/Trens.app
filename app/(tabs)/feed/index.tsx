@@ -10,7 +10,7 @@ import {
   RefreshControl,
   Alert,
 } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, router } from 'expo-router';
 import { Lock } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import { Heart, MessageCircle, Share2, Music, Bookmark, Play, Unlink } from 'lucide-react-native';
@@ -311,10 +311,12 @@ const FeedVideoItem = memo(
         <LinearGradient
           colors={['transparent', 'rgba(0,0,0,0.8)']}
           className="absolute bottom-0 left-0 right-0 h-64"
+          style={{ zIndex: 2 }}
+          pointerEvents="none"
         />
 
         {/* Info del usuario y video */}
-        <View className="absolute bottom-4 left-4 right-20">
+        <View className="absolute bottom-4 left-4 right-20" style={{ zIndex: 10 }}>
           {/* Usuario */}
           <TouchableOpacity
             onPress={() => onUserPress(item.user_id)}
@@ -411,7 +413,7 @@ const FeedVideoItem = memo(
         </View>
 
         {/* Acciones laterales - ED HARDY FIRE GLOW */}
-        <View className="absolute right-3 bottom-20 items-center gap-5">
+        <View className="absolute right-3 bottom-20 items-center gap-5" style={{ zIndex: 10 }}>
           {/* Like - Fire Heart */}
           <TouchableOpacity
             onPress={() => {
@@ -826,8 +828,8 @@ export default function FeedScreen() {
   );
 
   const handleUserPress = useCallback((userId: string) => {
-    // TODO: Navegar al perfil del usuario
-    console.warn('User profile not implemented:', userId);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.push(`/profile/${userId}`);
   }, []);
 
   // -------------------------------------------------------------------------

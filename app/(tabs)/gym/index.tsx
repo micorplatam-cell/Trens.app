@@ -1691,7 +1691,11 @@ function GymScreen() {
   // Eliminar video de pro_videos
   const handleDeleteVideo = async () => {
     if (!selectedVideo) return;
+    deleteVideoFromHistorial(selectedVideo);
+  };
 
+  // Eliminar video desde historial (para long press)
+  const deleteVideoFromHistorial = async (video: VideoRecord) => {
     Alert.alert(
       '🗑️ ELIMINAR VIDEO',
       '¿Estás seguro de que quieres eliminar este video? Esta acción no se puede deshacer.',
@@ -1705,14 +1709,12 @@ function GymScreen() {
               await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
 
               // 1. Eliminar de Cloudflare Stream si existe
-              if (selectedVideo.cloudflare_video_id) {
+              if (video.cloudflare_video_id) {
                 console.warn(
                   '🗑️ Eliminando video de Cloudflare Stream:',
-                  selectedVideo.cloudflare_video_id
+                  video.cloudflare_video_id
                 );
-                const deleted = await cloudflareStream.deleteVideo(
-                  selectedVideo.cloudflare_video_id
-                );
+                const deleted = await cloudflareStream.deleteVideo(video.cloudflare_video_id);
                 if (deleted) {
                   console.warn('✅ Video eliminado de Cloudflare Stream');
                 } else {
@@ -1721,31 +1723,33 @@ function GymScreen() {
               }
 
               // 2. Eliminar de la base de datos
-              const { error } = await supabase
-                .from('pro_videos')
-                .delete()
-                .eq('id', selectedVideo.id);
+              const { error } = await supabase.from('pro_videos').delete().eq('id', video.id);
 
               if (error) throw error;
 
+              // 3. Eliminar de personal_records si está vinculado
+              await supabase.from('personal_records').delete().eq('video_id', video.id);
+
               // Actualizar lista local del modal historial
-              setExerciseVideos((prev) => prev.filter((v) => v.id !== selectedVideo.id));
+              setExerciseVideos((prev) => prev.filter((v) => v.id !== video.id));
 
               // También actualizar la lista de ejercicios para que el video desaparezca de las cards
               setExercises((prevExercises) =>
                 prevExercises.map((ex) => ({
                   ...ex,
-                  videos: ex.videos.filter((v) => v.id !== selectedVideo.id),
+                  videos: ex.videos.filter((v) => v.id !== video.id),
                   alternatives: ex.alternatives?.map((alt) => ({
                     ...alt,
-                    videos: alt.videos.filter((v) => v.id !== selectedVideo.id),
+                    videos: alt.videos.filter((v) => v.id !== video.id),
                   })),
                 }))
               );
 
-              // Cerrar viewer
-              setVideoViewerVisible(false);
-              setSelectedVideo(null);
+              // Si el video eliminado era el seleccionado, cerrar viewer
+              if (selectedVideo?.id === video.id) {
+                setVideoViewerVisible(false);
+                setSelectedVideo(null);
+              }
 
               await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             } catch (err) {
@@ -6436,7 +6440,7 @@ function GymScreen() {
                 </View>
               ) : (
                 exerciseVideos.map((video) => (
-                  <TouchableOpacity
+                  <Pressable
                     key={video.id}
                     onPress={() => {
                       setSelectedVideo(video);
@@ -6444,6 +6448,11 @@ function GymScreen() {
                       setVideoViewerVisible(true);
                       setHistorialModalVisible(false);
                     }}
+                    onLongPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                      deleteVideoFromHistorial(video);
+                    }}
+                    delayLongPress={500}
                     className="flex-row bg-zinc-900 rounded-xl mb-3 border border-zinc-800 overflow-hidden"
                   >
                     {/* Thumbnail - usa VideoView pausado para mostrar primer frame */}
@@ -6495,7 +6504,7 @@ function GymScreen() {
                         )}
                       </View>
                     </View>
-                  </TouchableOpacity>
+                  </Pressable>
                 ))
               )}
             </ScrollView>
@@ -7250,13 +7259,18 @@ function GymScreen() {
                             .filter((v: VideoRecord) => v.video_url || v.videoUrl)
                             .slice(0, 10)
                             .map((video: VideoRecord, vIdx: number) => (
-                              <TouchableOpacity
+                              <Pressable
                                 key={video.id || vIdx}
                                 onPress={() => {
                                   setSelectedVideo(video);
                                   setVideoNotesExpanded(false);
                                   setVideoViewerVisible(true);
                                 }}
+                                onLongPress={() => {
+                                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                                  deleteVideoFromHistorial(video);
+                                }}
+                                delayLongPress={500}
                                 className="mr-3"
                                 style={{
                                   width: 75,
@@ -7341,7 +7355,7 @@ function GymScreen() {
                                     <Text className="text-zinc-400 text-[9px]">{video.date}</Text>
                                   </View>
                                 </View>
-                              </TouchableOpacity>
+                              </Pressable>
                             ))}
 
                           {variation.videos.length > 5 && (

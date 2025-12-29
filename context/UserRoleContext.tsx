@@ -117,7 +117,8 @@ export function UserRoleProvider({ children }: { children: ReactNode }) {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       setUser(session?.user ?? null);
       if (session?.user) {
-        fetchRole(session.user.id);
+        // IMPORTANTE: Esperar a que fetchRole termine antes de setLoading(false)
+        await fetchRole(session.user.id);
         // 🎵 Cargar token de Spotify al inicio
         await spotify.loadStoredTokens();
       }

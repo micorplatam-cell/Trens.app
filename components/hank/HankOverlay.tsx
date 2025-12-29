@@ -41,6 +41,7 @@ import {
   ChevronDown,
   Check,
   X,
+  Settings2,
 } from 'lucide-react-native';
 import { usePathname } from 'expo-router';
 import { useHank } from '../../context/HankContext';
@@ -49,7 +50,8 @@ import { callGemini } from '../../services/hank/gemini';
 import { supabase } from '../../lib/supabase';
 import { useSaveGuard } from '../../context/SaveGuardContext';
 import { calculateFabPositions } from '../../constants/floatingTools';
-import type { HankToolResult, HankToolCall } from '../../types/hank';
+import { HankTargetHighlight } from './HankTargetHighlight';
+import type { HankToolResult, HankToolCall, HankAnimationPhase, HankTarget } from '../../types/hank';
 
 // ============================================================================
 // TYPES
@@ -96,7 +98,7 @@ const getDefaultWelcomeMessage = (): ChatMessage => ({
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 // ============================================================================
-// FAB BUTTON (Floating Action Button) con Long Press
+// FAB BUTTON (Floating Action Button) con Long Press y Flying Animation
 // ============================================================================
 const HankFAB: React.FC<{
   onPress: () => void;
@@ -106,6 +108,8 @@ const HankFAB: React.FC<{
   isListening: boolean;
   bottomOffset: number;
   rightOffset: number;
+  animationPhase: HankAnimationPhase;
+  target: HankTarget | null;
 }> = ({
   onPress,
   onLongPressStart,
@@ -114,6 +118,8 @@ const HankFAB: React.FC<{
   isListening,
   bottomOffset,
   rightOffset,
+  animationPhase,
+  target,
 }) => {
   // Breathing animation
   const breathe = useSharedValue(0);
@@ -122,6 +128,17 @@ const HankFAB: React.FC<{
   // Listening pulse animation
   const pulse = useSharedValue(1);
   const pulseOpacity = useSharedValue(0);
+  // Flying animation
+  const flyX = useSharedValue(0);
+  const flyY = useSharedValue(0);
+  const flyScale = useSharedValue(1);
+  // Gear rotation for working phase
+  const gearRotation = useSharedValue(0);
+
+  // Calculate home position (bottom-right corner)
+  const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+  const homeX = screenWidth - rightOffset - 60; // 60 = FAB width
+  const homeY = screenHeight - bottomOffset - 60; // 60 = FAB height
 
   useEffect(() => {
     // Continuous breathing effect
@@ -173,6 +190,46 @@ const HankFAB: React.FC<{
     }
   }, [isListening, pulse, pulseOpacity]);
 
+  // Flying animation - Hank travels to target
+  useEffect(() => {
+    if (animationPhase === 'flying' && target) {
+      // Calculate target position (center of target element)
+      const targetCenterX = target.position.x + target.position.width / 2 - 30; // 30 = FAB half width
+      const targetCenterY = target.position.y - 70; // Above the target
+
+      // Fly to target with spring animation
+      flyX.value = withSpring(targetCenterX - homeX, { damping: 15, stiffness: 80 });
+      flyY.value = withSpring(targetCenterY - homeY, { damping: 15, stiffness: 80 });
+      flyScale.value = withSpring(0.8, { damping: 12 });
+    } else if (animationPhase === 'working') {
+      // Start gear rotation
+      gearRotation.value = withRepeat(
+        withTiming(360, { duration: 1200, easing: Easing.linear }),
+        -1,
+        false
+      );
+    } else if (animationPhase === 'returning' || animationPhase === 'idle') {
+      // Return to home position
+      flyX.value = withSpring(0, { damping: 15, stiffness: 100 });
+      flyY.value = withSpring(0, { damping: 15, stiffness: 100 });
+      flyScale.value = withSpring(1, { damping: 12 });
+      cancelAnimation(gearRotation);
+      gearRotation.value = withTiming(0, { duration: 300 });
+    }
+  }, [animationPhase, target, homeX, homeY, flyX, flyY, flyScale, gearRotation]);
+
+  const flyingStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: flyX.value },
+      { translateY: flyY.value },
+      { scale: flyScale.value },
+    ],
+  }));
+
+  const gearStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${gearRotation.value}deg` }],
+  }));
+
   const glowStyle = useAnimatedStyle(() => ({
     shadowOpacity: isListening
       ? interpolate(pulse.value, [1, 1.3], [0.5, 1])
@@ -222,10 +279,20 @@ const HankFAB: React.FC<{
     }
   }, [onPress, onLongPressEnd]);
 
+  // Determine if we're in a flying/working state
+  const isFlying = animationPhase === 'flying' || animationPhase === 'working' || animationPhase === 'returning';
+  const isWorking = animationPhase === 'working';
+  const isSuccess = animationPhase === 'success';
+
   return (
-    <View style={{ position: 'absolute', bottom: bottomOffset, right: rightOffset, zIndex: 1000 }}>
+    <Animated.View 
+      style={[
+        { position: 'absolute', bottom: bottomOffset, right: rightOffset, zIndex: 1000 },
+        flyingStyle,
+      ]}
+    >
       {/* Pulse ring effect when listening - ED HARDY FIRE RINGS */}
-      {isListening && (
+      {isListening && !isFlying && (
         <>
           <Animated.View
             style={[
@@ -261,21 +328,21 @@ const HankFAB: React.FC<{
       )}
 
       <AnimatedPressable
-        onPressIn={handlePressIn}
-        onPressOut={handlePressOut}
+        onPressIn={isFlying ? undefined : handlePressIn}
+        onPressOut={isFlying ? undefined : handlePressOut}
         style={[
           {
             width: 60,
             height: 60,
             borderRadius: 30,
-            backgroundColor: isListening ? '#DC2626' : '#0a0505',
+            backgroundColor: isWorking ? '#F97316' : isSuccess ? '#22C55E' : isListening ? '#DC2626' : '#0a0505',
             alignItems: 'center',
             justifyContent: 'center',
             // ED HARDY: Intense fire glow
-            shadowColor: isListening ? '#FF3B3B' : '#F97316',
+            shadowColor: isWorking ? '#F97316' : isSuccess ? '#22C55E' : isListening ? '#FF3B3B' : '#F97316',
             shadowOffset: { width: 0, height: 0 },
-            shadowOpacity: isListening ? 0.9 : 0.6,
-            shadowRadius: isListening ? 20 : 15,
+            shadowOpacity: isWorking || isSuccess ? 1 : isListening ? 0.9 : 0.6,
+            shadowRadius: isWorking || isSuccess ? 25 : isListening ? 20 : 15,
             elevation: 15,
           },
           glowStyle,
@@ -289,20 +356,26 @@ const HankFAB: React.FC<{
               width: 64,
               height: 64,
               borderRadius: 32,
-              borderWidth: isListening ? 3 : 2,
-              borderColor: isListening ? '#FBBF24' : '#F97316',
+              borderWidth: isWorking ? 3 : isListening ? 3 : 2,
+              borderColor: isWorking ? '#FBBF24' : isListening ? '#FBBF24' : '#F97316',
               borderStyle: 'solid',
-              borderTopColor: isProcessing ? '#F97316' : isListening ? '#FBBF24' : '#F97316',
-              borderRightColor: isProcessing ? 'transparent' : isListening ? '#F97316' : '#DC2626',
-              borderBottomColor: isProcessing ? 'transparent' : isListening ? '#DC2626' : '#DC2626',
-              borderLeftColor: isProcessing ? 'transparent' : isListening ? '#F97316' : '#F97316',
+              borderTopColor: isWorking || isProcessing ? '#F97316' : isListening ? '#FBBF24' : '#F97316',
+              borderRightColor: isWorking || isProcessing ? 'transparent' : isListening ? '#F97316' : '#DC2626',
+              borderBottomColor: isWorking || isProcessing ? 'transparent' : isListening ? '#DC2626' : '#DC2626',
+              borderLeftColor: isWorking || isProcessing ? 'transparent' : isListening ? '#F97316' : '#F97316',
             },
-            borderStyle,
+            isWorking ? gearStyle : borderStyle,
           ]}
         />
 
-        {/* Icon - ED HARDY COLORS */}
-        {isListening ? (
+        {/* Icon - ED HARDY COLORS with Working Gear */}
+        {isWorking ? (
+          <Animated.View style={gearStyle}>
+            <Settings2 size={28} color="#FFFFFF" strokeWidth={2.5} />
+          </Animated.View>
+        ) : isSuccess ? (
+          <View style={{ width: 14, height: 20, borderRightWidth: 4, borderBottomWidth: 4, borderColor: '#fff', transform: [{ rotate: '45deg' }, { translateY: -2 }] }} />
+        ) : isListening ? (
           <Mic size={28} color="#FFFFFF" />
         ) : isProcessing ? (
           <Sparkles size={28} color="#F97316" />
@@ -310,7 +383,7 @@ const HankFAB: React.FC<{
           <Bot size={28} color="#F97316" />
         )}
       </AnimatedPressable>
-    </View>
+    </Animated.View>
   );
 };
 
@@ -852,6 +925,7 @@ export const HankOverlay: React.FC = () => {
     availableExercises,
     clearConversation,
     saveMessageToSupabase,
+    targetState,
   } = useHank();
 
   // Voice input hook
@@ -1568,8 +1642,13 @@ export const HankOverlay: React.FC = () => {
           isListening={isListening || isRecording}
           bottomOffset={calculateFabPositions(insets.bottom).hank}
           rightOffset={calculateFabPositions(insets.bottom).right}
+          animationPhase={targetState.animationPhase}
+          target={targetState.currentTarget}
         />
       )}
+
+      {/* Target Highlight Overlay */}
+      <HankTargetHighlight />
 
       {/* Chat Panel Modal */}
       <Modal visible={isOpen} transparent={true} animationType="slide" onRequestClose={handleClose}>

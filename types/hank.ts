@@ -221,6 +221,9 @@ export interface HankContextState {
   // LLM Integration
   getToolDefinitions: () => ToolDefinition[];
   getSystemPrompt: () => string;
+
+  // Targeting System (para animaciones visuales)
+  targetState: HankTargetState;
 }
 
 // ============================================================================
@@ -236,4 +239,38 @@ export interface HankMessage {
     result: HankToolResult;
   }>;
   timestamp: Date;
+}
+
+// ============================================================================
+// HANK TARGETING SYSTEM - Para animaciones visuales
+// ============================================================================
+export interface HankTargetPosition {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface HankTarget {
+  id: string;
+  type: 'meal' | 'exercise' | 'supplement' | 'record' | 'profile' | 'custom';
+  label: string;
+  position: HankTargetPosition;
+}
+
+export type HankAnimationPhase =
+  | 'idle' // Hank en esquina, nada activo
+  | 'flying' // Hank viajando hacia el target
+  | 'working' // Hank llegó, engranaje girando
+  | 'success' // Flash verde, trabajo completado
+  | 'returning'; // Hank regresando a esquina
+
+export interface HankTargetState {
+  currentTarget: HankTarget | null;
+  animationPhase: HankAnimationPhase;
+  setTarget: (target: HankTarget | null) => void;
+  startAnimation: (target: HankTarget) => void;
+  completeAnimation: (success: boolean) => void;
+  registerTarget: (id: string, target: Omit<HankTarget, 'id'>) => void;
+  unregisterTarget: (id: string) => void;
 }

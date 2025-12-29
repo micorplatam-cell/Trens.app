@@ -27,6 +27,9 @@ import type {
   SportMode,
   UserProfile,
   UserAlias,
+  HankTarget,
+  HankAnimationPhase,
+  HankTargetState,
 } from '../types/hank';
 
 // ============================================================================
@@ -158,6 +161,46 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
   // Macro Cache Invalidation - Se incrementa cuando se actualizan datos del perfil
   const [macroCacheInvalidate, setMacroCacheInvalidate] = useState(0);
 
+  // -------------------------------------------------------------------------
+  // TARGETING SYSTEM - Para animaciones visuales de Hank
+  // -------------------------------------------------------------------------
+  const [currentTarget, setCurrentTarget] = useState<HankTarget | null>(null);
+  const [animationPhase, setAnimationPhase] = useState<HankAnimationPhase>('idle');
+  const registeredTargets = useRef<Map<string, HankTarget>>(new Map());
+
+  const registerTarget = useCallback((id: string, target: Omit<HankTarget, 'id'>) => {
+    registeredTargets.current.set(id, { ...target, id });
+  }, []);
+
+  const unregisterTarget = useCallback((id: string) => {
+    registeredTargets.current.delete(id);
+  }, []);
+
+  const startTargetAnimation = useCallback((target: HankTarget) => {
+    console.warn('🎯 HANK: Iniciando animación hacia', target.label);
+    setCurrentTarget(target);
+    setAnimationPhase('flying');
+
+    // Después de volar (800ms), cambiar a working
+    setTimeout(() => {
+      setAnimationPhase('working');
+    }, 800);
+  }, []);
+
+  const completeTargetAnimation = useCallback((success: boolean) => {
+    console.warn('✨ HANK: Completando animación', success ? 'con éxito' : 'con error');
+    setAnimationPhase(success ? 'success' : 'idle');
+
+    // Flash de éxito y luego regresar
+    setTimeout(() => {
+      setAnimationPhase('returning');
+      setTimeout(() => {
+        setAnimationPhase('idle');
+        setCurrentTarget(null);
+      }, 600);
+    }, 400);
+  }, []);
+
   // Dynamic Context
   const [screenContext, setScreenContext] = useState<ScreenContext>(defaultScreenContext);
   const [activeAsset, setActiveAssetState] = useState<ActiveAsset | null>(null);
@@ -192,29 +235,60 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
   });
 
   // Wrapper para executeTool que incrementa refreshTrigger si exitoso
+  // También dispara animación visual si hay target registrado
   const executeTool = useCallback(
     async (toolCall: HankToolCall): Promise<HankToolResult> => {
+      // Buscar target registrado que coincida con el contexto
+      const registeredTarget = registeredTargets.current.values().next().value;
+
+      // Si hay target, iniciar animación
+      if (registeredTarget) {
+        startTargetAnimation(registeredTarget);
+      }
+
       const result = await executeToolRaw(toolCall);
+
+      // Completar animación según resultado
+      if (registeredTarget) {
+        completeTargetAnimation(result.success);
+      }
+
       if (result.success) {
         console.warn('🔄 executeTool exitoso, incrementando refreshTrigger');
         setRefreshTrigger((prev) => prev + 1);
       }
       return result;
     },
-    [executeToolRaw]
+    [executeToolRaw, startTargetAnimation, completeTargetAnimation]
   );
 
   // Wrapper para executeToolChain que incrementa refreshTrigger si alguno exitoso
+  // También dispara animación visual si hay target registrado
   const executeToolChain = useCallback(
     async (toolCalls: HankToolCall[]): Promise<HankToolResult[]> => {
+      // Buscar target registrado que coincida con el contexto
+      const registeredTarget = registeredTargets.current.values().next().value;
+
+      // Si hay target, iniciar animación
+      if (registeredTarget) {
+        startTargetAnimation(registeredTarget);
+      }
+
       const results = await executeToolChainRaw(toolCalls);
-      if (results.some((r) => r.success)) {
+      const hasSuccess = results.some((r) => r.success);
+
+      // Completar animación según resultado
+      if (registeredTarget) {
+        completeTargetAnimation(hasSuccess);
+      }
+
+      if (hasSuccess) {
         console.warn('🔄 executeToolChain exitoso, incrementando refreshTrigger');
         setRefreshTrigger((prev) => prev + 1);
       }
       return results;
     },
-    [executeToolChainRaw]
+    [executeToolChainRaw, startTargetAnimation, completeTargetAnimation]
   );
 
   // -------------------------------------------------------------------------
@@ -1402,6 +1476,17 @@ IMPORTANTE: Puedes ejecutar múltiples herramientas si la solicitud lo requiere.
       // LLM Integration
       getToolDefinitions,
       getSystemPrompt,
+
+      // Targeting System
+      targetState: {
+        currentTarget,
+        animationPhase,
+        setTarget: setCurrentTarget,
+        startAnimation: startTargetAnimation,
+        completeAnimation: completeTargetAnimation,
+        registerTarget,
+        unregisterTarget,
+      },
     }),
     [
       isProcessing,
@@ -1428,6 +1513,12 @@ IMPORTANTE: Puedes ejecutar múltiples herramientas si la solicitud lo requiere.
       invalidateMacroCache,
       getToolDefinitions,
       getSystemPrompt,
+      currentTarget,
+      animationPhase,
+      startTargetAnimation,
+      completeTargetAnimation,
+      registerTarget,
+      unregisterTarget,
     ]
   );
 
@@ -1464,6 +1555,15 @@ const defaultHankState: HankContextState = {
   invalidateMacroCache: () => {},
   getToolDefinitions: () => [],
   getSystemPrompt: () => '',
+  targetState: {
+    currentTarget: null,
+    animationPhase: 'idle',
+    setTarget: () => {},
+    startAnimation: () => {},
+    completeAnimation: () => {},
+    registerTarget: () => {},
+    unregisterTarget: () => {},
+  },
 };
 
 export const useHank = (): HankContextState => {

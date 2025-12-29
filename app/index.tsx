@@ -4,7 +4,7 @@ import { useUserRoleContext } from '../context/UserRoleContext';
 import { View, ActivityIndicator } from 'react-native';
 
 export default function Index() {
-  const { loading } = useUserRoleContext();
+  const { loading, isPro } = useUserRoleContext();
 
   // Mientras carga la sesión, mostrar loading
   if (loading) {
@@ -17,6 +17,12 @@ export default function Index() {
 
   // TRENS NO pide login para usar la app
   // El contenido público es accesible sin cuenta
-  // Feed es la pantalla principal
-  return <Redirect href={'/(tabs)/feed' as Href} />;
+  // ============================================================================
+  // REDIRECCIÓN SEGÚN TIPO DE USUARIO:
+  // - PRO: Abre ADN por defecto (su perfil atlético)
+  // - FREE/Invitado: Abre FEED por defecto (contenido público)
+  // ============================================================================
+  const defaultRoute = isPro ? '/(tabs)/adn' : '/(tabs)/feed';
+
+  return <Redirect href={defaultRoute as Href} />;
 }

@@ -4,6 +4,7 @@ import {
   Text,
   ScrollView,
   TouchableOpacity,
+  Pressable,
   Image,
   RefreshControl,
   ActivityIndicator,
@@ -28,6 +29,7 @@ import {
   MoreVertical,
   Volume2,
   LogOut,
+  Trophy,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { VideoView, useVideoPlayer } from 'expo-video';
@@ -39,7 +41,7 @@ import { useSaveGuard } from '../../_layout';
 import spotify from '../../../services/spotify/spotify';
 import TrensID from '../../../components/adn/TrensID';
 import RecordCard from '../../../components/adn/RecordCard';
-import AddRecordModal from '../../../components/adn/AddRecordModal';
+import SelectRecordVideoModal from '../../../components/adn/SelectRecordVideoModal';
 import { SportSwitcher } from '../../../components/adn/SportSwitcher';
 import { ProUpgradeModal } from '../../../components/pro/ProUpgradeModal';
 import { ShareModal } from '../../../components/share/ShareModal';
@@ -80,12 +82,11 @@ interface Measurement {
 
 interface PersonalRecord {
   id: string;
-  exercise_id: string;
   exercise_name: string;
-  exercise_icon: string;
-  weight: number;
+  weight_kg: number;
   reps: number;
   video_id?: string;
+  achieved_at?: string;
 }
 
 interface Video {
@@ -158,6 +159,12 @@ export default function AdnScreen() {
   // Share modal state
   const [shareModalVisible, setShareModalVisible] = useState(false);
 
+  // Record viewer state
+  const [recordViewerVisible, setRecordViewerVisible] = useState(false);
+  const [selectedRecord, setSelectedRecord] = useState<PersonalRecord | null>(null);
+  const [selectedRecordVideo, setSelectedRecordVideo] = useState<Video | null>(null);
+  const [isRecordVideoManuallyPaused, setIsRecordVideoManuallyPaused] = useState(false);
+
   // Sincronizar contexto con HANK
   useFocusEffect(
     useCallback(() => {
@@ -228,6 +235,56 @@ export default function AdnScreen() {
       return newPaused;
     });
   }, [videoPlayer]);
+
+  // Video player para el visor de RÉCORDS
+  const recordVideoSource = selectedRecordVideo?.video_url || '';
+  const recordVideoPlayer = useVideoPlayer(recordVideoSource, (player) => {
+    player.loop = true;
+  });
+
+  // Ref para Spotify sync en visor de récords
+  const recordSpotifySyncedRef = useRef(false);
+
+  // Control de reproducción de récords + Spotify sync
+  useEffect(() => {
+    if (recordViewerVisible && recordVideoPlayer) {
+      const hasSpotify = !!(selectedRecordVideo?.spotify?.enabled && isPro && spotifyPremium);
+      const trackUri = hasSpotify ? (selectedRecordVideo?.spotify as any)?.trackUri : null;
+
+      recordVideoPlayer.volume = hasSpotify && trackUri ? 0 : 1;
+
+      if (!isRecordVideoManuallyPaused) {
+        recordVideoPlayer.play();
+      }
+
+      if (!recordSpotifySyncedRef.current && hasSpotify && trackUri) {
+        recordSpotifySyncedRef.current = true;
+        const positionMs = (selectedRecordVideo?.spotify as any)?.positionMs || 0;
+        spotify.syncWithVideo(trackUri, positionMs).catch(console.warn);
+      }
+    } else if (recordVideoPlayer && !recordViewerVisible) {
+      recordVideoPlayer.pause();
+      setIsRecordVideoManuallyPaused(false);
+      recordSpotifySyncedRef.current = false;
+      if (selectedRecordVideo?.spotify?.enabled && isPro && spotifyPremium) {
+        spotify.pauseForSwipe().catch(console.warn);
+      }
+    }
+  }, [recordViewerVisible, recordVideoPlayer, selectedRecordVideo, isPro, spotifyPremium]);
+
+  // Handler para tap en video de récord
+  const handleRecordVideoTap = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setIsRecordVideoManuallyPaused((prev) => {
+      const newPaused = !prev;
+      if (newPaused) {
+        recordVideoPlayer.pause();
+      } else {
+        recordVideoPlayer.play();
+      }
+      return newPaused;
+    });
+  }, [recordVideoPlayer]);
 
   // Data states
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -516,31 +573,37 @@ export default function AdnScreen() {
   };
 
   // -------------------------------------------------------------------------
-  // ADD RECORD - Solo desde videos públicos según MASTER
+  // SELECT VIDEO FOR RECORD - Desde videos públicos de la bóveda
   // -------------------------------------------------------------------------
-  const handleAddRecord = async (recordData: {
-    exercise_id: string;
-    exercise_name: string;
-    exercise_icon: string;
-    weight: number;
-    reps: number;
-    video_id?: string;
-  }) => {
+  const getExerciseIcon = (exerciseName?: string): string => {
+    if (!exerciseName) return '🏋️';
+
+    const name = exerciseName.toUpperCase();
+    if (name.includes('SENTADILLA') || name.includes('SQUAT')) return '🦵';
+    if (name.includes('BANCA') || name.includes('BENCH') || name.includes('PRESS')) return '💪';
+    if (name.includes('PESO MUERTO') || name.includes('DEADLIFT')) return '☠️';
+    if (name.includes('MILITAR') || name.includes('OHP')) return '🏋️';
+    if (name.includes('REMO') || name.includes('ROW')) return '🚣';
+    if (name.includes('DOMINADA') || name.includes('PULL')) return '🧗';
+    if (name.includes('CURL')) return '💪';
+    if (name.includes('TRICEP')) return '💪';
+
+    return '🏋️';
+  };
+
+  const handleSelectVideoForRecord = async (video: Video) => {
     // Guard: Verificar si puede guardar
     if (!canSave('save_record')) return;
 
     if (!user) return;
 
-    // Verificar que el video sea público si se proporciona
-    if (recordData.video_id) {
-      const video = videos.find((v) => v.id === recordData.video_id);
-      if (video && !video.is_public) {
-        Alert.alert(
-          'Video privado',
-          'Solo puedes agregar récords desde videos públicos. Primero hazlo público desde la Bóveda.'
-        );
-        return;
-      }
+    // Validar que el video tenga los datos necesarios
+    if (!video.exercise_name || !video.weight_kg || !video.reps) {
+      Alert.alert(
+        'Video incompleto',
+        'Este video no tiene ejercicio, peso o reps definidos. Selecciona otro video.'
+      );
+      return;
     }
 
     try {
@@ -548,7 +611,10 @@ export default function AdnScreen() {
         .from('personal_records')
         .insert({
           user_id: user.id,
-          ...recordData,
+          exercise_name: video.exercise_name,
+          weight_kg: video.weight_kg,
+          reps: video.reps,
+          video_id: video.id,
         })
         .select()
         .single();
@@ -563,9 +629,49 @@ export default function AdnScreen() {
 
       setRecords((prev) => [...prev, data]);
       setShowAddModal(false);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (err) {
-      console.error('Error adding record:', err);
+      console.error('Error adding record from video:', err);
     }
+  };
+
+  // -------------------------------------------------------------------------
+  // REMOVE RECORD - Quitar récord de la lista (no elimina el video)
+  // -------------------------------------------------------------------------
+  const handleRemoveRecord = async (recordId: string) => {
+    if (!user) return;
+
+    Alert.alert(
+      'Quitar Récord',
+      '¿Estás seguro de que quieres quitar este récord de tu Top 3? El video seguirá en tu bóveda.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Quitar',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { error } = await supabase
+                .from('personal_records')
+                .delete()
+                .eq('id', recordId)
+                .eq('user_id', user.id);
+
+              if (error) throw error;
+
+              setRecords((prev) => prev.filter((r) => r.id !== recordId));
+              setRecordViewerVisible(false);
+              setSelectedRecord(null);
+              setSelectedRecordVideo(null);
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            } catch (err) {
+              console.error('Error removing record:', err);
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            }
+          },
+        },
+      ]
+    );
   };
 
   // -------------------------------------------------------------------------
@@ -780,11 +886,25 @@ export default function AdnScreen() {
           </View>
 
           <View className="flex-row gap-2">
-            {records.slice(0, 3).map((rec) => (
-              <View key={rec.id} className="flex-1">
-                <RecordCard record={rec} />
-              </View>
-            ))}
+            {records.slice(0, 3).map((rec) => {
+              // Buscar el video asociado para obtener el thumbnail y spotify
+              const associatedVideo = videos.find((v) => v.id === rec.video_id);
+              const hasSpotify = !!associatedVideo?.spotify?.enabled;
+              return (
+                <View key={rec.id} className="flex-1">
+                  <RecordCard
+                    record={rec}
+                    thumbnailUrl={associatedVideo?.thumbnail_url}
+                    hasSpotify={hasSpotify}
+                    onPress={() => {
+                      setSelectedRecord(rec);
+                      setSelectedRecordVideo(associatedVideo || null);
+                      setRecordViewerVisible(true);
+                    }}
+                  />
+                </View>
+              );
+            })}
 
             {/* Botón añadir (solo dueño y si hay espacio) - NO manual según MASTER */}
             {/* Los récords solo se eligen desde videos públicos, no ingreso manual */}
@@ -988,8 +1108,13 @@ export default function AdnScreen() {
                   </View>
                 ) : (
                   videos.map((vid) => (
-                    <View
+                    <Pressable
                       key={vid.id}
+                      onLongPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                        deleteVideo(vid);
+                      }}
+                      delayLongPress={500}
                       className="flex-row gap-3 p-3 bg-[#0a0a0a] border border-zinc-900 rounded-xl mb-2"
                     >
                       {/* Thumbnail */}
@@ -1103,7 +1228,7 @@ export default function AdnScreen() {
                           <MoreVertical size={16} color="#71717a" />
                         </TouchableOpacity>
                       </View>
-                    </View>
+                    </Pressable>
                   ))
                 )}
               </View>
@@ -1138,11 +1263,13 @@ export default function AdnScreen() {
         <View className="h-20" />
       </ScrollView>
 
-      {/* Modal Añadir Récord */}
-      <AddRecordModal
+      {/* Modal Seleccionar Video para Récord */}
+      <SelectRecordVideoModal
         visible={showAddModal}
         onClose={() => setShowAddModal(false)}
-        onSave={handleAddRecord}
+        onSelect={handleSelectVideoForRecord}
+        publicVideos={publicVideos}
+        existingRecordVideoIds={records.map((r) => r.video_id).filter(Boolean) as string[]}
       />
 
       {/* Modal Video Viewer */}
@@ -1351,6 +1478,131 @@ export default function AdnScreen() {
         reps={selectedVideoForEdit?.reps}
         thumbnailUrl={selectedVideoForEdit?.thumbnail_url}
       />
+
+      {/* Modal Visor de Récord */}
+      <Modal
+        visible={recordViewerVisible}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => {
+          setRecordViewerVisible(false);
+          setSelectedRecord(null);
+          setSelectedRecordVideo(null);
+          spotify.pauseForSwipe().catch(() => {});
+        }}
+      >
+        <View className="flex-1 bg-black">
+          {/* Header */}
+          <View className="absolute top-0 left-0 right-0 z-10 pt-14 px-4 pb-4 bg-gradient-to-b from-black/80 to-transparent">
+            <View className="flex-row items-center justify-between">
+              <TouchableOpacity
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setRecordViewerVisible(false);
+                  setSelectedRecord(null);
+                  setSelectedRecordVideo(null);
+                  spotify.pauseForSwipe().catch(() => {});
+                }}
+                className="w-10 h-10 rounded-full bg-zinc-900/80 items-center justify-center"
+              >
+                <X size={20} color="#fff" />
+              </TouchableOpacity>
+              <View className="flex-1 mx-4">
+                <View className="flex-row items-center justify-center gap-2">
+                  <Trophy size={16} color="#F97316" />
+                  <Text className="text-fire-orange font-bold text-sm text-center uppercase">
+                    Récord Personal
+                  </Text>
+                </View>
+                <Text className="text-white font-bold text-center mt-1" numberOfLines={1}>
+                  {selectedRecord?.exercise_name}
+                </Text>
+                <Text className="text-fire-orange text-xs text-center font-mono mt-0.5">
+                  {selectedRecord?.weight_kg}kg × {selectedRecord?.reps}{' '}
+                  {selectedRecord?.reps === 1 ? '(1RM)' : 'reps'}
+                </Text>
+              </View>
+              <View className="w-10" />
+            </View>
+          </View>
+
+          {/* Video Player */}
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={handleRecordVideoTap}
+            className="flex-1 items-center justify-center"
+          >
+            {selectedRecordVideo?.video_url && (
+              <VideoView
+                player={recordVideoPlayer}
+                style={{ width: screenWidth, height: screenWidth * (16 / 9) }}
+                contentFit="contain"
+                nativeControls={false}
+              />
+            )}
+            {/* Icono de Play cuando está pausado */}
+            {isRecordVideoManuallyPaused && (
+              <View className="absolute inset-0 items-center justify-center">
+                <View className="w-20 h-20 rounded-full bg-black/50 items-center justify-center">
+                  <Play size={40} color="#FFFFFF" fill="#FFFFFF" />
+                </View>
+              </View>
+            )}
+          </TouchableOpacity>
+
+          {/* Footer con Spotify info + Quitar de Records */}
+          <View className="absolute bottom-0 left-0 right-0 pb-10 px-4 pt-4 bg-gradient-to-t from-black to-transparent">
+            {/* Spotify Info */}
+            {selectedRecordVideo?.spotify?.enabled && (
+              <TouchableOpacity
+                onPress={async () => {
+                  if (isPro && spotifyPremium) {
+                    const trackUri = (selectedRecordVideo.spotify as any).trackUri;
+                    const positionMs = (selectedRecordVideo.spotify as any).positionMs || 0;
+                    if (trackUri) {
+                      await spotify.syncWithVideo(trackUri, positionMs);
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    }
+                  } else {
+                    Alert.alert(
+                      '⭐ TRENS PRO',
+                      'Desbloquea TRENS PRO para escuchar la música con la que se grabó este levantamiento.',
+                      [{ text: 'ENTENDIDO', style: 'default' }]
+                    );
+                  }
+                }}
+                className="flex-row items-center gap-2 bg-zinc-900/80 rounded-lg px-3 py-2 mb-4"
+              >
+                <Music size={16} color="#1DB954" />
+                <View className="flex-1">
+                  <Text className="text-white text-xs font-bold" numberOfLines={1}>
+                    {selectedRecordVideo.spotify.trackName}
+                  </Text>
+                  <Text className="text-zinc-400 text-[10px]" numberOfLines={1}>
+                    {selectedRecordVideo.spotify.artist}
+                  </Text>
+                </View>
+                {isPro && spotifyPremium ? (
+                  <Volume2 size={16} color="#1DB954" />
+                ) : (
+                  <Lock size={14} color="#71717a" />
+                )}
+              </TouchableOpacity>
+            )}
+
+            {/* Botón Quitar de Records */}
+            <TouchableOpacity
+              onPress={() => selectedRecord && handleRemoveRecord(selectedRecord.id)}
+              className="flex-row items-center justify-center gap-2 py-4 bg-zinc-900/80 rounded-xl border border-zinc-800"
+            >
+              <Trophy size={18} color="#EF4444" />
+              <Text className="text-red-400 font-bold uppercase tracking-widest text-sm">
+                Quitar de Records
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }

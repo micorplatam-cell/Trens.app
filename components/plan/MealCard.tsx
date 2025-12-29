@@ -8,6 +8,7 @@ import { View, Text, Pressable, ScrollView, Dimensions } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { Clock, Plus, ChevronLeft, ChevronRight } from 'lucide-react-native';
+import { useHankTarget } from '../../hooks/useHankTarget';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_PADDING = 32; // padding horizontal del contenedor
@@ -87,6 +88,13 @@ export const MealCard: React.FC<MealCardProps> = ({
   // ============================================================================
   const scrollViewRef = useRef<ScrollView>(null);
   const scaleAnim = useSharedValue(1);
+
+  // Hank Target - Registrar esta tarjeta como target para animaciones
+  const { targetRef, onLayout, isHighlighted } = useHankTarget({
+    id: `meal-${meal.id}`,
+    type: 'meal',
+    label: mealName,
+  });
 
   // Navegar a opción específica
   const navigateToOption = useCallback(
@@ -244,16 +252,18 @@ export const MealCard: React.FC<MealCardProps> = ({
   return (
     <Animated.View style={animatedStyle} className="mb-6">
       <View
+        ref={targetRef}
+        onLayout={onLayout}
         className="rounded-xl overflow-hidden"
         style={{
           backgroundColor: '#0a0a0a',
-          borderWidth: 1,
-          borderColor: '#DC262640',
-          shadowColor: '#DC2626',
+          borderWidth: isHighlighted ? 2 : 1,
+          borderColor: isHighlighted ? '#F97316' : '#DC262640',
+          shadowColor: isHighlighted ? '#F97316' : '#DC2626',
           shadowOffset: { width: 0, height: 0 },
-          shadowOpacity: 0.15,
-          shadowRadius: 10,
-          elevation: 5,
+          shadowOpacity: isHighlighted ? 0.6 : 0.15,
+          shadowRadius: isHighlighted ? 20 : 10,
+          elevation: isHighlighted ? 10 : 5,
         }}
       >
         {/* Header - ED HARDY FIRE GRADIENT */}
