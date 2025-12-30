@@ -13,6 +13,8 @@ import Animated, {
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { Pill, Syringe, Droplets, FlaskConical, Zap, Clock, Trash2 } from 'lucide-react-native';
+import { useHankTarget } from '../../hooks/useHankTarget';
+import { HankInlineHighlight } from '../hank/HankInlineHighlight';
 
 // ============================================================================
 // TYPES
@@ -79,6 +81,13 @@ export const StackCard: React.FC<StackCardProps> = ({
   const [expanded, setExpanded] = useState(false);
   const expandProgress = useSharedValue(0);
 
+  // Hank Target - Registrar este stack como target para animaciones
+  const { targetRef, onLayout, isHighlighted, animationPhase } = useHankTarget({
+    id: `stack-${stack.id}`,
+    type: 'custom',
+    label: `Stack ${formatTimeToAMPM(stack.time)}`,
+  });
+
   const toggleExpand = () => {
     if (isCompressed) return; // No expandir si está comprimido
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -131,7 +140,10 @@ export const StackCard: React.FC<StackCardProps> = ({
   }
 
   return (
-    <View className="mb-6 pl-8 relative">
+    <View ref={targetRef} onLayout={onLayout} className="mb-6 pl-8 relative">
+      {/* Hank Inline Highlight - FUERA del Pressable */}
+      <HankInlineHighlight isActive={isHighlighted} phase={animationPhase} borderRadius={8} />
+
       {/* Timeline marker */}
       <View className="absolute left-2.5 top-3 w-3 h-3 rounded-full bg-purple-500 border-2 border-[#111111]" />
 

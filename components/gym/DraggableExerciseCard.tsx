@@ -18,6 +18,7 @@ import Animated, {
 import * as Haptics from 'expo-haptics';
 import { Trash2, GripVertical } from 'lucide-react-native';
 import { useHankTarget } from '../../hooks/useHankTarget';
+import { HankInlineHighlight } from '../hank/HankInlineHighlight';
 
 // ============================================================================
 // TYPES
@@ -103,7 +104,7 @@ export const DraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
   const isSwipingShared = useSharedValue(false);
 
   // Hank Target - Registrar este ejercicio como target para animaciones
-  const { targetRef, onLayout, isHighlighted } = useHankTarget({
+  const { targetRef, onLayout, isHighlighted, animationPhase } = useHankTarget({
     id: `exercise-${exercise.id}`,
     type: 'exercise',
     label: exercise.name,
@@ -306,18 +307,18 @@ export const DraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
 
       {/* MAIN CARD */}
       <GestureDetector gesture={composedGesture}>
-        <Animated.View style={animatedStyle}>
+        <Animated.View ref={targetRef} onLayout={onLayout} style={animatedStyle}>
+          {/* Hank Inline Highlight - FUERA de overflow:hidden */}
+          <HankInlineHighlight isActive={isHighlighted} phase={animationPhase} borderRadius={16} />
           <View
-            ref={targetRef}
-            onLayout={onLayout}
             className="rounded-2xl overflow-hidden"
             style={{
               backgroundColor: isDragging ? '#1a1a1a' : '#0a0a0a',
-              borderWidth: isDragging || isHighlighted ? 2 : 1,
-              borderColor: isHighlighted ? '#F97316' : isDragging ? '#F97316' : '#27272a',
-              shadowColor: isHighlighted ? '#F97316' : isDragging ? '#F97316' : 'transparent',
-              shadowOffset: { width: 0, height: isDragging || isHighlighted ? 12 : 0 },
-              shadowOpacity: isHighlighted ? 0.8 : isDragging ? 0.6 : 0,
+              borderWidth: isDragging ? 2 : 1,
+              borderColor: isDragging ? '#F97316' : '#27272a',
+              shadowColor: isDragging ? '#F97316' : 'transparent',
+              shadowOffset: { width: 0, height: isDragging ? 12 : 0 },
+              shadowOpacity: isDragging ? 0.6 : 0,
               shadowRadius: isDragging ? 20 : 0,
               elevation: isDragging ? 20 : 0,
             }}

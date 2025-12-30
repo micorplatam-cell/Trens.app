@@ -1,10 +1,10 @@
 // ============================================================================
-// HANK TARGET HIGHLIGHT - Borde animado y engranaje cuando Hank trabaja
-// Efecto visual ED HARDY SAVAGE MODE
+// HANK INLINE HIGHLIGHT - Componente reutilizable para mostrar animaciones
+// de Hank cuando trabaja en cualquier tarjeta
 // ============================================================================
 
 import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, StatusBar, Platform } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -17,75 +17,44 @@ import Animated, {
   cancelAnimation,
 } from 'react-native-reanimated';
 import { Settings2 } from 'lucide-react-native';
-import { useHank } from '../../context/HankContext';
-
-// Obtener altura de StatusBar para compensar en Android
-const STATUSBAR_HEIGHT = Platform.OS === 'android' ? StatusBar.currentHeight || 0 : 0;
 
 // ============================================================================
-// ANIMATED GEAR COMPONENT
+// TYPES
 // ============================================================================
-const AnimatedGear: React.FC<{
-  size: number;
-  isSpinning: boolean;
-  color?: string;
-}> = ({ size, isSpinning, color = '#F97316' }) => {
-  const rotation = useSharedValue(0);
-
-  useEffect(() => {
-    if (isSpinning) {
-      rotation.value = withRepeat(
-        withTiming(360, { duration: 1500, easing: Easing.linear }),
-        -1,
-        false
-      );
-    } else {
-      cancelAnimation(rotation);
-      rotation.value = withTiming(0, { duration: 300 });
-    }
-  }, [isSpinning, rotation]);
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${rotation.value}deg` }],
-  }));
-
-  return (
-    <Animated.View style={animatedStyle}>
-      <Settings2 size={size} color={color} strokeWidth={2.5} />
-    </Animated.View>
-  );
-};
+interface HankInlineHighlightProps {
+  isActive: boolean;
+  phase: 'idle' | 'flying' | 'working' | 'success' | 'returning';
+  borderRadius?: number;
+}
 
 // ============================================================================
-// ANIMATED BORDER COMPONENT
+// COMPONENT
 // ============================================================================
-const AnimatedBorder: React.FC<{
-  position: { x: number; y: number; width: number; height: number };
-  phase: 'flying' | 'working' | 'success' | 'idle';
-}> = ({ position, phase }) => {
+export const HankInlineHighlight: React.FC<HankInlineHighlightProps> = ({
+  isActive,
+  phase,
+  borderRadius = 12,
+}) => {
   const borderOpacity = useSharedValue(0);
-  const borderScale = useSharedValue(1);
   const glowIntensity = useSharedValue(0);
-  const dashOffset = useSharedValue(0);
+  const gearRotation = useSharedValue(0);
+
+  const isHighlighting =
+    isActive && (phase === 'flying' || phase === 'working' || phase === 'success');
 
   useEffect(() => {
+    if (!isActive) {
+      borderOpacity.value = withTiming(0, { duration: 200 });
+      return;
+    }
+
     if (phase === 'flying') {
-      // Entrada suave mientras Hank vuela hacia el target
-      borderOpacity.value = withTiming(0.7, { duration: 400 });
-      borderScale.value = withSequence(
-        withSpring(1.05, { damping: 10 }),
-        withSpring(1, { damping: 15 })
-      );
-      // Glow suave de anticipación
-      glowIntensity.value = withTiming(0.5, { duration: 400 });
+      // Entrada suave mientras Hank vuela
+      borderOpacity.value = withTiming(0.8, { duration: 300 });
+      glowIntensity.value = withTiming(0.5, { duration: 300 });
     } else if (phase === 'working') {
-      // Entrada con spring
+      // Borde completo + glow pulsante + engranaje girando
       borderOpacity.value = withSpring(1, { damping: 15 });
-      borderScale.value = withSequence(
-        withSpring(1.02, { damping: 10 }),
-        withSpring(1, { damping: 15 })
-      );
-      // Glow pulsante
       glowIntensity.value = withRepeat(
         withSequence(
           withTiming(1, { duration: 600, easing: Easing.inOut(Easing.ease) }),
@@ -94,14 +63,14 @@ const AnimatedBorder: React.FC<{
         -1,
         true
       );
-      // Dash animation
-      dashOffset.value = withRepeat(
-        withTiming(20, { duration: 500, easing: Easing.linear }),
+      gearRotation.value = withRepeat(
+        withTiming(360, { duration: 1500, easing: Easing.linear }),
         -1,
         false
       );
     } else if (phase === 'success') {
-      // Flash verde de éxito
+      // Flash verde
+      cancelAnimation(gearRotation);
       glowIntensity.value = withSequence(
         withTiming(1.5, { duration: 150 }),
         withTiming(0, { duration: 300 })
@@ -109,30 +78,17 @@ const AnimatedBorder: React.FC<{
       borderOpacity.value = withTiming(0, { duration: 400 });
     } else {
       cancelAnimation(glowIntensity);
-      cancelAnimation(dashOffset);
+      cancelAnimation(gearRotation);
       borderOpacity.value = withTiming(0, { duration: 200 });
-      borderScale.value = withTiming(1, { duration: 200 });
     }
-  }, [phase, borderOpacity, borderScale, glowIntensity, dashOffset]);
-
-  const containerStyle = useAnimatedStyle(() => ({
-    position: 'absolute',
-    // Posición EXACTA del target
-    // measureInWindow incluye StatusBar, pero el overlay no, así que restamos la altura
-    left: position.x,
-    top: position.y - STATUSBAR_HEIGHT,
-    width: position.width,
-    height: position.height,
-    opacity: borderOpacity.value,
-    transform: [{ scale: borderScale.value }],
-  }));
+  }, [isActive, phase, borderOpacity, glowIntensity, gearRotation]);
 
   const borderStyle = useAnimatedStyle(() => ({
     ...StyleSheet.absoluteFillObject,
     borderWidth: 2,
     borderColor: phase === 'success' ? '#22C55E' : '#F97316',
-    borderRadius: 12,
-    borderStyle: 'solid',
+    borderRadius: borderRadius,
+    opacity: borderOpacity.value,
     shadowColor: phase === 'success' ? '#22C55E' : '#DC2626',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: interpolate(glowIntensity.value, [0, 1], [0.3, 0.9]),
@@ -140,17 +96,24 @@ const AnimatedBorder: React.FC<{
     elevation: 10,
   }));
 
-  // Esquinas decorativas ED HARDY
-  const cornerStyle = useAnimatedStyle(() => ({
+  const cornerOpacity = useAnimatedStyle(() => ({
     opacity: interpolate(glowIntensity.value, [0, 1], [0.5, 1]),
   }));
 
+  const gearStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${gearRotation.value}deg` }],
+  }));
+
+  if (!isHighlighting) return null;
+
+  const cornerColor = phase === 'success' ? '#22C55E' : '#FBBF24';
+
   return (
-    <Animated.View style={containerStyle} pointerEvents="none">
+    <View style={StyleSheet.absoluteFill} pointerEvents="none">
       {/* Borde principal */}
       <Animated.View style={borderStyle} />
 
-      {/* Esquinas con efecto */}
+      {/* Esquinas decorativas */}
       <Animated.View
         style={[
           {
@@ -161,10 +124,10 @@ const AnimatedBorder: React.FC<{
             height: 12,
             borderTopWidth: 3,
             borderLeftWidth: 3,
-            borderColor: phase === 'success' ? '#22C55E' : '#FBBF24',
+            borderColor: cornerColor,
             borderTopLeftRadius: 4,
           },
-          cornerStyle,
+          cornerOpacity,
         ]}
       />
       <Animated.View
@@ -177,10 +140,10 @@ const AnimatedBorder: React.FC<{
             height: 12,
             borderTopWidth: 3,
             borderRightWidth: 3,
-            borderColor: phase === 'success' ? '#22C55E' : '#FBBF24',
+            borderColor: cornerColor,
             borderTopRightRadius: 4,
           },
-          cornerStyle,
+          cornerOpacity,
         ]}
       />
       <Animated.View
@@ -193,10 +156,10 @@ const AnimatedBorder: React.FC<{
             height: 12,
             borderBottomWidth: 3,
             borderLeftWidth: 3,
-            borderColor: phase === 'success' ? '#22C55E' : '#FBBF24',
+            borderColor: cornerColor,
             borderBottomLeftRadius: 4,
           },
-          cornerStyle,
+          cornerOpacity,
         ]}
       />
       <Animated.View
@@ -209,14 +172,14 @@ const AnimatedBorder: React.FC<{
             height: 12,
             borderBottomWidth: 3,
             borderRightWidth: 3,
-            borderColor: phase === 'success' ? '#22C55E' : '#FBBF24',
+            borderColor: cornerColor,
             borderBottomRightRadius: 4,
           },
-          cornerStyle,
+          cornerOpacity,
         ]}
       />
 
-      {/* Engranaje girando en esquina superior derecha */}
+      {/* Engranaje girando */}
       {phase === 'working' && (
         <>
           {/* Mini-badge "Ejecutando..." encima del target */}
@@ -250,7 +213,7 @@ const AnimatedBorder: React.FC<{
           <View
             style={{
               position: 'absolute',
-              top: -14,
+              bottom: -14,
               right: -14,
               width: 28,
               height: 28,
@@ -267,7 +230,9 @@ const AnimatedBorder: React.FC<{
               elevation: 5,
             }}
           >
-            <AnimatedGear size={16} isSpinning={true} />
+            <Animated.View style={gearStyle}>
+              <Settings2 size={16} color="#F97316" strokeWidth={2.5} />
+            </Animated.View>
           </View>
         </>
       )}
@@ -330,40 +295,8 @@ const AnimatedBorder: React.FC<{
           </View>
         </>
       )}
-    </Animated.View>
-  );
-};
-
-// ============================================================================
-// MAIN COMPONENT - Overlay global para highlights
-// NOTA: Ahora los componentes manejan su propio highlight interno para precisión exacta
-// Este componente queda como fallback para componentes que no tienen highlight inline
-// Los targets con type 'exercise' tienen highlight inline en SeriesCard
-// ============================================================================
-export const HankTargetHighlight: React.FC = () => {
-  const { targetState } = useHank();
-  const { currentTarget, animationPhase } = targetState;
-
-  // Componentes con highlight inline: SeriesCard (type: 'exercise')
-  // No mostrar el overlay global para estos componentes
-  const hasInlineHighlight = currentTarget?.type === 'exercise';
-
-  if (
-    hasInlineHighlight ||
-    !currentTarget ||
-    (animationPhase !== 'flying' && animationPhase !== 'working' && animationPhase !== 'success')
-  ) {
-    return null;
-  }
-
-  return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      <AnimatedBorder
-        position={currentTarget.position}
-        phase={animationPhase as 'flying' | 'working' | 'success' | 'idle'}
-      />
     </View>
   );
 };
 
-export default HankTargetHighlight;
+export default HankInlineHighlight;

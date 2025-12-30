@@ -22,26 +22,31 @@ interface UseHankTargetReturn {
    * Ref to attach to the target View component
    */
   targetRef: React.RefObject<View | null>;
-  
+
   /**
    * onLayout handler to capture position updates
    */
   onLayout: (event: LayoutChangeEvent) => void;
-  
+
   /**
    * Manually trigger animation to this target
    */
   highlightTarget: () => void;
-  
+
   /**
    * Check if this target is currently being highlighted
    */
   isHighlighted: boolean;
+
+  /**
+   * Current animation phase when this target is highlighted
+   */
+  animationPhase: 'idle' | 'flying' | 'working' | 'success' | 'returning';
 }
 
 /**
  * Hook to register a component as a Hank target
- * 
+ *
  * @example
  * ```tsx
  * const MyComponent = () => {
@@ -50,7 +55,7 @@ interface UseHankTargetReturn {
  *     type: 'meal',
  *     label: 'Desayuno',
  *   });
- *   
+ *
  *   return (
  *     <View ref={targetRef} onLayout={onLayout}>
  *       {/* Your component content *\/}
@@ -63,42 +68,62 @@ export function useHankTarget(options: UseHankTargetOptions): UseHankTargetRetur
   const { id, type, label, enabled = true } = options;
   const targetRef = useRef<View>(null);
   const positionRef = useRef({ x: 0, y: 0, width: 0, height: 0 });
-  
+  const hasRegistered = useRef(false);
+
   const { targetState } = useHank();
-  const { registerTarget, unregisterTarget, currentTarget, startAnimation } = targetState;
+  const { registerTarget, unregisterTarget, currentTarget, startAnimation, animationPhase } =
+    targetState;
 
-  // Register/unregister on mount/unmount
-  useEffect(() => {
-    if (!enabled) return;
-    
-    return () => {
-      unregisterTarget(id);
-    };
-  }, [id, enabled, unregisterTarget]);
+  // Función para medir y registrar
+  const measureAndRegister = useCallback(() => {
+    if (!enabled || !targetRef.current) return;
 
-  // Handle layout changes
-  const onLayout = useCallback((_event: LayoutChangeEvent) => {
-    if (!enabled) return;
-
-    // Get position relative to screen
-    targetRef.current?.measureInWindow((x, y, width, height) => {
-      if (x !== undefined && y !== undefined) {
+    targetRef.current.measureInWindow((x, y, width, height) => {
+      if (x !== undefined && y !== undefined && width > 0 && height > 0) {
         positionRef.current = { x, y, width, height };
-        
+
         // Register with updated position
         registerTarget(id, {
           type,
           label,
           position: { x, y, width, height },
         });
+        hasRegistered.current = true;
+        console.warn(
+          `🎯 Target registrado: ${id} (${label}) en x:${x.toFixed(0)}, y:${y.toFixed(0)}`
+        );
       }
     });
   }, [id, type, label, enabled, registerTarget]);
 
+  // Register/unregister on mount/unmount
+  useEffect(() => {
+    if (!enabled) return;
+
+    // Intentar registrar después de un pequeño delay (para que el componente esté montado)
+    const timer = setTimeout(() => {
+      measureAndRegister();
+    }, 100);
+
+    return () => {
+      clearTimeout(timer);
+      unregisterTarget(id);
+      hasRegistered.current = false;
+    };
+  }, [id, enabled, unregisterTarget, measureAndRegister]);
+
+  // Handle layout changes - también actualizar posición
+  const onLayout = useCallback(
+    (_event: LayoutChangeEvent) => {
+      measureAndRegister();
+    },
+    [measureAndRegister]
+  );
+
   // Manually trigger highlight
   const highlightTarget = useCallback(() => {
     if (!enabled || !positionRef.current.width) return;
-    
+
     startAnimation({
       id,
       type,
@@ -110,11 +135,15 @@ export function useHankTarget(options: UseHankTargetOptions): UseHankTargetRetur
   // Check if this target is highlighted
   const isHighlighted = currentTarget?.id === id;
 
+  // Get the animation phase for this target (only relevant when highlighted)
+  const targetAnimationPhase = isHighlighted ? animationPhase : 'idle';
+
   return {
     targetRef,
     onLayout,
     highlightTarget,
     isHighlighted,
+    animationPhase: targetAnimationPhase,
   };
 }
 

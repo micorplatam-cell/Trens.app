@@ -64,6 +64,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import spotify, { SpotifyVideoMetadata } from '../../../services/spotify/spotify';
 import cloudflareStream from '../../../services/cloudflare/stream';
 import { DraggableExerciseCard } from '../../../components/gym/DraggableExerciseCard';
+import { SeriesCard } from '../../../components/gym/SeriesCard';
 import { useUserRoleContext } from '../../../context/UserRoleContext';
 import { useSaveGuard } from '../../_layout';
 import cloudflareR2 from '../../../services/cloudflare/r2';
@@ -2021,7 +2022,8 @@ function GymScreen() {
         'manteniendo índice:',
         previousIndex
       );
-      loadExercises(selectedDayIndex).then(() => {
+      // Refresh SILENCIOSO - sin mostrar loading para evitar flash
+      loadExercises(selectedDayIndex, true).then(() => {
         // Después de cargar, hacer scroll al mismo índice (o al último si el índice ya no existe)
         setTimeout(() => {
           if (exerciseListRef.current && previousIndex >= 0) {
@@ -2036,7 +2038,7 @@ function GymScreen() {
     }
   }, [refreshTrigger]);
 
-  const loadExercises = async (dayIndex: number | null = null) => {
+  const loadExercises = async (dayIndex: number | null = null, silent: boolean = false) => {
     // Si no hay usuario, mostrar vista STRUCTURE vacía
     if (!user) {
       setExercises([]);
@@ -2044,7 +2046,10 @@ function GymScreen() {
       setLoading(false);
       return;
     }
-    setLoading(true);
+    // Solo mostrar loading si no es silencioso (evita flash en refresh de HANK)
+    if (!silent) {
+      setLoading(true);
+    }
     const targetDayIndex = dayIndex !== null ? dayIndex : selectedDayIndex;
 
     try {
@@ -7404,100 +7409,16 @@ function GymScreen() {
 
               {/* CARD ESTRUCTURA - FIJA (fuera del scroll horizontal) */}
               <View className="bg-black px-4 pt-4" style={{ paddingRight: 90 }}>
-                <View
-                  className="p-4 rounded-xl"
-                  style={{
-                    backgroundColor: '#0a0a0a',
-                    borderWidth: 1,
-                    borderColor: '#1a1a1a',
+                <SeriesCard
+                  exerciseId={item.exercise_id}
+                  exerciseName={item.name}
+                  series={item.series || []}
+                  isActive={index === activeExerciseIndex}
+                  onPress={() => {
+                    setModalExercise(item);
+                    setStructureModalVisible(true);
                   }}
-                >
-                  <TouchableOpacity
-                    onPress={() => {
-                      setModalExercise(item);
-                      setStructureModalVisible(true);
-                    }}
-                  >
-                    <View className="flex-row items-center justify-between mb-3">
-                      <View className="flex-row items-center gap-2">
-                        <View className="w-1 h-4 bg-fire-orange rounded-full" />
-                        <Text className="text-white font-bold text-sm uppercase tracking-wider">
-                          Series de Hoy
-                        </Text>
-                      </View>
-                      <View className="flex-row items-center gap-1">
-                        <Text className="text-zinc-500 text-xs">Editar</Text>
-                        <Sliders color="#71717a" size={14} />
-                      </View>
-                    </View>
-                  </TouchableOpacity>
-
-                  {/* Series visuales - Slider horizontal */}
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={{ gap: 8 }}
-                    nestedScrollEnabled={true}
-                  >
-                    {(item.series || [])
-                      .filter((s: any) => s && typeof s === 'object')
-                      .map((s: any, idx: number) => {
-                        const typeConfig: Record<
-                          string,
-                          { bg: string; border: string; label: string }
-                        > = {
-                          CALENTAMIENTO: { bg: '#1e3a5f', border: '#3b82f6', label: 'C' },
-                          APROXIMACION: { bg: '#422006', border: '#f59e0b', label: 'A' },
-                          EFECTIVA: { bg: '#14532d', border: '#22c55e', label: 'E' },
-                          FALLO: { bg: '#450a0a', border: '#ef4444', label: 'F' },
-                        };
-                        const config = typeConfig[s.type as string] || typeConfig.EFECTIVA;
-                        return (
-                          <TouchableOpacity
-                            key={String(idx)}
-                            onPress={() => {
-                              setModalExercise(item);
-                              setStructureModalVisible(true);
-                            }}
-                            className="items-center justify-center rounded-lg"
-                            style={{
-                              width: 44,
-                              height: 44,
-                              backgroundColor: config.bg,
-                              borderWidth: 1,
-                              borderColor: config.border,
-                            }}
-                          >
-                            <Text className="text-white font-bold text-sm">
-                              {String(s.reps || 0)}
-                            </Text>
-                            <Text className="text-zinc-400 text-[8px] font-bold -mt-0.5">
-                              {config.label}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-
-                    {/* Agregar serie */}
-                    <TouchableOpacity
-                      onPress={() => {
-                        setModalExercise(item);
-                        setStructureModalVisible(true);
-                      }}
-                      className="items-center justify-center rounded-lg"
-                      style={{
-                        width: 44,
-                        height: 44,
-                        backgroundColor: 'transparent',
-                        borderWidth: 1,
-                        borderColor: '#3f3f46',
-                        borderStyle: 'dashed',
-                      }}
-                    >
-                      <Plus color="#71717a" size={18} />
-                    </TouchableOpacity>
-                  </ScrollView>
-                </View>
+                />
               </View>
 
               {/* ESPACIADOR FLEXIBLE */}

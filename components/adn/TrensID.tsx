@@ -27,6 +27,8 @@ import {
 import * as Haptics from 'expo-haptics';
 import { supabase } from '../../lib/supabase';
 import { useSaveGuard } from '../../context/SaveGuardContext';
+import { useHankTarget } from '../../hooks/useHankTarget';
+import HankInlineHighlight from '../hank/HankInlineHighlight';
 import {
   calculateUserDailyMacros,
   calculateMealWithUserMacros,
@@ -68,6 +70,11 @@ interface TrensIDProps {
 
 export default function TrensID({ userId, profileData, measurements, onUpdate }: TrensIDProps) {
   const { canSave } = useSaveGuard();
+  const { targetRef, onLayout, isHighlighted, animationPhase } = useHankTarget({
+    id: 'trens-id-biometrics',
+    type: 'profile',
+    label: 'ID // Biometrics',
+  });
   const [isExpanded, setIsExpanded] = useState(false);
   const [editData, setEditData] = useState<ProfileData>(profileData);
   const [editMeasurements, setEditMeasurements] = useState<Measurement[]>(measurements);
@@ -375,7 +382,10 @@ export default function TrensID({ userId, profileData, measurements, onUpdate }:
   }));
 
   return (
-    <View className="mb-6">
+    <View className="mb-6" ref={targetRef} onLayout={onLayout}>
+      {/* HANK INLINE HIGHLIGHT */}
+      <HankInlineHighlight isActive={isHighlighted} phase={animationPhase} borderRadius={8} />
+
       {/* CARD CONTAINER - ED HARDY STYLE */}
       <TouchableOpacity
         activeOpacity={isExpanded ? 1 : 0.8}

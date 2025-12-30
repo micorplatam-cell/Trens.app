@@ -238,25 +238,70 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
   // También dispara animación visual si hay target registrado
   const executeTool = useCallback(
     async (toolCall: HankToolCall): Promise<HankToolResult> => {
-      // Buscar target registrado que coincida con el contexto
-      const registeredTarget = registeredTargets.current.values().next().value;
+      console.warn('🚀🚀🚀 HANK WRAPPER executeTool LLAMADO! Tool:', toolCall.tool);
 
-      // Si hay target, iniciar animación
-      if (registeredTarget) {
-        startTargetAnimation(registeredTarget);
+      // Buscar target registrado que coincida con el contexto
+      const allTargets = Array.from(registeredTargets.current.entries());
+      console.warn(
+        '🎯 HANK executeTool: Targets registrados:',
+        allTargets.length,
+        allTargets.map(([id]) => id)
+      );
+
+      let registeredTarget = registeredTargets.current.values().next().value;
+
+      // Si NO hay target registrado, crear uno por defecto en el centro de la pantalla
+      if (!registeredTarget) {
+        console.warn('⚠️ HANK: NO hay targets registrados, usando posición central');
+        const { Dimensions } = require('react-native');
+        const { width, height } = Dimensions.get('window');
+        registeredTarget = {
+          id: 'default-center',
+          type: 'custom',
+          label: toolCall.tool,
+          position: {
+            x: width / 2 - 100,
+            y: height / 2 - 50,
+            width: 200,
+            height: 100,
+          },
+        };
+      } else {
+        console.warn(
+          '🎯 HANK: Target encontrado, iniciando animación hacia:',
+          registeredTarget.label
+        );
       }
+
+      // Iniciar animación
+      startTargetAnimation(registeredTarget);
+
+      // Registrar tiempo de inicio de la fase working (después de 800ms de vuelo)
+      const workingStartTime = Date.now() + 800;
 
       const result = await executeToolRaw(toolCall);
 
-      // Completar animación según resultado
-      if (registeredTarget) {
-        completeTargetAnimation(result.success);
-      }
-
+      // IMPORTANTE: Disparar refresh INMEDIATAMENTE después de ejecutar
+      // Así los datos se cargan mientras Hank sigue "trabajando" visualmente
       if (result.success) {
-        console.warn('🔄 executeTool exitoso, incrementando refreshTrigger');
+        console.warn('🔄 executeTool exitoso, disparando refresh AHORA (mientras Hank trabaja)');
         setRefreshTrigger((prev) => prev + 1);
       }
+
+      // Asegurar mínimo 5 segundos en fase working (los datos se cargan en paralelo)
+      const elapsedInWorking = Date.now() - workingStartTime;
+      const remainingWorkingTime = Math.max(0, 5000 - elapsedInWorking);
+      if (remainingWorkingTime > 0) {
+        await new Promise((resolve) => setTimeout(resolve, remainingWorkingTime));
+      }
+
+      // Completar animación según resultado
+      completeTargetAnimation(result.success);
+
+      // Esperar solo el tiempo mínimo para que la animación de éxito sea visible
+      // success(400) + returning(500) = ~900ms
+      await new Promise((resolve) => setTimeout(resolve, 900));
+
       return result;
     },
     [executeToolRaw, startTargetAnimation, completeTargetAnimation]
@@ -267,25 +312,62 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
   const executeToolChain = useCallback(
     async (toolCalls: HankToolCall[]): Promise<HankToolResult[]> => {
       // Buscar target registrado que coincida con el contexto
-      const registeredTarget = registeredTargets.current.values().next().value;
+      const allTargets = Array.from(registeredTargets.current.entries());
+      console.warn('🎯 HANK executeToolChain: Targets registrados:', allTargets.length);
 
-      // Si hay target, iniciar animación
-      if (registeredTarget) {
-        startTargetAnimation(registeredTarget);
+      let registeredTarget = registeredTargets.current.values().next().value;
+
+      // Si NO hay target registrado, crear uno por defecto en el centro de la pantalla
+      if (!registeredTarget) {
+        console.warn('⚠️ HANK: NO hay targets, usando posición central');
+        const { Dimensions } = require('react-native');
+        const { width, height } = Dimensions.get('window');
+        registeredTarget = {
+          id: 'default-center',
+          type: 'custom',
+          label: toolCalls[0]?.tool || 'Action',
+          position: {
+            x: width / 2 - 100,
+            y: height / 2 - 50,
+            width: 200,
+            height: 100,
+          },
+        };
+      } else {
+        console.warn('🎯 HANK: Target encontrado:', registeredTarget.label);
       }
+
+      // Iniciar animación
+      startTargetAnimation(registeredTarget);
+
+      // Registrar tiempo de inicio de la fase working (después de 800ms de vuelo)
+      const workingStartTime = Date.now() + 800;
 
       const results = await executeToolChainRaw(toolCalls);
       const hasSuccess = results.some((r) => r.success);
 
-      // Completar animación según resultado
-      if (registeredTarget) {
-        completeTargetAnimation(hasSuccess);
-      }
-
+      // IMPORTANTE: Disparar refresh INMEDIATAMENTE después de ejecutar
+      // Así los datos se cargan mientras Hank sigue "trabajando" visualmente
       if (hasSuccess) {
-        console.warn('🔄 executeToolChain exitoso, incrementando refreshTrigger');
+        console.warn(
+          '🔄 executeToolChain exitoso, disparando refresh AHORA (mientras Hank trabaja)'
+        );
         setRefreshTrigger((prev) => prev + 1);
       }
+
+      // Asegurar mínimo 5 segundos en fase working (los datos se cargan en paralelo)
+      const elapsedInWorking = Date.now() - workingStartTime;
+      const remainingWorkingTime = Math.max(0, 5000 - elapsedInWorking);
+      if (remainingWorkingTime > 0) {
+        await new Promise((resolve) => setTimeout(resolve, remainingWorkingTime));
+      }
+
+      // Completar animación según resultado
+      completeTargetAnimation(hasSuccess);
+
+      // Esperar solo el tiempo mínimo para que la animación de éxito sea visible
+      await new Promise((resolve) => setTimeout(resolve, 900));
+
       return results;
     },
     [executeToolChainRaw, startTargetAnimation, completeTargetAnimation]
@@ -965,6 +1047,11 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
               console.warn('🔄 HANK: refreshTrigger ahora será:', prev + 1);
               return prev + 1;
             });
+          }
+
+          // Marcar que hubo tool calls para que el UI pueda cerrar el chat
+          if (results.length > 0) {
+            results[0].data = { ...(results[0].data || {}), hadToolCalls: true };
           }
 
           return results;

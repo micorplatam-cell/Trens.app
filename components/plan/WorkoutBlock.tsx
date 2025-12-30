@@ -26,6 +26,8 @@ import {
   Droplets,
   Dumbbell,
 } from 'lucide-react-native';
+import { useHankTarget } from '../../hooks/useHankTarget';
+import { HankInlineHighlight } from '../hank/HankInlineHighlight';
 
 // ============================================================================
 // TYPES
@@ -153,6 +155,13 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
   const preProgress = useSharedValue(0);
   const postProgress = useSharedValue(0);
 
+  // Hank Target - Registrar este bloque como target para animaciones
+  const { targetRef, onLayout, isHighlighted, animationPhase } = useHankTarget({
+    id: `workout-${data.id}`,
+    type: 'custom',
+    label: data.routineName,
+  });
+
   const preHeight = Math.max(data.preStack.length * 48 + 24, 80);
   const postHeight = Math.max(data.postStack.length * 48 + 24, 80);
 
@@ -246,7 +255,10 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
   const hasExercises = data.exercises && data.exercises.length > 0;
 
   return (
-    <View className="mb-6">
+    <View ref={targetRef} onLayout={onLayout} className="mb-6">
+      {/* Hank Inline Highlight - FUERA del contenedor */}
+      <HankInlineHighlight isActive={isHighlighted} phase={animationPhase} borderRadius={0} />
+
       <View className="bg-[#1a1a1a] border-y-2 border-red-500/50 shadow-lg">
         {/* Control Handle */}
         <View className="flex-row justify-between items-center bg-red-500/10 px-4 py-2 border-b border-white/5">

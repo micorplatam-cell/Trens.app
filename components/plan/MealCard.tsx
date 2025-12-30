@@ -9,6 +9,7 @@ import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanima
 import * as Haptics from 'expo-haptics';
 import { Clock, Plus, ChevronLeft, ChevronRight } from 'lucide-react-native';
 import { useHankTarget } from '../../hooks/useHankTarget';
+import { HankInlineHighlight } from '../hank/HankInlineHighlight';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_PADDING = 32; // padding horizontal del contenedor
@@ -90,7 +91,7 @@ export const MealCard: React.FC<MealCardProps> = ({
   const scaleAnim = useSharedValue(1);
 
   // Hank Target - Registrar esta tarjeta como target para animaciones
-  const { targetRef, onLayout, isHighlighted } = useHankTarget({
+  const { targetRef, onLayout, isHighlighted, animationPhase } = useHankTarget({
     id: `meal-${meal.id}`,
     type: 'meal',
     label: mealName,
@@ -250,20 +251,21 @@ export const MealCard: React.FC<MealCardProps> = ({
   // RENDER - ED HARDY STYLE
   // ============================================================================
   return (
-    <Animated.View style={animatedStyle} className="mb-6">
+    <Animated.View ref={targetRef} onLayout={onLayout} style={animatedStyle} className="mb-6">
+      {/* Hank Inline Highlight - DEBE estar fuera del View con overflow:hidden */}
+      <HankInlineHighlight isActive={isHighlighted} phase={animationPhase} borderRadius={12} />
+
       <View
-        ref={targetRef}
-        onLayout={onLayout}
         className="rounded-xl overflow-hidden"
         style={{
           backgroundColor: '#0a0a0a',
-          borderWidth: isHighlighted ? 2 : 1,
-          borderColor: isHighlighted ? '#F97316' : '#DC262640',
-          shadowColor: isHighlighted ? '#F97316' : '#DC2626',
+          borderWidth: 1,
+          borderColor: '#DC262640',
+          shadowColor: '#DC2626',
           shadowOffset: { width: 0, height: 0 },
-          shadowOpacity: isHighlighted ? 0.6 : 0.15,
-          shadowRadius: isHighlighted ? 20 : 10,
-          elevation: isHighlighted ? 10 : 5,
+          shadowOpacity: 0.15,
+          shadowRadius: 10,
+          elevation: 5,
         }}
       >
         {/* Header - ED HARDY FIRE GRADIENT */}

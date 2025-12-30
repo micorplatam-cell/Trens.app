@@ -51,7 +51,12 @@ import { supabase } from '../../lib/supabase';
 import { useSaveGuard } from '../../context/SaveGuardContext';
 import { calculateFabPositions } from '../../constants/floatingTools';
 import { HankTargetHighlight } from './HankTargetHighlight';
-import type { HankToolResult, HankToolCall, HankAnimationPhase, HankTarget } from '../../types/hank';
+import type {
+  HankToolResult,
+  HankToolCall,
+  HankAnimationPhase,
+  HankTarget,
+} from '../../types/hank';
 
 // ============================================================================
 // TYPES
@@ -110,6 +115,7 @@ const HankFAB: React.FC<{
   rightOffset: number;
   animationPhase: HankAnimationPhase;
   target: HankTarget | null;
+  voiceToastPosition?: { x: number; y: number } | null; // Posición del toast de voz
 }> = ({
   onPress,
   onLongPressStart,
@@ -120,6 +126,7 @@ const HankFAB: React.FC<{
   rightOffset,
   animationPhase,
   target,
+  voiceToastPosition,
 }) => {
   // Breathing animation
   const breathe = useSharedValue(0);
@@ -190,17 +197,51 @@ const HankFAB: React.FC<{
     }
   }, [isListening, pulse, pulseOpacity]);
 
-  // Flying animation - Hank travels to target
+  // Flying animation - Hank travels to target OR to voice toast position
   useEffect(() => {
-    if (animationPhase === 'flying' && target) {
-      // Calculate target position (center of target element)
-      const targetCenterX = target.position.x + target.position.width / 2 - 30; // 30 = FAB half width
-      const targetCenterY = target.position.y - 70; // Above the target
+    // Prioridad 1: Posición del toast de voz (cuando espera confirmación)
+    if (voiceToastPosition) {
+      // Volar a la esquina superior izquierda del toast
+      const toastX = voiceToastPosition.x - 30; // 30 = FAB half width
+      const toastY = voiceToastPosition.y - 30; // 30 = FAB half height
 
-      // Fly to target with spring animation
-      flyX.value = withSpring(targetCenterX - homeX, { damping: 15, stiffness: 80 });
-      flyY.value = withSpring(targetCenterY - homeY, { damping: 15, stiffness: 80 });
-      flyScale.value = withSpring(0.8, { damping: 12 });
+      flyX.value = withTiming(toastX - homeX, {
+        duration: 500,
+        easing: Easing.out(Easing.cubic),
+      });
+      flyY.value = withTiming(toastY - homeY, {
+        duration: 500,
+        easing: Easing.out(Easing.cubic),
+      });
+      flyScale.value = withTiming(0.85, { duration: 400, easing: Easing.out(Easing.ease) });
+
+      // Vibración al llegar
+      setTimeout(() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      }, 500);
+      return;
+    }
+
+    // Prioridad 2: Animación normal hacia target de herramienta
+    if (animationPhase === 'flying' && target) {
+      // El FAB va al CENTRO ARRIBA del target (donde está el badge "Ejecutando...")
+      const targetCenterX = target.position.x + target.position.width / 2 - 30; // 30 = FAB half width
+      const targetTopY = target.position.y - 60; // Encima del badge
+
+      flyX.value = withTiming(targetCenterX - homeX, {
+        duration: 600,
+        easing: Easing.out(Easing.cubic),
+      });
+      flyY.value = withTiming(targetTopY - homeY, {
+        duration: 600,
+        easing: Easing.out(Easing.cubic),
+      });
+      flyScale.value = withTiming(0.8, { duration: 400, easing: Easing.out(Easing.ease) });
+
+      // Vibración al llegar (después de 600ms)
+      setTimeout(() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+      }, 600);
     } else if (animationPhase === 'working') {
       // Start gear rotation
       gearRotation.value = withRepeat(
@@ -208,22 +249,31 @@ const HankFAB: React.FC<{
         -1,
         false
       );
+    } else if (animationPhase === 'success') {
+      // Vibración al terminar el trabajo
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } else if (animationPhase === 'returning' || animationPhase === 'idle') {
-      // Return to home position
-      flyX.value = withSpring(0, { damping: 15, stiffness: 100 });
-      flyY.value = withSpring(0, { damping: 15, stiffness: 100 });
+      // Return to home position - también en seco
+      flyX.value = withTiming(0, { duration: 500, easing: Easing.out(Easing.cubic) });
+      flyY.value = withTiming(0, { duration: 500, easing: Easing.out(Easing.cubic) });
       flyScale.value = withSpring(1, { damping: 12 });
       cancelAnimation(gearRotation);
       gearRotation.value = withTiming(0, { duration: 300 });
     }
-  }, [animationPhase, target, homeX, homeY, flyX, flyY, flyScale, gearRotation]);
+  }, [
+    animationPhase,
+    target,
+    homeX,
+    homeY,
+    flyX,
+    flyY,
+    flyScale,
+    gearRotation,
+    voiceToastPosition,
+  ]);
 
   const flyingStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: flyX.value },
-      { translateY: flyY.value },
-      { scale: flyScale.value },
-    ],
+    transform: [{ translateX: flyX.value }, { translateY: flyY.value }, { scale: flyScale.value }],
   }));
 
   const gearStyle = useAnimatedStyle(() => ({
@@ -280,12 +330,13 @@ const HankFAB: React.FC<{
   }, [onPress, onLongPressEnd]);
 
   // Determine if we're in a flying/working state
-  const isFlying = animationPhase === 'flying' || animationPhase === 'working' || animationPhase === 'returning';
+  const isFlying =
+    animationPhase === 'flying' || animationPhase === 'working' || animationPhase === 'returning';
   const isWorking = animationPhase === 'working';
   const isSuccess = animationPhase === 'success';
 
   return (
-    <Animated.View 
+    <Animated.View
       style={[
         { position: 'absolute', bottom: bottomOffset, right: rightOffset, zIndex: 1000 },
         flyingStyle,
@@ -335,11 +386,23 @@ const HankFAB: React.FC<{
             width: 60,
             height: 60,
             borderRadius: 30,
-            backgroundColor: isWorking ? '#F97316' : isSuccess ? '#22C55E' : isListening ? '#DC2626' : '#0a0505',
+            backgroundColor: isWorking
+              ? '#DC2626' // Rojo savage cuando trabaja
+              : isSuccess
+                ? '#22C55E'
+                : isListening
+                  ? '#DC2626'
+                  : '#0a0505',
             alignItems: 'center',
             justifyContent: 'center',
             // ED HARDY: Intense fire glow
-            shadowColor: isWorking ? '#F97316' : isSuccess ? '#22C55E' : isListening ? '#FF3B3B' : '#F97316',
+            shadowColor: isWorking
+              ? '#DC2626'
+              : isSuccess
+                ? '#22C55E'
+                : isListening
+                  ? '#FF3B3B'
+                  : '#F97316',
             shadowOffset: { width: 0, height: 0 },
             shadowOpacity: isWorking || isSuccess ? 1 : isListening ? 0.9 : 0.6,
             shadowRadius: isWorking || isSuccess ? 25 : isListening ? 20 : 15,
@@ -357,30 +420,33 @@ const HankFAB: React.FC<{
               height: 64,
               borderRadius: 32,
               borderWidth: isWorking ? 3 : isListening ? 3 : 2,
-              borderColor: isWorking ? '#FBBF24' : isListening ? '#FBBF24' : '#F97316',
+              borderColor: isWorking ? '#F97316' : isListening ? '#FBBF24' : '#F97316',
               borderStyle: 'solid',
-              borderTopColor: isWorking || isProcessing ? '#F97316' : isListening ? '#FBBF24' : '#F97316',
-              borderRightColor: isWorking || isProcessing ? 'transparent' : isListening ? '#F97316' : '#DC2626',
-              borderBottomColor: isWorking || isProcessing ? 'transparent' : isListening ? '#DC2626' : '#DC2626',
-              borderLeftColor: isWorking || isProcessing ? 'transparent' : isListening ? '#F97316' : '#F97316',
+              borderTopColor: isWorking
+                ? '#FBBF24'
+                : isProcessing
+                  ? '#F97316'
+                  : isListening
+                    ? '#FBBF24'
+                    : '#F97316',
+              borderRightColor:
+                isWorking || isProcessing ? 'transparent' : isListening ? '#F97316' : '#DC2626',
+              borderBottomColor:
+                isWorking || isProcessing ? 'transparent' : isListening ? '#DC2626' : '#DC2626',
+              borderLeftColor:
+                isWorking || isProcessing ? 'transparent' : isListening ? '#F97316' : '#F97316',
             },
-            isWorking ? gearStyle : borderStyle,
+            borderStyle,
           ]}
         />
 
-        {/* Icon - ED HARDY COLORS with Working Gear */}
-        {isWorking ? (
-          <Animated.View style={gearStyle}>
-            <Settings2 size={28} color="#FFFFFF" strokeWidth={2.5} />
-          </Animated.View>
-        ) : isSuccess ? (
-          <View style={{ width: 14, height: 20, borderRightWidth: 4, borderBottomWidth: 4, borderColor: '#fff', transform: [{ rotate: '45deg' }, { translateY: -2 }] }} />
-        ) : isListening ? (
+        {/* Icon - ED HARDY COLORS - FAB siempre muestra Bot */}
+        {isListening ? (
           <Mic size={28} color="#FFFFFF" />
         ) : isProcessing ? (
           <Sparkles size={28} color="#F97316" />
         ) : (
-          <Bot size={28} color="#F97316" />
+          <Bot size={28} color={isWorking || isSuccess ? '#FFFFFF' : '#F97316'} />
         )}
       </AnimatedPressable>
     </Animated.View>
@@ -523,6 +589,194 @@ const ThinkingIndicator: React.FC = () => {
         />
       </View>
     </View>
+  );
+};
+
+// ============================================================================
+// VOICE CONFIRMATION TOAST - Notificación flotante para comandos de voz
+// Brota desde donde está Hank (esquina superior izquierda del toast)
+// ============================================================================
+interface VoiceToastProps {
+  visible: boolean;
+  type: 'confirm' | 'success' | 'error' | 'processing';
+  message: string;
+  actionDescription?: string;
+  onConfirm?: () => void;
+  onCancel?: () => void;
+  delayAppear?: boolean; // Si debe esperar a que Hank llegue
+}
+
+// Posición del toast en el centro de la pantalla (usa SCREEN_HEIGHT de línea 86)
+const VOICE_TOAST_POSITION = { x: 40, y: Math.round(SCREEN_HEIGHT / 2 - 60) }; // Centro vertical
+
+const VoiceConfirmationToast: React.FC<VoiceToastProps> = ({
+  visible,
+  type,
+  message,
+  actionDescription,
+  onConfirm,
+  onCancel,
+  delayAppear = false,
+}) => {
+  const scale = useSharedValue(0);
+  const opacity = useSharedValue(0);
+  const [shouldRender, setShouldRender] = React.useState(false);
+  const hasAppeared = React.useRef(false);
+
+  useEffect(() => {
+    if (visible && !hasAppeared.current) {
+      hasAppeared.current = true;
+      setShouldRender(true);
+
+      // Si delayAppear, esperar a que Hank llegue (500ms) antes de aparecer
+      const delay = delayAppear ? 550 : 0;
+
+      setTimeout(() => {
+        // Animación de brotar desde la esquina (donde está Hank)
+        scale.value = withSpring(1, { damping: 12, stiffness: 100 });
+        opacity.value = withTiming(1, { duration: 200 });
+      }, delay);
+    } else if (!visible && hasAppeared.current) {
+      hasAppeared.current = false;
+      // Desaparecer
+      scale.value = withTiming(0, { duration: 150 });
+      opacity.value = withTiming(0, { duration: 150 });
+      setTimeout(() => setShouldRender(false), 200);
+    }
+  }, [visible, scale, opacity, delayAppear]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+    opacity: opacity.value,
+    // Punto de origen en la esquina superior izquierda (donde está Hank)
+    transformOrigin: 'top left',
+  }));
+
+  // Solo renderizar para tipo 'confirm'
+  if (!shouldRender || type !== 'confirm') return null;
+
+  const getBorderColor = () => {
+    // Solo tipo 'confirm' llega aquí (ya filtramos arriba)
+    return '#F97316';
+  };
+
+  const getIcon = () => {
+    // Solo tipo 'confirm' llega aquí (ya filtramos arriba)
+    return <Mic size={24} color="#F97316" />;
+  };
+
+  return (
+    <Animated.View
+      style={[
+        {
+          position: 'absolute',
+          top: VOICE_TOAST_POSITION.y,
+          left: 40, // Centrado con margen igual
+          right: 40,
+          zIndex: 9999,
+          backgroundColor: '#0a0505',
+          borderRadius: 12,
+          borderWidth: 2,
+          borderColor: getBorderColor(),
+          padding: 12,
+          shadowColor: getBorderColor(),
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.4,
+          shadowRadius: 12,
+          elevation: 10,
+        },
+        animatedStyle,
+      ]}
+    >
+      {/* Header con icono y mensaje */}
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          marginBottom: actionDescription ? 8 : 0,
+        }}
+      >
+        <View
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: 16,
+            backgroundColor: `${getBorderColor()}20`,
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginRight: 10,
+          }}
+        >
+          {getIcon()}
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text
+            style={{ color: '#71717a', fontSize: 10, fontFamily: 'monospace', marginBottom: 1 }}
+          >
+            🎤 VOZ
+          </Text>
+          <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '600' }}>{message}</Text>
+        </View>
+      </View>
+
+      {/* Descripción de la acción */}
+      {actionDescription && (
+        <View
+          style={{
+            backgroundColor: '#1a1a1a',
+            borderRadius: 6,
+            padding: 8,
+            marginBottom: 10,
+            borderLeftWidth: 2,
+            borderLeftColor: getBorderColor(),
+          }}
+        >
+          <Text style={{ color: '#FFFFFF', fontSize: 12, fontFamily: 'monospace' }}>
+            {actionDescription}
+          </Text>
+        </View>
+      )}
+
+      {/* Botones de confirmación */}
+      {type === 'confirm' && onConfirm && onCancel && (
+        <View style={{ flexDirection: 'row', gap: 10 }}>
+          <TouchableOpacity
+            onPress={onCancel}
+            style={{
+              flex: 1,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              paddingVertical: 8,
+              backgroundColor: '#27272a',
+              borderRadius: 6,
+            }}
+          >
+            <X size={16} color="#EF4444" />
+            <Text style={{ color: '#EF4444', fontWeight: 'bold', fontSize: 12, marginLeft: 4 }}>
+              NO
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={onConfirm}
+            style={{
+              flex: 1,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              paddingVertical: 8,
+              backgroundColor: '#DC2626',
+              borderRadius: 6,
+            }}
+          >
+            <Check size={16} color="#FFFFFF" />
+            <Text style={{ color: '#FFFFFF', fontWeight: 'bold', fontSize: 12, marginLeft: 4 }}>
+              SÍ
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </Animated.View>
   );
 };
 
@@ -901,6 +1155,21 @@ export const HankOverlay: React.FC = () => {
   const messagesInitialized = useRef(false);
   const takeoverResultRef = useRef<HankToolResult[] | null>(null);
 
+  // Estado del Toast de voz
+  const [voiceToast, setVoiceToast] = useState<{
+    visible: boolean;
+    type: 'confirm' | 'success' | 'error' | 'processing';
+    message: string;
+    actionDescription?: string;
+    delayAppear?: boolean;
+  }>({
+    visible: false,
+    type: 'confirm',
+    message: '',
+    actionDescription: undefined,
+    delayAppear: false,
+  });
+
   const flatListRef = useRef<FlatList>(null);
 
   // Ocultar en Feed
@@ -1133,16 +1402,20 @@ export const HankOverlay: React.FC = () => {
       timestamp: new Date(),
     };
 
+    const messageText = inputText.trim();
     setMessages((prev) => [...prev, userMessage]);
     setInputText('');
 
-    // Scroll to bottom
-    setTimeout(() => {
-      flatListRef.current?.scrollToEnd({ animated: true });
-    }, 100);
+    // Cerrar el chat ANTES de ejecutar para ver la animación
+    setIsOpen(false);
 
     // Execute command
-    const results = await executeCommand(userMessage.content);
+    const results = await executeCommand(messageText);
+
+    // Verificar si hubo tool calls para decidir si reabrir chat
+    const hadToolCalls = results.some(
+      (r) => (r.data as { hadToolCalls?: boolean })?.hadToolCalls === true
+    );
 
     // Verificar si debe limpiar la UI del chat
     if (checkAndClearUIChat(results)) {
@@ -1168,10 +1441,23 @@ export const HankOverlay: React.FC = () => {
 
     setMessages((prev) => [...prev, hankMessage]);
 
-    // Scroll to bottom
-    setTimeout(() => {
-      flatListRef.current?.scrollToEnd({ animated: true });
-    }, 100);
+    // Si hubo tool calls, reabrir el chat después de la animación
+    // Si no hubo tool calls (solo conversación), reabrir inmediatamente
+    if (hadToolCalls) {
+      // Esperar que termine la animación completa antes de reabrir
+      setTimeout(() => {
+        setIsOpen(true);
+        setTimeout(() => {
+          flatListRef.current?.scrollToEnd({ animated: true });
+        }, 100);
+      }, 4500); // flying(800) + working(3000) + success(400) + returning(600) = 4800ms
+    } else {
+      // Solo conversación, reabrir inmediatamente
+      setIsOpen(true);
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    }
   };
 
   const handleMicPress = async () => {
@@ -1270,11 +1556,18 @@ export const HankOverlay: React.FC = () => {
     const transcription = await stopRecording();
 
     if (transcription) {
-      // Abrir el chat y mostrar indicador de procesamiento
-      setIsOpen(true);
+      // NO abrir el chat - usar toast flotante
       setIsLongPressProcessing(true);
 
-      // Agregar mensaje del usuario
+      // Mostrar toast de procesamiento
+      setVoiceToast({
+        visible: true,
+        type: 'processing',
+        message: `"${transcription}"`,
+        actionDescription: undefined,
+      });
+
+      // Agregar mensaje del usuario al historial (SÍ se guarda)
       const userMessage: ChatMessage = {
         id: Date.now().toString(),
         role: 'user',
@@ -1316,35 +1609,28 @@ export const HankOverlay: React.FC = () => {
         if (result.toolCalls && result.toolCalls.length > 0) {
           // Separar herramientas de lectura (ejecutar directo) de escritura (pedir confirmación)
           const readOnlyTools = [
-            // GYM
             'GYM_GET_TODAY_ROUTINE',
             'GYM_LIST_EXERCISES',
-            // ASSET
             'ASSET_READ',
             'ASSET_GET_SCHEMA',
-            // ADN
             'ADN_GET_PROFILE',
             'ADN_GET_RECORDS',
-            // PLAN - Tools de lectura
             'PLAN_GET_MEALS',
             'PLAN_GET_MEAL_DETAILS',
             'PLAN_GET_NEXT_MEAL',
             'PLAN_GET_STACK',
             'PLAN_ANALYZE_NUTRITION',
-            'PLAN_CALCULATE_MACROS', // Solo lee y calcula, no modifica
-            // SPOTIFY - Tools de lectura
+            'PLAN_CALCULATE_MACROS',
             'SPOTIFY_GET_CURRENT_TRACK',
-            // Contexto OMNISCIENTE
             'GET_USER_CONTEXT',
             'GET_FULL_USER_CONTEXT',
-            // Sistema - Ejecutar sin confirmación
             'HANK_CLEAR_HISTORY',
           ];
 
           const writeToolCalls = result.toolCalls.filter((tc) => !readOnlyTools.includes(tc.tool));
           const readToolCalls = result.toolCalls.filter((tc) => readOnlyTools.includes(tc.tool));
 
-          // Ejecutar herramientas de lectura directamente y capturar resultados
+          // Ejecutar herramientas de lectura directamente
           let readResults: HankToolResult[] = [];
           if (readToolCalls.length > 0) {
             console.log('✅ Ejecutando herramientas de lectura sin confirmación...');
@@ -1359,10 +1645,11 @@ export const HankOverlay: React.FC = () => {
           // Verificar si algún resultado tiene flag de limpiar UI
           if (checkAndClearUIChat(readResults)) {
             setIsLongPressProcessing(false);
-            return; // Ya se limpió, no agregar más mensajes
+            setVoiceToast({ visible: false, type: 'confirm', message: '' });
+            return;
           }
 
-          // Si hay herramientas de escritura, pedir confirmación
+          // Si hay herramientas de escritura, mostrar TOAST de confirmación
           if (writeToolCalls.length > 0) {
             const actionDescription = writeToolCalls
               .map((tc) => {
@@ -1374,65 +1661,38 @@ export const HankOverlay: React.FC = () => {
                   case 'GYM_REMOVE_EXERCISE':
                     return `Quitar ${tc.parameters.exerciseName}`;
                   case 'ASSET_ADD_SERIES':
-                    return `Agregar serie de ${tc.parameters.reps || 10} reps × ${tc.parameters.weight || 0}kg`;
+                    return `Agregar serie: ${tc.parameters.reps || 10} reps × ${tc.parameters.weight || 0}kg`;
                   case 'ASSET_REMOVE_SERIES':
                     return `Quitar serie`;
                   case 'ASSET_REPLACE_SERIES':
-                    return `Reemplazar serie por ${tc.parameters.reps || 10} reps × ${tc.parameters.weight || 0}kg`;
+                    return `Reemplazar serie: ${tc.parameters.reps || 10} reps × ${tc.parameters.weight || 0}kg`;
                   case 'ASSET_UPDATE_FIELD':
                     return `Modificar ${tc.parameters.fieldPath}`;
                   case 'ASSET_SET_SERIES':
-                    return `Configurar todas las series`;
-                  // ADN Tools
+                    return `Configurar series`;
                   case 'ADN_UPDATE_PROFILE':
                     return `Actualizar ${tc.parameters.field}: ${tc.parameters.value}`;
                   case 'ADN_ADD_MEASUREMENT':
                     return `Agregar medida: ${tc.parameters.name} = ${tc.parameters.value}`;
                   case 'ADN_REMOVE_MEASUREMENT':
                     return `Eliminar medida: ${tc.parameters.measurementName}`;
-                  // PLAN Tools
                   case 'PLAN_ADD_SUPPLEMENT':
-                    return `Agregar suplemento: ${tc.parameters.name} (${tc.parameters.dose})`;
+                    return `Agregar suplemento: ${tc.parameters.name}`;
                   case 'PLAN_REMOVE_SUPPLEMENT':
                     return `Eliminar suplemento: ${tc.parameters.name}`;
-                  case 'PLAN_UPDATE_SUPPLEMENT_TIME': {
-                    // Convertir formato 24h a AM/PM
-                    const time24s = tc.parameters.newTime as string;
-                    const [hoursS, minsS] = time24s.split(':').map(Number);
-                    const periodS = hoursS >= 12 ? 'PM' : 'AM';
-                    const hours12S = hoursS % 12 || 12;
-                    const timeFormattedS = `${hours12S}:${minsS.toString().padStart(2, '0')} ${periodS}`;
-                    return `Cambiar hora de ${tc.parameters.name} a ${timeFormattedS}`;
-                  }
                   case 'PLAN_ADD_MEAL':
                     return `Agregar comida a las ${tc.parameters.time}`;
                   case 'PLAN_EDIT_MEAL':
                     return `Editar comida`;
                   case 'PLAN_DELETE_MEAL':
                     return `Eliminar comida`;
-                  case 'PLAN_UPDATE_MEAL_TIME': {
-                    // Convertir formato 24h a AM/PM
-                    const time24 = tc.parameters.newTime as string;
-                    const [hours, mins] = time24.split(':').map(Number);
-                    const period = hours >= 12 ? 'PM' : 'AM';
-                    const hours12 = hours % 12 || 12;
-                    const timeFormatted = `${hours12}:${mins.toString().padStart(2, '0')} ${period}`;
-                    // Determinar nombre de comida por position
-                    let mealLabel = 'comida';
-                    const pos = tc.parameters.position as string;
-                    if (pos === 'first') mealLabel = 'desayuno';
-                    else if (pos === 'last') mealLabel = 'cena';
-                    else if (pos === '2' || pos === 'second') mealLabel = 'almuerzo';
-                    return `Cambiar hora de ${mealLabel} a ${timeFormatted}`;
-                  }
-                  case 'PLAN_CALCULATE_MACROS':
-                    return `Calcular macros de la comida`;
                   default:
-                    return tc.tool;
+                    return tc.tool.replace(/_/g, ' ');
                 }
               })
               .join('\n• ');
 
+            // Guardar mensaje de confirmación en el historial
             const confirmMessage: ChatMessage = {
               id: `confirm-${Date.now()}`,
               role: 'hank',
@@ -1441,8 +1701,17 @@ export const HankOverlay: React.FC = () => {
               pendingConfirmation: true,
               pendingToolCalls: writeToolCalls,
             };
-
             setMessages((prev) => [...prev, confirmMessage]);
+
+            // Mostrar TOAST de confirmación con delay para que Hank llegue primero
+            setVoiceToast({
+              visible: true,
+              type: 'confirm',
+              message: '¿Ejecutar este comando?',
+              actionDescription: `• ${actionDescription}`,
+              delayAppear: true, // Esperar a que Hank llegue
+            });
+
             setPendingExecution({
               text: transcription,
               toolCalls: writeToolCalls,
@@ -1450,11 +1719,10 @@ export const HankOverlay: React.FC = () => {
 
             // Vibración de alerta
             await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+            setIsLongPressProcessing(false);
           } else if (readResults.length > 0) {
-            // Solo había herramientas de lectura - mostrar resultado directamente
-            // 🔧 FIX: Usar resultado directo sin llamar a Gemini de nuevo (evita "Ejecutando...")
+            // Solo herramientas de lectura - mostrar toast de éxito y abrir chat
             const finalMessage = readResults.map((r) => r.message).join('\n\n');
-
             const hankMessage: ChatMessage = {
               id: `hank-${Date.now()}`,
               role: 'hank',
@@ -1463,8 +1731,20 @@ export const HankOverlay: React.FC = () => {
             };
             setMessages((prev) => [...prev, hankMessage]);
             await saveMessageToSupabase('model', finalMessage);
+
+            // Mostrar toast de éxito brevemente y luego abrir chat
+            setVoiceToast({
+              visible: true,
+              type: 'success',
+              message: 'Información obtenida',
+            });
+            setTimeout(() => {
+              setVoiceToast({ visible: false, type: 'confirm', message: '' });
+              setIsOpen(true);
+            }, 1500);
+            setIsLongPressProcessing(false);
           } else {
-            // Mostrar respuesta de Gemini si no hubo resultados de herramientas
+            // Sin resultados - mostrar respuesta de Gemini
             const hankMessage: ChatMessage = {
               id: `hank-${Date.now()}`,
               role: 'hank',
@@ -1473,9 +1753,19 @@ export const HankOverlay: React.FC = () => {
             };
             setMessages((prev) => [...prev, hankMessage]);
             await saveMessageToSupabase('model', result.message || 'Información obtenida.');
+
+            setVoiceToast({
+              visible: true,
+              type: 'success',
+              message: result.message?.substring(0, 50) || 'Listo',
+            });
+            setTimeout(() => {
+              setVoiceToast({ visible: false, type: 'confirm', message: '' });
+            }, 2000);
+            setIsLongPressProcessing(false);
           }
         } else {
-          // Es solo una pregunta, mostrar respuesta directamente
+          // Es solo una pregunta conversacional - guardar y mostrar toast
           const hankMessage: ChatMessage = {
             id: `hank-${Date.now()}`,
             role: 'hank',
@@ -1484,6 +1774,18 @@ export const HankOverlay: React.FC = () => {
           };
           setMessages((prev) => [...prev, hankMessage]);
           await saveMessageToSupabase('model', result.message || 'No entendí tu comando.');
+
+          // Mostrar toast con respuesta breve y abrir chat después
+          setVoiceToast({
+            visible: true,
+            type: 'success',
+            message: result.message?.substring(0, 60) || 'Respuesta recibida',
+          });
+          setTimeout(() => {
+            setVoiceToast({ visible: false, type: 'confirm', message: '' });
+            setIsOpen(true);
+          }, 2000);
+          setIsLongPressProcessing(false);
         }
       } catch (error) {
         console.error('Error analizando comando:', error);
@@ -1495,14 +1797,17 @@ export const HankOverlay: React.FC = () => {
         };
         setMessages((prev) => [...prev, errorMessage]);
         await saveMessageToSupabase('model', '❌ Error al procesar tu comando.');
-      } finally {
-        // Siempre apagar el indicador de procesamiento
+
+        setVoiceToast({
+          visible: true,
+          type: 'error',
+          message: 'Error al procesar comando',
+        });
+        setTimeout(() => {
+          setVoiceToast({ visible: false, type: 'confirm', message: '' });
+        }, 3000);
         setIsLongPressProcessing(false);
       }
-
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
     }
   }, [
     stopRecording,
@@ -1516,7 +1821,74 @@ export const HankOverlay: React.FC = () => {
     saveMessageToSupabase,
   ]);
 
-  // Confirmar ejecución pendiente - CON EFECTO HANK TAKEOVER
+  // Handler para confirmar desde el toast de voz
+  const handleVoiceConfirm = useCallback(async () => {
+    if (!pendingExecution) return;
+
+    console.log('✅ Ejecutando acciones confirmadas desde toast...');
+
+    // Vibración de confirmación
+    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+    // Cerrar el toast - Hank irá directo al target
+    setVoiceToast({ visible: false, type: 'confirm', message: '' });
+
+    // EJECUTAR LAS HERRAMIENTAS (Hank volará directo al target)
+    const results: HankToolResult[] = [];
+    for (let i = 0; i < pendingExecution.toolCalls.length; i++) {
+      const toolCall = pendingExecution.toolCalls[i];
+      const result = await executeTool(toolCall);
+      results.push(result);
+    }
+
+    // Guardar en historial
+    const successCount = results.filter((r) => r.success).length;
+    const resultMessage =
+      successCount === results.length
+        ? `✅ ${successCount} acción(es) ejecutada(s) correctamente`
+        : `⚠️ ${successCount}/${results.length} acciones completadas`;
+
+    const hankMessage: ChatMessage = {
+      id: `result-${Date.now()}`,
+      role: 'hank',
+      content: resultMessage + '\n\n' + results.map((r) => r.message).join('\n'),
+      timestamp: new Date(),
+    };
+    setMessages((prev) => [...prev, hankMessage]);
+    await saveMessageToSupabase('model', resultMessage);
+
+    // Vibración de éxito (el badge de éxito se muestra en HankTargetHighlight)
+    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+    // Limpiar ejecución pendiente
+    setPendingExecution(null);
+  }, [pendingExecution, executeTool, saveMessageToSupabase]);
+
+  // Handler para cancelar desde el toast de voz
+  const handleVoiceCancel = useCallback(async () => {
+    console.log('❌ Comando cancelado desde toast');
+
+    // Cerrar el toast para que Hank regrese a casa
+    setVoiceToast({ visible: false, type: 'confirm', message: '' });
+
+    // Vibración de cancelación
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+    // Guardar en historial
+    const cancelMessage: ChatMessage = {
+      id: `cancel-${Date.now()}`,
+      role: 'hank',
+      content: '❌ Comando cancelado',
+      timestamp: new Date(),
+    };
+    setMessages((prev) => [...prev, cancelMessage]);
+    await saveMessageToSupabase('model', '❌ Comando cancelado');
+
+    // Limpiar ejecución pendiente
+    setPendingExecution(null);
+  }, [saveMessageToSupabase]);
+
+  // Confirmar ejecución pendiente - USA ANIMACIÓN DE VUELO (no Takeover)
   const handleConfirmExecution = useCallback(async () => {
     if (!pendingExecution) return;
 
@@ -1525,46 +1897,33 @@ export const HankOverlay: React.FC = () => {
     // Vibración de confirmación
     await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-    // 1. CERRAR EL CHAT
+    // CERRAR EL CHAT para ver la animación de vuelo
     setIsOpen(false);
 
-    // 2. ACTIVAR TAKEOVER MODE
-    setTakeoverStatus('Aplicando cambios...');
-    setIsTakeover(true);
-
-    // Vibración fuerte para indicar takeover
+    // Vibración fuerte para indicar inicio
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
 
-    // 3. EJECUTAR LAS HERRAMIENTAS
+    // Pequeña pausa para que el chat se cierre y se vea el FAB
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    // EJECUTAR LAS HERRAMIENTAS (la animación y delay ya están dentro de executeTool)
     const results: HankToolResult[] = [];
     for (let i = 0; i < pendingExecution.toolCalls.length; i++) {
       const toolCall = pendingExecution.toolCalls[i];
-      setTakeoverStatus(`Ejecutando ${i + 1}/${pendingExecution.toolCalls.length}...`);
       const result = await executeTool(toolCall);
       results.push(result);
-      // Pequeña pausa para efecto visual
-      await new Promise((resolve) => setTimeout(resolve, 300));
     }
 
     // Guardar resultados para después
     takeoverResultRef.current = results;
 
-    // Mostrar mensaje de éxito
-    setTakeoverStatus(results.every((r) => r.success) ? '¡Cambios aplicados!' : 'Completado');
-
     // Vibración de éxito
     await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-    // 4. ESPERAR UN MOMENTO PARA EL EFECTO
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-
-    // 5. DESACTIVAR TAKEOVER Y ABRIR CHAT
-    setIsTakeover(false);
-
     // Pequeña pausa antes de abrir el chat
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await new Promise((resolve) => setTimeout(resolve, 300));
 
-    // 6. ABRIR EL CHAT Y MOSTRAR RESULTADO
+    // ABRIR EL CHAT Y MOSTRAR RESULTADO
     setIsOpen(true);
 
     // Verificar si debe limpiar la UI del chat
@@ -1632,6 +1991,17 @@ export const HankOverlay: React.FC = () => {
       {/* HANK TAKEOVER - Efecto fullscreen cuando ejecuta cambios */}
       <HankTakeover isActive={isTakeover} statusText={takeoverStatus} />
 
+      {/* Voice Confirmation Toast - Notificación flotante para comandos de voz */}
+      <VoiceConfirmationToast
+        visible={voiceToast.visible}
+        type={voiceToast.type}
+        message={voiceToast.message}
+        actionDescription={voiceToast.actionDescription}
+        onConfirm={handleVoiceConfirm}
+        onCancel={handleVoiceCancel}
+        delayAppear={voiceToast.delayAppear}
+      />
+
       {/* FAB Button - Always visible (oculto durante takeover) */}
       {!isTakeover && (
         <HankFAB
@@ -1644,6 +2014,9 @@ export const HankOverlay: React.FC = () => {
           rightOffset={calculateFabPositions(insets.bottom).right}
           animationPhase={targetState.animationPhase}
           target={targetState.currentTarget}
+          voiceToastPosition={
+            voiceToast.visible && voiceToast.type === 'confirm' ? VOICE_TOAST_POSITION : null
+          }
         />
       )}
 
