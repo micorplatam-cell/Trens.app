@@ -10,14 +10,50 @@
   "customizations": {
     "vscode": {
       "extensions": [
+        // =====================================================
+        // 🤖 AI & Copilot - Asistencia IA
+        // =====================================================
         "GitHub.copilot",
         "GitHub.copilot-chat",
+
+        // =====================================================
+        // 📝 Code Quality - Calidad de código
+        // =====================================================
         "dbaeumer.vscode-eslint",
         "esbenp.prettier-vscode",
+
+        // =====================================================
+        // 🎨 Frontend - React Native & Tailwind
+        // =====================================================
         "bradlc.vscode-tailwindcss",
         "expo.vscode-expo-tools",
         "formulahendry.auto-rename-tag",
-        "mikestead.dotenv"
+        "dsznajder.es7-react-js-snippets",
+
+        // =====================================================
+        // 🗄️ Database - Supabase & SQL
+        // =====================================================
+        "cweijan.vscode-database-client2",
+        "cweijan.dbclient-jdbc",
+        "supabase.vscode-supabase-extension",
+        "mtxr.sqltools",
+
+        // =====================================================
+        // 🌐 API Testing - HTTP Client
+        // =====================================================
+        "humao.rest-client",
+
+        // =====================================================
+        // 🔧 Utilities - Herramientas generales
+        // =====================================================
+        "mikestead.dotenv",
+        "christian-kohler.path-intellisense",
+        "usernamehw.errorlens",
+        "eamodio.gitlens",
+        "gruntfuggly.todo-tree",
+        "wayou.vscode-todo-highlight",
+        "pkief.material-icon-theme",
+        "aaron-bond.better-comments"
       ],
       "settings": {
         "editor.formatOnSave": true,
@@ -26,7 +62,13 @@
           "source.fixAll.eslint": "explicit"
         },
         "typescript.preferences.importModuleSpecifier": "relative",
-        "terminal.integrated.defaultProfile.linux": "bash"
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "editor.bracketPairColorization.enabled": true,
+        "editor.guides.bracketPairs": true,
+        "editor.minimap.enabled": false,
+        "workbench.iconTheme": "material-icon-theme",
+        "errorLens.enabledDiagnosticLevels": ["error", "warning"],
+        "git.autofetch": true
       }
     }
   },
