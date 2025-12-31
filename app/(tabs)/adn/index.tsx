@@ -43,6 +43,7 @@ import TrensID from '../../../components/adn/TrensID';
 import RecordCard from '../../../components/adn/RecordCard';
 import SelectRecordVideoModal from '../../../components/adn/SelectRecordVideoModal';
 import { SportSwitcher } from '../../../components/adn/SportSwitcher';
+import { TodayCards } from '../../../components/adn/TodayCards';
 import { ProUpgradeModal } from '../../../components/pro/ProUpgradeModal';
 import { ShareModal } from '../../../components/share/ShareModal';
 
@@ -815,8 +816,15 @@ export default function AdnScreen() {
           </View>
         </View>
 
+        {/* TODAY CARDS - Entrenamiento y Próxima Comida/Stack */}
+        {isOwner && user && (
+          <View className="-mt-6">
+            <TodayCards userId={user.id} />
+          </View>
+        )}
+
         {/* TRENS ID (Solo visible para el dueño) */}
-        <View className="px-4 -mt-10">
+        <View className="px-4 -mt-4">
           {isOwner && (
             <TrensID
               userId={user?.id || 'guest'}

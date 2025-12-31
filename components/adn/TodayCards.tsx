@@ -1,0 +1,654 @@
+import React, { useState, useCallback } from 'react';
+import { View, Text, ActivityIndicator, ScrollView, Pressable } from 'react-native';
+import { Image } from 'expo-image';
+import { VideoView, useVideoPlayer } from 'expo-video';
+import {
+  Dumbbell,
+  Utensils,
+  Pill,
+  Clock,
+  ChevronRight,
+  Flame,
+  Zap,
+  Syringe,
+  FlaskConical,
+  Droplets,
+} from 'lucide-react-native';
+import { router, useFocusEffect } from 'expo-router';
+import * as Haptics from 'expo-haptics';
+import { supabase } from '../../lib/supabase';
+
+// ============================================================================
+// TYPES
+// ============================================================================
+interface Exercise {
+  id: string;
+  name: string;
+  imageUrl?: string;
+  videoUrl?: string;
+}
+
+interface TodayWorkout {
+  routineName: string;
+  exercises: Exercise[];
+  isRestDay: boolean;
+}
+
+interface MealItem {
+  id: string;
+  name: string;
+  time: string;
+  timeUntil: string;
+  minutesUntil: number;
+  ingredients: string[];
+}
+
+interface StackItemData {
+  id: string;
+  name: string;
+  dose: string;
+  time: string;
+  timeUntil: string;
+  minutesUntil: number;
+  type: 'pill' | 'syringe' | 'powder' | 'liquid';
+}
+
+interface TodayCardsProps {
+  userId: string;
+}
+
+// ============================================================================
+// HELPERS - Misma lógica de PLAN para calcular tiempos
+// ============================================================================
+const getCurrentMinutes = (): number => {
+  const now = new Date();
+  return now.getHours() * 60 + now.getMinutes();
+};
+
+const parseTimeToMinutes = (time: string): number => {
+  if (!time) return 0;
+  const [hours, minutes] = time.split(':').map(Number);
+  return (hours || 0) * 60 + (minutes || 0);
+};
+
+const formatTimeUntil = (targetMinutes: number, currentMinutes: number): string => {
+  const diff = targetMinutes - currentMinutes;
+
+  if (diff >= -30 && diff <= 0) return 'AHORA';
+  if (diff < -30) {
+    const absDiff = Math.abs(diff);
+    const hours = Math.floor(absDiff / 60);
+    const mins = absDiff % 60;
+    if (hours > 0) return `hace ${hours}h ${mins}m`;
+    return `hace ${mins}m`;
+  }
+
+  const hours = Math.floor(diff / 60);
+  const mins = diff % 60;
+  if (hours > 0 && mins > 0) return `en ${hours}h ${mins}m`;
+  if (hours > 0) return `en ${hours}h`;
+  return `en ${mins}m`;
+};
+
+const formatTime12h = (time24: string): string => {
+  if (!time24) return '';
+  const [hours, minutes] = time24.split(':').map(Number);
+  const period = hours >= 12 ? 'PM' : 'AM';
+  const hours12 = hours % 12 || 12;
+  return `${hours12}:${(minutes || 0).toString().padStart(2, '0')} ${period}`;
+};
+
+const getStackTypeIcon = (type: string) => {
+  const iconProps = { size: 12, color: '#A855F7' };
+  switch (type) {
+    case 'pill':
+      return <Pill {...iconProps} />;
+    case 'syringe':
+      return <Syringe {...iconProps} />;
+    case 'liquid':
+      return <Droplets {...iconProps} />;
+    case 'powder':
+      return <FlaskConical {...iconProps} />;
+    default:
+      return <Pill {...iconProps} />;
+  }
+};
+
+// ============================================================================
+// EXERCISE MINI CARD - Thumbnail del ejercicio
+// ============================================================================
+interface ExerciseMiniCardProps {
+  exercise: Exercise;
+}
+
+const ExerciseMiniCard: React.FC<ExerciseMiniCardProps> = ({ exercise }) => {
+  // Video player para mostrar primer frame
+  const videoPlayer = useVideoPlayer(exercise.videoUrl || null, (player) => {
+    player.loop = false;
+    player.muted = true;
+    player.pause();
+  });
+
+  return (
+    <View className="mr-2 items-center">
+      <View
+        className="w-14 h-14 rounded-lg items-center justify-center overflow-hidden"
+        style={{
+          backgroundColor: '#1a0505',
+          borderWidth: 1,
+          borderColor: '#DC262640',
+        }}
+      >
+        {exercise.imageUrl ? (
+          <Image source={{ uri: exercise.imageUrl }} className="w-full h-full" contentFit="cover" />
+        ) : exercise.videoUrl ? (
+          <VideoView
+            player={videoPlayer}
+            style={{ width: 56, height: 56 }}
+            contentFit="cover"
+            nativeControls={false}
+          />
+        ) : (
+          <Dumbbell size={20} color="#DC2626" />
+        )}
+      </View>
+      <Text className="text-zinc-500 text-[8px] text-center mt-1 w-14" numberOfLines={1}>
+        {exercise.name}
+      </Text>
+    </View>
+  );
+};
+
+// ============================================================================
+// MAIN COMPONENT
+// ============================================================================
+export const TodayCards: React.FC<TodayCardsProps> = ({ userId }) => {
+  const [loading, setLoading] = useState(true);
+  const [workout, setWorkout] = useState<TodayWorkout | null>(null);
+  const [nextMeal, setNextMeal] = useState<MealItem | null>(null);
+  const [nextStack, setNextStack] = useState<StackItemData | null>(null);
+
+  // -------------------------------------------------------------------------
+  // FETCH DATA - Usando lógica de PLAN para calcular próximos items
+  // -------------------------------------------------------------------------
+  const fetchTodayData = useCallback(async () => {
+    if (!userId) {
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const currentMinutes = getCurrentMinutes();
+      const today = new Date().getDay();
+
+      // =====================================================================
+      // 1. FETCH WORKOUT DATA
+      // =====================================================================
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('training_current_day, training_routine_names, training_frequency')
+        .eq('id', userId)
+        .single();
+
+      const currentTrainingDay = profileData?.training_current_day ?? 0;
+      const routineNames = profileData?.training_routine_names || {};
+      const routineName = routineNames[String(currentTrainingDay)] || 'ENTRENAMIENTO';
+
+      // Fetch ejercicios del día actual con su media
+      const { data: exerciseConfigs } = await supabase
+        .from('user_exercise_config')
+        .select(
+          `
+          id,
+          training_days,
+          custom_media_url,
+          exercises (
+            id,
+            name,
+            default_media_url,
+            thumbnail_url,
+            video_url
+          )
+        `
+        )
+        .eq('user_id', userId)
+        .order('display_order', { ascending: true });
+
+      // Filtrar ejercicios del día actual
+      const todayExercises: Exercise[] = [];
+      exerciseConfigs?.forEach((config: any) => {
+        const days = config.training_days || [0];
+        if (days.includes(currentTrainingDay) && config.exercises) {
+          const ex = config.exercises;
+          const mediaUrl = config.custom_media_url || ex.default_media_url || ex.thumbnail_url;
+          const isVideo =
+            mediaUrl?.toLowerCase().includes('.mp4') ||
+            mediaUrl?.toLowerCase().includes('.mov') ||
+            mediaUrl?.toLowerCase().includes('.m4v');
+
+          todayExercises.push({
+            id: config.id,
+            name: ex.name,
+            imageUrl: isVideo ? undefined : mediaUrl,
+            videoUrl: isVideo ? mediaUrl : ex.video_url,
+          });
+        }
+      });
+
+      const isRestDay = todayExercises.length === 0;
+      setWorkout({
+        routineName: isRestDay ? 'DESCANSO' : routineName,
+        exercises: todayExercises,
+        isRestDay,
+      });
+
+      // =====================================================================
+      // 2. FETCH MEALS - Usando lógica de PLAN
+      // =====================================================================
+      const { data: mealsData } = await supabase
+        .from('meals')
+        .select('id, name, scheduled_time, ingredients')
+        .eq('user_id', userId)
+        .order('scheduled_time', { ascending: true });
+
+      // Procesar comidas y encontrar la próxima
+      interface MealCandidate {
+        id: string;
+        name: string;
+        time: string;
+        minutes: number;
+        diff: number;
+        ingredients: string[];
+      }
+
+      const mealCandidates: MealCandidate[] = [];
+
+      mealsData?.forEach((meal) => {
+        if (meal.scheduled_time) {
+          const timeStr = meal.scheduled_time.slice(0, 5);
+          const minutes = parseTimeToMinutes(timeStr);
+          const diff = minutes - currentMinutes;
+
+          // Extraer nombres de ingredientes
+          const ingredientsList: string[] = [];
+          if (Array.isArray(meal.ingredients)) {
+            meal.ingredients.forEach((ing: any) => {
+              if (ing?.name) ingredientsList.push(ing.name);
+            });
+          }
+
+          mealCandidates.push({
+            id: meal.id,
+            name: meal.name || 'COMIDA',
+            time: timeStr,
+            minutes,
+            diff,
+            ingredients: ingredientsList,
+          });
+        }
+      });
+
+      // Encontrar próxima comida (misma lógica que getCurrentTimelineIndex de PLAN)
+      // Ordenar: primero los que aún no pasaron, luego los que ya pasaron
+      const futureMeals = mealCandidates.filter((m) => m.diff >= 0).sort((a, b) => a.diff - b.diff);
+      const pastMeals = mealCandidates.filter((m) => m.diff < 0).sort((a, b) => b.diff - a.diff);
+
+      // Tomar el próximo que no ha pasado, o el más reciente que pasó
+      const selectedMeal = futureMeals[0] || pastMeals[0] || null;
+
+      if (selectedMeal) {
+        setNextMeal({
+          id: selectedMeal.id,
+          name: selectedMeal.name,
+          time: selectedMeal.time,
+          timeUntil: formatTimeUntil(selectedMeal.minutes, currentMinutes),
+          minutesUntil: selectedMeal.diff,
+          ingredients: selectedMeal.ingredients.slice(0, 4), // Max 4 ingredientes para preview
+        });
+      } else {
+        setNextMeal(null);
+      }
+
+      // =====================================================================
+      // 3. FETCH STACKS - Próximo compuesto (NO pre/post workout)
+      // =====================================================================
+      const { data: stacksData } = await supabase
+        .from('supplement_stack')
+        .select('id, name, dose, time, type, days_of_week, is_pre_workout, is_post_workout')
+        .eq('user_id', userId)
+        .eq('is_active', true);
+
+      interface StackCandidate {
+        id: string;
+        name: string;
+        dose: string;
+        time: string;
+        type: 'pill' | 'syringe' | 'powder' | 'liquid';
+        minutes: number;
+        diff: number;
+      }
+
+      const stackCandidates: StackCandidate[] = [];
+
+      stacksData?.forEach((stack) => {
+        // Solo stacks que:
+        // - Tienen hora
+        // - NO son pre/post workout
+        // - Están programados para hoy
+        if (
+          stack.time &&
+          !stack.is_pre_workout &&
+          !stack.is_post_workout &&
+          (stack.days_of_week?.includes(today) ?? true)
+        ) {
+          const timeStr = stack.time.slice(0, 5);
+          const minutes = parseTimeToMinutes(timeStr);
+          const diff = minutes - currentMinutes;
+
+          stackCandidates.push({
+            id: stack.id,
+            name: stack.name,
+            dose: stack.dose || '',
+            time: timeStr,
+            type: (stack.type as any) || 'pill',
+            minutes,
+            diff,
+          });
+        }
+      });
+
+      // Encontrar próximo stack (misma lógica)
+      const futureStacks = stackCandidates
+        .filter((s) => s.diff >= 0)
+        .sort((a, b) => a.diff - b.diff);
+      const pastStacks = stackCandidates.filter((s) => s.diff < 0).sort((a, b) => b.diff - a.diff);
+
+      const selectedStack = futureStacks[0] || pastStacks[0] || null;
+
+      if (selectedStack) {
+        setNextStack({
+          id: selectedStack.id,
+          name: selectedStack.name,
+          dose: selectedStack.dose,
+          time: selectedStack.time,
+          type: selectedStack.type,
+          timeUntil: formatTimeUntil(selectedStack.minutes, currentMinutes),
+          minutesUntil: selectedStack.diff,
+        });
+      } else {
+        setNextStack(null);
+      }
+    } catch (error) {
+      console.error('Error fetching today data:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [userId]);
+
+  // Refetch cuando la pantalla obtiene foco
+  useFocusEffect(
+    useCallback(() => {
+      fetchTodayData();
+    }, [fetchTodayData])
+  );
+
+  // -------------------------------------------------------------------------
+  // HANDLERS
+  // -------------------------------------------------------------------------
+  const handleWorkoutPress = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    router.push('/(tabs)/gym');
+  };
+
+  const handlePlanPress = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    router.push('/(tabs)/plan');
+  };
+
+  // -------------------------------------------------------------------------
+  // RENDER: Loading
+  // -------------------------------------------------------------------------
+  if (loading) {
+    return (
+      <View className="px-4 py-3">
+        <View className="h-40 bg-zinc-900/50 rounded-xl items-center justify-center">
+          <ActivityIndicator size="small" color="#DC2626" />
+        </View>
+      </View>
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // RENDER: Main
+  // -------------------------------------------------------------------------
+  return (
+    <View className="px-4 py-3">
+      {/* Header */}
+      <View className="flex-row items-center gap-2 mb-3">
+        <Flame size={14} color="#DC2626" />
+        <Text className="text-fire-red text-xs font-bold uppercase tracking-widest">HOY</Text>
+      </View>
+
+      {/* ================================================================== */}
+      {/* CARD 1: ENTRENAMIENTO DE HOY - Con slider de ejercicios           */}
+      {/* ================================================================== */}
+      <Pressable
+        onPress={handleWorkoutPress}
+        className="mb-3 rounded-xl overflow-hidden"
+        style={{
+          backgroundColor: '#0a0505',
+          borderWidth: 1,
+          borderColor: workout?.isRestDay ? '#3f3f46' : '#DC262660',
+        }}
+      >
+        {/* Header */}
+        <View className="flex-row items-center justify-between px-4 pt-3 pb-2">
+          <View className="flex-row items-center gap-2">
+            <View
+              className="w-7 h-7 rounded-full items-center justify-center"
+              style={{
+                backgroundColor: workout?.isRestDay ? '#27272a' : '#DC262620',
+              }}
+            >
+              {workout?.isRestDay ? (
+                <Zap size={12} color="#71717a" />
+              ) : (
+                <Dumbbell size={12} color="#DC2626" />
+              )}
+            </View>
+            <View>
+              <Text className="text-fire-red text-[10px] font-bold uppercase tracking-widest">
+                🔥 BLOQUE ENTRENO
+              </Text>
+              <Text
+                className="font-bold text-sm uppercase tracking-tight"
+                style={{ color: workout?.isRestDay ? '#71717a' : '#ffffff' }}
+                numberOfLines={1}
+              >
+                {workout?.routineName || 'SIN RUTINA'}
+              </Text>
+            </View>
+          </View>
+
+          <View className="flex-row items-center gap-2">
+            {!workout?.isRestDay && workout?.exercises && (
+              <View className="px-2 py-1 rounded-md" style={{ backgroundColor: '#DC262620' }}>
+                <Text className="text-fire-red text-[10px] font-mono font-bold">
+                  {workout.exercises.length} ejercicios
+                </Text>
+              </View>
+            )}
+            <ChevronRight size={14} color="#52525b" />
+          </View>
+        </View>
+
+        {/* Slider de Ejercicios */}
+        {!workout?.isRestDay && workout?.exercises && workout.exercises.length > 0 && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            className="pb-3"
+            contentContainerStyle={{ paddingHorizontal: 16 }}
+          >
+            {workout.exercises.map((ex) => (
+              <ExerciseMiniCard key={ex.id} exercise={ex} />
+            ))}
+          </ScrollView>
+        )}
+
+        {/* Día de descanso */}
+        {workout?.isRestDay && (
+          <View className="px-4 pb-3">
+            <Text className="text-zinc-600 text-xs font-mono">
+              ⚡ Recuperación activa recomendada
+            </Text>
+          </View>
+        )}
+      </Pressable>
+
+      {/* ================================================================== */}
+      {/* CARD 2: PRÓXIMA COMIDA - Con ingredientes                         */}
+      {/* ================================================================== */}
+      <Pressable
+        onPress={handlePlanPress}
+        className="mb-3 rounded-xl p-4"
+        style={{
+          backgroundColor: '#050a05',
+          borderWidth: 1,
+          borderColor: nextMeal ? '#22c55e40' : '#3f3f46',
+        }}
+      >
+        <View className="flex-row items-center justify-between mb-2">
+          <View className="flex-row items-center gap-2">
+            <View
+              className="w-7 h-7 rounded-full items-center justify-center"
+              style={{
+                backgroundColor: nextMeal ? '#22c55e20' : '#27272a',
+              }}
+            >
+              <Utensils size={12} color={nextMeal ? '#22c55e' : '#71717a'} />
+            </View>
+            <View>
+              <Text className="text-green-500 text-[10px] font-bold uppercase tracking-widest">
+                PRÓXIMA COMIDA
+              </Text>
+              <Text
+                className="font-bold text-sm text-white uppercase tracking-tight"
+                numberOfLines={1}
+              >
+                {nextMeal?.name || 'SIN PLAN'}
+              </Text>
+            </View>
+          </View>
+
+          <View className="flex-row items-center gap-2">
+            {nextMeal && (
+              <View className="items-end">
+                <View className="flex-row items-center gap-1">
+                  <Clock size={10} color="#22c55e" />
+                  <Text className="text-green-500 text-[10px] font-mono">
+                    {formatTime12h(nextMeal.time)}
+                  </Text>
+                </View>
+                <Text
+                  className="text-[10px] font-bold"
+                  style={{
+                    color:
+                      nextMeal.minutesUntil >= 0 && nextMeal.minutesUntil <= 30
+                        ? '#22c55e'
+                        : '#71717a',
+                  }}
+                >
+                  {nextMeal.timeUntil}
+                </Text>
+              </View>
+            )}
+            <ChevronRight size={14} color="#52525b" />
+          </View>
+        </View>
+
+        {/* Ingredientes Preview */}
+        {nextMeal && nextMeal.ingredients.length > 0 && (
+          <View className="flex-row flex-wrap gap-1 mt-1">
+            {nextMeal.ingredients.map((ing, idx) => (
+              <View
+                key={idx}
+                className="px-2 py-0.5 rounded-full"
+                style={{ backgroundColor: '#22c55e15' }}
+              >
+                <Text className="text-zinc-400 text-[9px]">{ing}</Text>
+              </View>
+            ))}
+            {nextMeal.ingredients.length === 4 && (
+              <Text className="text-zinc-600 text-[9px] ml-1">+más</Text>
+            )}
+          </View>
+        )}
+
+        {!nextMeal && (
+          <Text className="text-zinc-600 text-xs font-mono">Configura tu plan de comidas</Text>
+        )}
+      </Pressable>
+
+      {/* ================================================================== */}
+      {/* CARD 3: PRÓXIMO STACK - Sub-tarjeta compacta                      */}
+      {/* ================================================================== */}
+      {nextStack && (
+        <Pressable
+          onPress={handlePlanPress}
+          className="rounded-xl p-3 flex-row items-center justify-between"
+          style={{
+            backgroundColor: '#0a0510',
+            borderWidth: 1,
+            borderColor: '#a855f740',
+          }}
+        >
+          <View className="flex-row items-center gap-3">
+            <View
+              className="w-8 h-8 rounded-full items-center justify-center"
+              style={{ backgroundColor: '#a855f720' }}
+            >
+              {getStackTypeIcon(nextStack.type)}
+            </View>
+            <View>
+              <Text className="text-purple-400 text-[10px] font-bold uppercase tracking-widest">
+                💊 PRÓXIMO STACK
+              </Text>
+              <Text className="font-bold text-sm text-white" numberOfLines={1}>
+                {nextStack.name}
+                {nextStack.dose && (
+                  <Text className="text-purple-400 font-normal"> · {nextStack.dose}</Text>
+                )}
+              </Text>
+            </View>
+          </View>
+
+          <View className="flex-row items-center gap-2">
+            <View className="items-end">
+              <View className="flex-row items-center gap-1">
+                <Clock size={10} color="#a855f7" />
+                <Text className="text-purple-400 text-[10px] font-mono">
+                  {formatTime12h(nextStack.time)}
+                </Text>
+              </View>
+              <Text
+                className="text-[10px] font-bold"
+                style={{
+                  color:
+                    nextStack.minutesUntil >= 0 && nextStack.minutesUntil <= 30
+                      ? '#a855f7'
+                      : '#71717a',
+                }}
+              >
+                {nextStack.timeUntil}
+              </Text>
+            </View>
+            <ChevronRight size={14} color="#52525b" />
+          </View>
+        </Pressable>
+      )}
+    </View>
+  );
+};
+
+export default TodayCards;
