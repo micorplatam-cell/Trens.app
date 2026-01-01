@@ -1,7 +1,6 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, ActivityIndicator, ScrollView, Pressable } from 'react-native';
-import { Image } from 'expo-image';
-import { VideoView, useVideoPlayer } from 'expo-video';
+import { View, Text, ActivityIndicator, ScrollView, Pressable, Image } from 'react-native';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import {
   Dumbbell,
   Utensils,
@@ -122,7 +121,7 @@ interface ExerciseMiniCardProps {
 }
 
 const ExerciseMiniCard: React.FC<ExerciseMiniCardProps> = ({ exercise }) => {
-  // Video player para mostrar primer frame
+  // Si tiene video, crear player pausado para mostrar primer frame (igual que WorkoutBlock)
   const videoPlayer = useVideoPlayer(exercise.videoUrl || null, (player) => {
     player.loop = false;
     player.muted = true;
@@ -140,13 +139,14 @@ const ExerciseMiniCard: React.FC<ExerciseMiniCardProps> = ({ exercise }) => {
         }}
       >
         {exercise.imageUrl ? (
-          <Image source={{ uri: exercise.imageUrl }} className="w-full h-full" contentFit="cover" />
+          <Image source={{ uri: exercise.imageUrl }} className="w-full h-full" resizeMode="cover" />
         ) : exercise.videoUrl ? (
           <VideoView
             player={videoPlayer}
             style={{ width: 56, height: 56 }}
             contentFit="cover"
             nativeControls={false}
+            allowsFullscreen={false}
           />
         ) : (
           <Dumbbell size={20} color="#DC2626" />
@@ -214,23 +214,47 @@ export const TodayCards: React.FC<TodayCardsProps> = ({ userId }) => {
         .eq('user_id', userId)
         .order('display_order', { ascending: true });
 
-      // Filtrar ejercicios del día actual
+      // Filtrar ejercicios del día actual (misma lógica que PLAN)
       const todayExercises: Exercise[] = [];
+
+      // Helper para verificar si es video
+      const isVideoUrl = (url: string) => {
+        if (!url) return false;
+        const videoExtensions = ['.mp4', '.mov', '.avi', '.webm', '.m4v'];
+        return videoExtensions.some((ext) => url.toLowerCase().includes(ext));
+      };
+
       exerciseConfigs?.forEach((config: any) => {
         const days = config.training_days || [0];
         if (days.includes(currentTrainingDay) && config.exercises) {
           const ex = config.exercises;
-          const mediaUrl = config.custom_media_url || ex.default_media_url || ex.thumbnail_url;
-          const isVideo =
-            mediaUrl?.toLowerCase().includes('.mp4') ||
-            mediaUrl?.toLowerCase().includes('.mov') ||
-            mediaUrl?.toLowerCase().includes('.m4v');
+
+          // Mapear igual que PLAN
+          const mediaUrl =
+            config.custom_media_url || ex.default_media_url || ex.thumbnail_url || '';
+          const explicitVideoUrl = ex.video_url || '';
+
+          // Priorizar video_url explícito, luego verificar si media_url es video
+          let imageUrl: string | undefined = undefined;
+          let videoUrl: string | undefined = undefined;
+
+          if (explicitVideoUrl) {
+            // Tiene video_url explícito
+            videoUrl = explicitVideoUrl;
+            imageUrl = mediaUrl || undefined; // media_url como thumbnail
+          } else if (isVideoUrl(mediaUrl)) {
+            // media_url es un video
+            videoUrl = mediaUrl;
+          } else {
+            // Es imagen
+            imageUrl = mediaUrl || undefined;
+          }
 
           todayExercises.push({
             id: config.id,
             name: ex.name,
-            imageUrl: isVideo ? undefined : mediaUrl,
-            videoUrl: isVideo ? mediaUrl : ex.video_url,
+            imageUrl,
+            videoUrl,
           });
         }
       });

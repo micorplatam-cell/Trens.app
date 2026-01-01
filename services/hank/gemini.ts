@@ -241,8 +241,12 @@ function generateSystemPrompt(context: GeminiContext): string {
         }>
       | undefined;
 
+    // Obtener configId para operaciones estables
+    const configId = (context.activeAsset as { configId?: string }).configId || '';
+
     let assetContext = `
 🎯 EJERCICIO EN PANTALLA: "${context.activeAsset.name}"
+• ConfigID: ${configId}${configId ? ' (USAR ESTE ID PARA TODAS LAS OPERACIONES)' : ''}
 • Tipo: ${context.activeAsset.type}${isAlternative ? ` (ALTERNATIVA de "${parentName}")` : ''}
 • Series: ${seriesCount} (índices 0-${lastIndex})
 ${series.map((s, i) => `  [${i}] ${s.reps}×${s.weight}kg (${s.type})`).join('\n')}`;
@@ -274,12 +278,12 @@ ${series.map((s, i) => `  [${i}] ${s.reps}×${s.weight}kg (${s.type})`).join('\n
 
     assetContext += `
 
-📝 PARA MODIFICAR SERIES:
-• Cambiar peso/reps: ASSET_UPDATE_FIELD(assetName="${context.activeAsset.name}", fieldPath="custom_series.N.weight|reps", newValue=X)
-• Quitar serie: ASSET_REMOVE_SERIES(seriesIndex="first|last|N")
-• Agregar serie: ASSET_ADD_SERIES(reps, weight, seriesType, position)
-• Reemplazar serie: ASSET_REPLACE_SERIES(seriesIndex, reps, weight, seriesType)
-• Configurar todas: ASSET_SET_SERIES(series=[{reps,weight,type},...])
+📝 PARA MODIFICAR SERIES (SIEMPRE usar configId="${configId}"):
+• Cambiar peso/reps: ASSET_UPDATE_FIELD(configId="${configId}", fieldPath="custom_series.N.weight|reps", newValue=X)
+• Quitar serie: ASSET_REMOVE_SERIES(configId="${configId}", seriesIndex="first|last|N")
+• Agregar serie: ASSET_ADD_SERIES(configId="${configId}", reps, weight, seriesType, position)
+• Reemplazar serie: ASSET_REPLACE_SERIES(configId="${configId}", seriesIndex, reps, weight, seriesType)
+• Configurar todas: ASSET_SET_SERIES(configId="${configId}", series=[{reps,weight,type},...])
 
 💪 ${getExerciseKnowledge(context.activeAsset.name)}`;
 
@@ -388,6 +392,9 @@ export async function callGemini(
   apiKey: string,
   conversationHistory: GeminiMessage[] = []
 ): Promise<GeminiResult> {
+  // 🔍 DEBUG: Ver qué ejercicio está activo en el contexto
+  console.warn('🎯 GEMINI activeAsset:', context.activeAsset?.name || 'NINGUNO');
+
   // Preparar herramientas en formato Gemini
   const geminiTools = convertToGeminiTools(TOOL_DEFINITIONS);
 

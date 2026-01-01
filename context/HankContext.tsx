@@ -30,12 +30,79 @@ import type {
   HankTarget,
   HankAnimationPhase,
   HankTargetState,
+  PlanBuilderState,
+  PlanBuilderMeal,
+  PlanBuilderSupplement,
+  PlanBuilderIngredient,
 } from '../types/hank';
 
 // ============================================================================
 // GEMINI API KEY - Configura tu clave aquí o usa variable de entorno
 // ============================================================================
 const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
+
+// ============================================================================
+// HELPER: Determinar si una herramienta es de ESCRITURA (modifica datos)
+// Las herramientas de LECTURA no deben disparar animación ni cerrar chat
+// ============================================================================
+const isWriteTool = (toolName: string): boolean => {
+  // Patrones de herramientas de LECTURA (GET, LIST, SHOW, etc.)
+  const readPatterns = [
+    '_GET_',
+    '_LIST_',
+    '_SHOW',
+    'GET_FULL_',
+    'GET_USER_',
+    'ANALYZE_',
+    '_COMPARE_',
+    'SPOTIFY_', // Consultas de Spotify
+    'HANK_CLEAR_', // Clear history no es "escribir datos del usuario"
+  ];
+
+  // También considerar herramientas específicas de solo lectura
+  const readOnlyTools = [
+    'ADN_GET_PROFILE',
+    'ADN_GET_RECORDS',
+    'GYM_GET_TODAY_ROUTINE',
+    'GYM_LIST_EXERCISES',
+    'GYM_GET_EXERCISE_DETAILS',
+    'PLAN_GET_MEALS',
+    'PLAN_GET_NEXT_MEAL',
+    'PLAN_GET_STACK',
+    'PLAN_GET_MEAL_DETAILS',
+    'PLAN_BUILDER_SHOW',
+    'TRAINING_LIST_TEMPLATES',
+    'TRAINING_GET_CURRENT_PLAN',
+    'PROGRESS_GET_PHOTOS',
+    'PROGRESS_GET_PHOTO_DETAIL',
+    'PROGRESS_COMPARE_PHOTOS',
+    'GET_FULL_USER_CONTEXT',
+    'GET_FULL_PLAN_STATUS',
+    'INVENTORY_LIST_ITEMS',
+    'MAINTENANCE_GET_HISTORY',
+    'MAINTENANCE_GET_ALERTS',
+    'EVENT_LIST',
+    'SURF_GET_SESSIONS',
+    'SURF_GET_SPOTS',
+    'ASSET_GET_SCHEMA',
+    'ASSET_READ',
+  ];
+
+  // Si es una herramienta de solo lectura, retornar false
+  if (readOnlyTools.includes(toolName)) {
+    return false;
+  }
+
+  // Si coincide con patrones de lectura, retornar false
+  for (const pattern of readPatterns) {
+    if (toolName.includes(pattern)) {
+      return false;
+    }
+  }
+
+  // Por defecto, asumir que es escritura
+  return true;
+};
 
 // ============================================================================
 // DEFAULT VALUES
@@ -45,6 +112,15 @@ const defaultScreenContext: ScreenContext = {
   viewMode: null,
   currentExerciseIndex: null,
   currentTrainingDay: 0,
+};
+
+// Plan Builder default state
+const defaultPlanBuilderState: PlanBuilderState = {
+  isActive: false,
+  meals: [],
+  supplements: [],
+  startedAt: null,
+  clearExistingOnExecute: false,
 };
 
 const defaultUserProfile: UserProfile = {
@@ -168,6 +244,9 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
   const [animationPhase, setAnimationPhase] = useState<HankAnimationPhase>('idle');
   const registeredTargets = useRef<Map<string, HankTarget>>(new Map());
 
+  // Flag que se activa cuando se detecta un write tool - HankOverlay lo escucha para cerrar el chat
+  const [writeToolDetected, setWriteToolDetected] = useState(false);
+
   const registerTarget = useCallback((id: string, target: Omit<HankTarget, 'id'>) => {
     registeredTargets.current.set(id, { ...target, id });
   }, []);
@@ -180,6 +259,8 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
     console.warn('🎯 HANK: Iniciando animación hacia', target.label);
     setCurrentTarget(target);
     setAnimationPhase('flying');
+    // Notificar que se detectó un write tool (para que HankOverlay cierre el chat)
+    setWriteToolDetected(true);
 
     // Después de volar (800ms), cambiar a working
     setTimeout(() => {
@@ -197,6 +278,8 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
       setTimeout(() => {
         setAnimationPhase('idle');
         setCurrentTarget(null);
+        // Reset del flag de write tool detectado
+        setWriteToolDetected(false);
       }, 600);
     }, 400);
   }, []);
@@ -206,6 +289,10 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
   const [activeAsset, setActiveAssetState] = useState<ActiveAsset | null>(null);
   const [sportMode, setSportMode] = useState<SportMode>(activeSportCode as SportMode);
   const [userProfile] = useState<UserProfile>(defaultUserProfile);
+
+  // Plan Builder State - Para construcción conversacional de planes
+  const [planBuilderState, setPlanBuilderState] =
+    useState<PlanBuilderState>(defaultPlanBuilderState);
 
   // Sincronizar sportMode con el deporte activo del SportContext
   useEffect(() => {
@@ -240,135 +327,154 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
     async (toolCall: HankToolCall): Promise<HankToolResult> => {
       console.warn('🚀🚀🚀 HANK WRAPPER executeTool LLAMADO! Tool:', toolCall.tool);
 
-      // Buscar target registrado que coincida con el contexto
-      const allTargets = Array.from(registeredTargets.current.entries());
-      console.warn(
-        '🎯 HANK executeTool: Targets registrados:',
-        allTargets.length,
-        allTargets.map(([id]) => id)
-      );
+      // Solo disparar animación para herramientas de ESCRITURA
+      const shouldAnimate = isWriteTool(toolCall.tool);
+      console.warn('🎬 HANK: shouldAnimate:', shouldAnimate, 'tool:', toolCall.tool);
 
-      let registeredTarget = registeredTargets.current.values().next().value;
-
-      // Si NO hay target registrado, crear uno por defecto en el centro de la pantalla
-      if (!registeredTarget) {
-        console.warn('⚠️ HANK: NO hay targets registrados, usando posición central');
-        const { Dimensions } = require('react-native');
-        const { width, height } = Dimensions.get('window');
-        registeredTarget = {
-          id: 'default-center',
-          type: 'custom',
-          label: toolCall.tool,
-          position: {
-            x: width / 2 - 100,
-            y: height / 2 - 50,
-            width: 200,
-            height: 100,
-          },
-        };
-      } else {
+      if (shouldAnimate) {
+        // Buscar target registrado que coincida con el contexto
+        const allTargets = Array.from(registeredTargets.current.entries());
         console.warn(
-          '🎯 HANK: Target encontrado, iniciando animación hacia:',
-          registeredTarget.label
+          '🎯 HANK executeTool: Targets registrados:',
+          allTargets.length,
+          allTargets.map(([id]) => id)
         );
+
+        let registeredTarget = registeredTargets.current.values().next().value;
+
+        // Si NO hay target registrado, crear uno por defecto en el centro de la pantalla
+        if (!registeredTarget) {
+          console.warn('⚠️ HANK: NO hay targets registrados, usando posición central');
+          const { Dimensions } = require('react-native');
+          const { width, height } = Dimensions.get('window');
+          registeredTarget = {
+            id: 'default-center',
+            type: 'custom',
+            label: toolCall.tool,
+            position: {
+              x: width / 2 - 100,
+              y: height / 2 - 50,
+              width: 200,
+              height: 100,
+            },
+          };
+        } else {
+          console.warn(
+            '🎯 HANK: Target encontrado, iniciando animación hacia:',
+            registeredTarget.label
+          );
+        }
+
+        // Iniciar animación
+        startTargetAnimation(registeredTarget);
+
+        // Registrar tiempo de inicio de la fase working (después de 800ms de vuelo)
+        const workingStartTime = Date.now() + 800;
+
+        const result = await executeToolRaw(toolCall);
+
+        // IMPORTANTE: Disparar refresh INMEDIATAMENTE después de ejecutar
+        if (result.success) {
+          console.warn('🔄 executeTool exitoso, disparando refresh AHORA (mientras Hank trabaja)');
+          setRefreshTrigger((prev) => prev + 1);
+        }
+
+        // Asegurar mínimo 5 segundos en fase working (los datos se cargan en paralelo)
+        const elapsedInWorking = Date.now() - workingStartTime;
+        const remainingWorkingTime = Math.max(0, 5000 - elapsedInWorking);
+        if (remainingWorkingTime > 0) {
+          await new Promise((resolve) => setTimeout(resolve, remainingWorkingTime));
+        }
+
+        // Completar animación según resultado
+        completeTargetAnimation(result.success);
+
+        // Esperar solo el tiempo mínimo para que la animación de éxito sea visible
+        await new Promise((resolve) => setTimeout(resolve, 900));
+
+        return result;
+      } else {
+        // Herramienta de LECTURA - ejecutar sin animación
+        console.warn('📖 HANK: Ejecutando herramienta de LECTURA sin animación');
+        const result = await executeToolRaw(toolCall);
+        return result;
       }
-
-      // Iniciar animación
-      startTargetAnimation(registeredTarget);
-
-      // Registrar tiempo de inicio de la fase working (después de 800ms de vuelo)
-      const workingStartTime = Date.now() + 800;
-
-      const result = await executeToolRaw(toolCall);
-
-      // IMPORTANTE: Disparar refresh INMEDIATAMENTE después de ejecutar
-      // Así los datos se cargan mientras Hank sigue "trabajando" visualmente
-      if (result.success) {
-        console.warn('🔄 executeTool exitoso, disparando refresh AHORA (mientras Hank trabaja)');
-        setRefreshTrigger((prev) => prev + 1);
-      }
-
-      // Asegurar mínimo 5 segundos en fase working (los datos se cargan en paralelo)
-      const elapsedInWorking = Date.now() - workingStartTime;
-      const remainingWorkingTime = Math.max(0, 5000 - elapsedInWorking);
-      if (remainingWorkingTime > 0) {
-        await new Promise((resolve) => setTimeout(resolve, remainingWorkingTime));
-      }
-
-      // Completar animación según resultado
-      completeTargetAnimation(result.success);
-
-      // Esperar solo el tiempo mínimo para que la animación de éxito sea visible
-      // success(400) + returning(500) = ~900ms
-      await new Promise((resolve) => setTimeout(resolve, 900));
-
-      return result;
     },
     [executeToolRaw, startTargetAnimation, completeTargetAnimation]
   );
 
   // Wrapper para executeToolChain que incrementa refreshTrigger si alguno exitoso
-  // También dispara animación visual si hay target registrado
+  // También dispara animación visual si hay target registrado Y hay herramientas de escritura
   const executeToolChain = useCallback(
     async (toolCalls: HankToolCall[]): Promise<HankToolResult[]> => {
-      // Buscar target registrado que coincida con el contexto
-      const allTargets = Array.from(registeredTargets.current.entries());
-      console.warn('🎯 HANK executeToolChain: Targets registrados:', allTargets.length);
+      // Solo disparar animación si hay herramientas de ESCRITURA
+      const hasWriteTools = toolCalls.some((tc) => isWriteTool(tc.tool));
+      console.warn('🎬 HANK executeToolChain: hasWriteTools:', hasWriteTools);
 
-      let registeredTarget = registeredTargets.current.values().next().value;
+      if (hasWriteTools) {
+        // Buscar target registrado que coincida con el contexto
+        const allTargets = Array.from(registeredTargets.current.entries());
+        console.warn('🎯 HANK executeToolChain: Targets registrados:', allTargets.length);
 
-      // Si NO hay target registrado, crear uno por defecto en el centro de la pantalla
-      if (!registeredTarget) {
-        console.warn('⚠️ HANK: NO hay targets, usando posición central');
-        const { Dimensions } = require('react-native');
-        const { width, height } = Dimensions.get('window');
-        registeredTarget = {
-          id: 'default-center',
-          type: 'custom',
-          label: toolCalls[0]?.tool || 'Action',
-          position: {
-            x: width / 2 - 100,
-            y: height / 2 - 50,
-            width: 200,
-            height: 100,
-          },
-        };
+        let registeredTarget = registeredTargets.current.values().next().value;
+
+        // Si NO hay target registrado, crear uno por defecto en el centro de la pantalla
+        if (!registeredTarget) {
+          console.warn('⚠️ HANK: NO hay targets, usando posición central');
+          const { Dimensions } = require('react-native');
+          const { width, height } = Dimensions.get('window');
+          registeredTarget = {
+            id: 'default-center',
+            type: 'custom',
+            label: toolCalls[0]?.tool || 'Action',
+            position: {
+              x: width / 2 - 100,
+              y: height / 2 - 50,
+              width: 200,
+              height: 100,
+            },
+          };
+        } else {
+          console.warn('🎯 HANK: Target encontrado:', registeredTarget.label);
+        }
+
+        // Iniciar animación
+        startTargetAnimation(registeredTarget);
+
+        // Registrar tiempo de inicio de la fase working (después de 800ms de vuelo)
+        const workingStartTime = Date.now() + 800;
+
+        const results = await executeToolChainRaw(toolCalls);
+        const hasSuccess = results.some((r) => r.success);
+
+        // IMPORTANTE: Disparar refresh INMEDIATAMENTE después de ejecutar
+        if (hasSuccess) {
+          console.warn(
+            '🔄 executeToolChain exitoso, disparando refresh AHORA (mientras Hank trabaja)'
+          );
+          setRefreshTrigger((prev) => prev + 1);
+        }
+
+        // Asegurar mínimo 5 segundos en fase working (los datos se cargan en paralelo)
+        const elapsedInWorking = Date.now() - workingStartTime;
+        const remainingWorkingTime = Math.max(0, 5000 - elapsedInWorking);
+        if (remainingWorkingTime > 0) {
+          await new Promise((resolve) => setTimeout(resolve, remainingWorkingTime));
+        }
+
+        // Completar animación según resultado
+        completeTargetAnimation(hasSuccess);
+
+        // Esperar solo el tiempo mínimo para que la animación de éxito sea visible
+        await new Promise((resolve) => setTimeout(resolve, 900));
+
+        return results;
       } else {
-        console.warn('🎯 HANK: Target encontrado:', registeredTarget.label);
+        // Solo herramientas de LECTURA - ejecutar sin animación
+        console.warn('📖 HANK executeToolChain: Solo herramientas de LECTURA, sin animación');
+        const results = await executeToolChainRaw(toolCalls);
+        return results;
       }
-
-      // Iniciar animación
-      startTargetAnimation(registeredTarget);
-
-      // Registrar tiempo de inicio de la fase working (después de 800ms de vuelo)
-      const workingStartTime = Date.now() + 800;
-
-      const results = await executeToolChainRaw(toolCalls);
-      const hasSuccess = results.some((r) => r.success);
-
-      // IMPORTANTE: Disparar refresh INMEDIATAMENTE después de ejecutar
-      // Así los datos se cargan mientras Hank sigue "trabajando" visualmente
-      if (hasSuccess) {
-        console.warn(
-          '🔄 executeToolChain exitoso, disparando refresh AHORA (mientras Hank trabaja)'
-        );
-        setRefreshTrigger((prev) => prev + 1);
-      }
-
-      // Asegurar mínimo 5 segundos en fase working (los datos se cargan en paralelo)
-      const elapsedInWorking = Date.now() - workingStartTime;
-      const remainingWorkingTime = Math.max(0, 5000 - elapsedInWorking);
-      if (remainingWorkingTime > 0) {
-        await new Promise((resolve) => setTimeout(resolve, remainingWorkingTime));
-      }
-
-      // Completar animación según resultado
-      completeTargetAnimation(hasSuccess);
-
-      // Esperar solo el tiempo mínimo para que la animación de éxito sea visible
-      await new Promise((resolve) => setTimeout(resolve, 900));
-
-      return results;
     },
     [executeToolChainRaw, startTargetAnimation, completeTargetAnimation]
   );
@@ -652,6 +758,7 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
         };
 
         // 🔧 FIX: Si es alternativa, cargar desde la tabla exercises directamente
+        // PERO también necesitamos el configId del ejercicio principal
         if (alternativeInfo?.isAlternative) {
           console.log('🔄 setActiveAsset: Cargando ALTERNATIVA:', assetId);
 
@@ -667,12 +774,39 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
             return;
           }
 
+          // Buscar el configId del ejercicio principal (que contiene esta alternativa)
+          // 1. Primero buscar qué ejercicio tiene esta alternativa en su alternative_exercises
+          const { data: parentExercise } = await supabase
+            .from('exercises')
+            .select('id')
+            .contains('alternative_exercises', [assetId])
+            .limit(1)
+            .maybeSingle();
+
+          let configId = '';
+          let parentLiquidData: Record<string, unknown> = {};
+
+          if (parentExercise) {
+            // 2. Ahora buscar el user_exercise_config del ejercicio principal
+            const { data: parentConfig } = await supabase
+              .from('user_exercise_config')
+              .select('id, config')
+              .eq('user_id', userId)
+              .eq('exercise_id', parentExercise.id)
+              .limit(1)
+              .maybeSingle();
+
+            configId = parentConfig?.id || '';
+            parentLiquidData = (parentConfig?.config as Record<string, unknown>) || {};
+          }
+
           console.log(
             '✅ setActiveAsset: Alternativa cargada:',
             altData.name,
             '(de',
             alternativeInfo.parentExerciseName,
-            ')'
+            ') configId:',
+            configId
           );
 
           // Cargar notas e historial para la alternativa
@@ -680,9 +814,11 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
 
           setActiveAssetState({
             id: altData.id,
+            configId: configId, // ID del user_exercise_config del ejercicio principal
             type: 'exercise',
             name: altData.name,
             liquidData: {
+              ...parentLiquidData, // Las series vienen del ejercicio principal
               notes: notesData.currentNotes,
               tags: notesData.currentTags,
               todayNotes: notesData.todayNotes,
@@ -787,7 +923,8 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
         );
 
         setActiveAssetState({
-          id: exerciseData.id,
+          id: exerciseData.exercise_id, // exercise_id de tabla exercises
+          configId: exerciseData.id, // user_exercise_config.id - ESTABLE para modificar series
           type: 'exercise',
           name: exerciseData.exercises?.name || 'Sin nombre',
           liquidData: {
@@ -844,6 +981,144 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
   );
 
   // -------------------------------------------------------------------------
+  // PLAN BUILDER MANAGEMENT - Construcción conversacional de planes
+  // -------------------------------------------------------------------------
+
+  // Importar funciones de Plan Builder
+  const {
+    planBuilderStart,
+    planBuilderAddMeal,
+    planBuilderEditMeal,
+    planBuilderRemoveMeal,
+    planBuilderAddSupplement,
+    planBuilderRemoveSupplement,
+    planBuilderShow,
+    planBuilderClear,
+    planBuilderExecute,
+  } = require('../services/hank/tools');
+
+  const planBuilderActionsStart = useCallback((clearExisting: boolean = false) => {
+    console.warn('🚀 Plan Builder: Iniciando...');
+    const result = planBuilderStart(clearExisting);
+    setPlanBuilderState({
+      isActive: true,
+      meals: [],
+      supplements: [],
+      startedAt: new Date(),
+      clearExistingOnExecute: clearExisting,
+    });
+    return result;
+  }, []);
+
+  const planBuilderActionsAddMeal = useCallback(
+    (time: string, ingredients: PlanBuilderIngredient[], name?: string): HankToolResult => {
+      const { newState, result } = planBuilderAddMeal(planBuilderState, time, ingredients, name);
+      setPlanBuilderState(newState);
+      return result;
+    },
+    [planBuilderState]
+  );
+
+  const planBuilderActionsEditMeal = useCallback(
+    (
+      identifier: string | number,
+      updates: { time?: string; ingredients?: PlanBuilderIngredient[]; name?: string }
+    ): HankToolResult => {
+      const { newState, result } = planBuilderEditMeal(planBuilderState, identifier, updates);
+      setPlanBuilderState(newState);
+      return result;
+    },
+    [planBuilderState]
+  );
+
+  const planBuilderActionsRemoveMeal = useCallback(
+    (identifier: string | number): HankToolResult => {
+      const { newState, result } = planBuilderRemoveMeal(planBuilderState, identifier);
+      setPlanBuilderState(newState);
+      return result;
+    },
+    [planBuilderState]
+  );
+
+  const planBuilderActionsAddSupplement = useCallback(
+    (
+      name: string,
+      dose: string,
+      options?: {
+        type?: 'pill' | 'powder' | 'liquid' | 'syringe';
+        time?: string;
+        isPreWorkout?: boolean;
+        isPostWorkout?: boolean;
+      }
+    ): HankToolResult => {
+      const { newState, result } = planBuilderAddSupplement(planBuilderState, name, dose, options);
+      setPlanBuilderState(newState);
+      return result;
+    },
+    [planBuilderState]
+  );
+
+  const planBuilderActionsRemoveSupplement = useCallback(
+    (nameOrIndex: string | number): HankToolResult => {
+      const { newState, result } = planBuilderRemoveSupplement(planBuilderState, nameOrIndex);
+      setPlanBuilderState(newState);
+      return result;
+    },
+    [planBuilderState]
+  );
+
+  const planBuilderActionsShow = useCallback((): HankToolResult => {
+    return planBuilderShow(planBuilderState);
+  }, [planBuilderState]);
+
+  const planBuilderActionsClear = useCallback(() => {
+    console.warn('🧹 Plan Builder: Limpiando...');
+    setPlanBuilderState(defaultPlanBuilderState);
+  }, []);
+
+  const planBuilderActionsExecute = useCallback(async (): Promise<HankToolResult> => {
+    if (!userId) {
+      return { success: false, message: 'Usuario no autenticado.' };
+    }
+    console.warn('🏃 Plan Builder: Ejecutando plan...');
+    const result = await planBuilderExecute(userId, planBuilderState);
+
+    // Si fue exitoso, limpiar el estado y disparar refresh
+    if (result.success || result.data?.mealsCreated > 0 || result.data?.supplementsCreated > 0) {
+      setPlanBuilderState(defaultPlanBuilderState);
+      setRefreshTrigger((prev) => prev + 1);
+    }
+
+    return result;
+  }, [userId, planBuilderState]);
+
+  // Agrupar todas las acciones del Plan Builder
+  const planBuilderActions = useMemo(
+    () => ({
+      start: planBuilderActionsStart,
+      addMeal: planBuilderActionsAddMeal,
+      editMeal: planBuilderActionsEditMeal,
+      removeMeal: planBuilderActionsRemoveMeal,
+      addSupplement: planBuilderActionsAddSupplement,
+      removeSupplement: planBuilderActionsRemoveSupplement,
+      show: planBuilderActionsShow,
+      clear: planBuilderActionsClear,
+      execute: planBuilderActionsExecute,
+    }),
+    [
+      planBuilderActionsStart,
+      planBuilderActionsAddMeal,
+      planBuilderActionsEditMeal,
+      planBuilderActionsRemoveMeal,
+      planBuilderActionsAddSupplement,
+      planBuilderActionsRemoveSupplement,
+      planBuilderActionsShow,
+      planBuilderActionsClear,
+      planBuilderActionsExecute,
+    ]
+  );
+
+  // -------------------------------------------------------------------------
   // LOAD AVAILABLE EXERCISES FROM CATALOG
   // -------------------------------------------------------------------------
   const [availableExercises, setAvailableExercises] = useState<string[]>([]);
@@ -876,7 +1151,7 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
     // 🐛 FIX: Usar screenContext.currentTrainingDay (real) en lugar de userProfile.currentTrainingDay (siempre 0)
     const realTrainingDay = screenContext.currentTrainingDay ?? 0;
     console.warn(
-      `📝 buildGeminiContext: día=${realTrainingDay}, ejercicio=${activeAsset?.name || 'NINGUNO'}`
+      `📝 buildGeminiContext: día=${realTrainingDay}, ejercicio=${activeAsset?.name || 'NINGUNO'}, planBuilder=${planBuilderState.isActive ? 'ACTIVO' : 'INACTIVO'}`
     );
 
     return {
@@ -888,6 +1163,7 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
         ? {
             name: activeAsset.name,
             type: activeAsset.type,
+            configId: activeAsset.configId, // ID estable para operaciones de series
             liquidData: activeAsset.liquidData,
             isAlternative: activeAsset.isAlternative || false,
             parentExerciseName: activeAsset.parentExerciseName,
@@ -898,8 +1174,30 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
         description: a.description,
       })),
       availableExercises: availableExercises,
+      // Plan Builder State - Para que Gemini sepa si está activo
+      planBuilderActive: planBuilderState.isActive,
+      planBuilderSummary: planBuilderState.isActive
+        ? {
+            mealsCount: planBuilderState.meals.length,
+            supplementsCount: planBuilderState.supplements.length,
+            meals: planBuilderState.meals.map((m) => ({
+              time: m.time,
+              name: m.name,
+              ingredientsCount: m.ingredients.length,
+            })),
+            supplements: planBuilderState.supplements.map((s) => ({ name: s.name, dose: s.dose })),
+          }
+        : null,
     };
-  }, [screenContext, sportMode, userProfile, activeAsset, aliases, availableExercises]);
+  }, [
+    screenContext,
+    sportMode,
+    userProfile,
+    activeAsset,
+    aliases,
+    availableExercises,
+    planBuilderState,
+  ]);
 
   // -------------------------------------------------------------------------
   // MAIN COMMAND EXECUTION
@@ -1007,7 +1305,101 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
 
           for (const toolCall of geminiResponse.toolCalls) {
             console.warn(`🔧 Ejecutando herramienta: ${toolCall.tool}`);
-            const result = await executeTool(toolCall);
+
+            let result: HankToolResult;
+
+            // INTERCEPTAR HERRAMIENTAS DE PLAN BUILDER - se manejan localmente
+            if (toolCall.tool.startsWith('PLAN_BUILDER_')) {
+              const p = toolCall.parameters;
+
+              switch (toolCall.tool) {
+                case 'PLAN_BUILDER_START':
+                  result = planBuilderActionsStart((p.clearExisting as boolean) || false);
+                  break;
+
+                case 'PLAN_BUILDER_ADD_MEAL': {
+                  // Parsear ingredientes de JSON string
+                  let ingredients: PlanBuilderIngredient[] = [];
+                  try {
+                    if (typeof p.ingredients === 'string') {
+                      ingredients = JSON.parse(p.ingredients);
+                    } else if (Array.isArray(p.ingredients)) {
+                      ingredients = p.ingredients as PlanBuilderIngredient[];
+                    }
+                  } catch (e) {
+                    console.warn('Error parseando ingredientes:', e);
+                    ingredients = [];
+                  }
+                  result = planBuilderActionsAddMeal(
+                    p.time as string,
+                    ingredients,
+                    p.name as string | undefined
+                  );
+                  break;
+                }
+
+                case 'PLAN_BUILDER_EDIT_MEAL': {
+                  let ingredients: PlanBuilderIngredient[] | undefined;
+                  if (p.ingredients) {
+                    try {
+                      ingredients =
+                        typeof p.ingredients === 'string'
+                          ? JSON.parse(p.ingredients)
+                          : (p.ingredients as PlanBuilderIngredient[]);
+                    } catch (e) {
+                      console.warn('Error parseando ingredientes:', e);
+                    }
+                  }
+                  result = planBuilderActionsEditMeal(p.mealIdentifier as string | number, {
+                    time: p.time as string | undefined,
+                    ingredients,
+                    name: p.name as string | undefined,
+                  });
+                  break;
+                }
+
+                case 'PLAN_BUILDER_REMOVE_MEAL':
+                  result = planBuilderActionsRemoveMeal(p.mealIdentifier as string | number);
+                  break;
+
+                case 'PLAN_BUILDER_ADD_SUPPLEMENT':
+                  result = planBuilderActionsAddSupplement(p.name as string, p.dose as string, {
+                    type: p.type as 'pill' | 'powder' | 'liquid' | 'syringe' | undefined,
+                    time: p.time as string | undefined,
+                    isPreWorkout: p.isPreWorkout as boolean | undefined,
+                    isPostWorkout: p.isPostWorkout as boolean | undefined,
+                  });
+                  break;
+
+                case 'PLAN_BUILDER_REMOVE_SUPPLEMENT':
+                  result = planBuilderActionsRemoveSupplement(p.nameOrIndex as string | number);
+                  break;
+
+                case 'PLAN_BUILDER_SHOW':
+                  result = planBuilderActionsShow();
+                  break;
+
+                case 'PLAN_BUILDER_CLEAR':
+                  planBuilderActionsClear();
+                  result = {
+                    success: true,
+                    message: `🧹 Plan Builder limpiado. Se descartaron los cambios.
+💡 Di "crea mi plan" para empezar de nuevo.`,
+                  };
+                  break;
+
+                case 'PLAN_BUILDER_EXECUTE':
+                  result = await planBuilderActionsExecute();
+                  break;
+
+                default:
+                  result = await executeTool(toolCall);
+              }
+            } else {
+              // Herramientas normales - ejecutar vía executor
+              result = await executeTool(toolCall);
+            }
+
             results.push(result);
             toolResults.push({
               toolName: toolCall.tool,
@@ -1049,9 +1441,22 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
             });
           }
 
-          // Marcar que hubo tool calls para que el UI pueda cerrar el chat
+          // Marcar que hubo tool calls y si hubo herramientas de ESCRITURA
+          // Solo las herramientas de escritura deben cerrar el chat y mostrar animación
+          const hadWriteTools = geminiResponse.toolCalls.some((tc) => isWriteTool(tc.tool));
+          console.warn(
+            '🔧 HANK: hadWriteTools:',
+            hadWriteTools,
+            'tools:',
+            geminiResponse.toolCalls.map((tc) => tc.tool).join(', ')
+          );
+
           if (results.length > 0) {
-            results[0].data = { ...(results[0].data || {}), hadToolCalls: true };
+            results[0].data = {
+              ...(results[0].data || {}),
+              hadToolCalls: true,
+              hadWriteToolCalls: hadWriteTools,
+            };
           }
 
           return results;
@@ -1417,7 +1822,27 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
 
     // Debug: ver qué contexto tiene HANK
     console.warn('🧠 HANK getSystemPrompt - activeAsset:', activeAsset?.name || 'NINGUNO');
-    console.warn('🧠 HANK liquidData:', JSON.stringify(activeAsset?.liquidData || {}, null, 2));
+    console.warn('🧠 HANK planBuilder:', planBuilderState.isActive ? 'ACTIVO' : 'INACTIVO');
+
+    // Construir sección de Plan Builder si está activo
+    const planBuilderSection = planBuilderState.isActive
+      ? `
+🚀 MODO PLAN BUILDER ACTIVO
+El usuario está construyendo un plan de nutrición conversacionalmente.
+- Comidas agregadas: ${planBuilderState.meals.length}
+- Suplementos agregados: ${planBuilderState.supplements.length}
+${planBuilderState.meals.length > 0 ? `\nComidas en construcción:\n${planBuilderState.meals.map((m, i) => `  ${i + 1}. ${m.name || 'Comida'} (${m.time}): ${m.ingredients.map((ing) => ing.name).join(', ')}`).join('\n')}` : ''}
+${planBuilderState.supplements.length > 0 ? `\nSupplementos en construcción:\n${planBuilderState.supplements.map((s, i) => `  ${i + 1}. ${s.name} (${s.dose})`).join('\n')}` : ''}
+
+INSTRUCCIONES PLAN BUILDER:
+- Usa PLAN_BUILDER_ADD_MEAL para agregar comidas
+- Usa PLAN_BUILDER_ADD_SUPPLEMENT para agregar suplementos
+- Usa PLAN_BUILDER_SHOW cuando pida ver el plan
+- Usa PLAN_BUILDER_REMOVE_MEAL / PLAN_BUILDER_REMOVE_SUPPLEMENT para quitar items
+- Usa PLAN_BUILDER_EXECUTE cuando diga "ejecuta", "guarda", "aplica" o "listo con el plan"
+- Usa PLAN_BUILDER_CLEAR para cancelar y descartar todo
+`
+      : '';
 
     return `Eres HANK, el asistente de IA de TRENS (High-Performance Multi-Sport App).
 
@@ -1427,6 +1852,7 @@ CONTEXTO ACTUAL:
 - Deporte activo: ${sportMode} (${sportName})
 - Nivel del usuario: ${userProfile.level}
 ${sportMode === 'GYM' ? `- Día de entrenamiento: ${currentDay + 1} (índice: ${currentDay})` : ''}
+${planBuilderSection}
 
 ${getSportInstructions(sportMode)}
 
@@ -1494,8 +1920,67 @@ PERSONALIDAD:
 5. Si no entiendes algo, pregunta claramente.
 6. SIEMPRE revisa las NOTAS e HISTORIAL del ejercicio activo antes de responder preguntas sobre el rendimiento del usuario.
 7. Cuando el usuario pregunte sobre su levantamiento/entrenamiento, USA los datos del historial de videos (peso, reps, notas).
+${planBuilderState.isActive ? '8. EL PLAN BUILDER ESTÁ ACTIVO - Usa las herramientas PLAN_BUILDER_* para manejar el plan en construcción.' : ''}
 
-IMPORTANTE: Puedes ejecutar múltiples herramientas si la solicitud lo requiere.`;
+PLANES DE ENTRENAMIENTO:
+- Usa TRAINING_LIST_TEMPLATES para mostrar planes disponibles (puedes filtrar por nivel, objetivo, frecuencia)
+- Usa TRAINING_ASSIGN_PLAN para asignar un plan completo al usuario
+- Usa TRAINING_GET_CURRENT_PLAN para ver qué plan tiene actualmente
+- Usa TRAINING_RESTRUCTURE para cambiar completamente la estructura de días
+- Usa TRAINING_RENAME_DAY para renombrar un día específico
+- Usa TRAINING_ADD_DAY para agregar un nuevo día
+- Usa TRAINING_REMOVE_DAY para eliminar un día
+- Cuando un usuario nuevo pregunte por entrenar, primero pregunta: ¿cuántos días puede entrenar? ¿cuál es su objetivo? ¿nivel de experiencia?
+
+CONTROL DE EJERCICIOS Y SERIES:
+- Usa GYM_GET_EXERCISE_DETAILS para ver la configuración completa de un ejercicio (series, reps, peso, RIR, tempo, descanso)
+- Usa GYM_UPDATE_SERIES_DETAIL para modificar cualquier aspecto de una serie específica:
+  * reps: número de repeticiones
+  * weight: peso en kg
+  * type: WARMUP, APPROACH, EFFECTIVE, FAILURE
+  * rir: Reps In Reserve (0-5, donde 0=fallo técnico)
+  * tempo: formato "3-1-2-0" (excéntrico-pausa-concéntrico-pausa)
+  * restSeconds: segundos de descanso después de la serie
+  * note: anotación para la serie
+- Usa ASSET_SET_SERIES para configurar TODAS las series de un ejercicio de una vez
+- Usa ASSET_ADD_SERIES para agregar una serie nueva
+- Usa ASSET_REMOVE_SERIES para quitar una serie
+- Cuando el usuario pregunte sobre un ejercicio, usa GYM_GET_EXERCISE_DETAILS primero para ver su configuración
+
+NUTRICIÓN Y MACROS:
+- Usa GET_FULL_PLAN_STATUS para obtener el estado COMPLETO del plan (entrenamiento + nutrición + suplementos)
+- Usa SYNC_NUTRITION_MACROS para recalcular todos los macros después de cambios en el perfil
+- Usa PLAN_BUILDER_* para construir planes de nutrición conversacionalmente
+- Cuando el usuario cambie peso, objetivo o datos del perfil, pregunta si quiere sincronizar macros
+
+CONTROL DEL PERFIL (ADN):
+- Usa ADN_SET_BIOMETRICS para actualizar múltiples datos del perfil de una vez (peso, altura, objetivo, edad, sexo, % grasa, masa muscular, nivel de actividad, experiencia, lesiones, alergias)
+- Usa ADN_UPDATE_MEASUREMENT para actualizar medidas corporales existentes (brazo, pecho, pierna, cintura, etc.)
+- Usa ADN_ADD_MEASUREMENT para agregar nuevas medidas
+- Usa ADN_UPDATE_PROFILE para cambios individuales simples
+- DESPUÉS de cualquier cambio significativo en el perfil (peso, objetivo, composición corporal), SUGIERE ejecutar AUTO_ADJUST_ALL
+
+AJUSTE AUTOMÁTICO:
+- Usa AUTO_ADJUST_ALL cuando el usuario:
+  * Cambie su peso significativamente (±2kg)
+  * Cambie su objetivo (volumen → definición, etc.)
+  * Actualice su % de grasa corporal
+  * Pida "recalcular todo", "ajustar mi plan", "actualizar basado en mis cambios"
+- AUTO_ADJUST_ALL recalcula: macros diarios, distribución de comidas, y da recomendaciones de entrenamiento
+
+IMPORTANTE: 
+- Puedes ejecutar múltiples herramientas si la solicitud lo requiere.
+- Usa GET_FULL_PLAN_STATUS cuando necesites contexto completo antes de hacer cambios grandes.
+- Siempre confirma los cambios importantes antes de ejecutarlos.
+- TIENES CONTROL TOTAL del perfil del usuario. Cualquier dato (peso, objetivo, medidas) puede y DEBE cambiarse a través de ti.
+
+HISTORIAL DE PROGRESO (FOTOS):
+- Usa PROGRESS_GET_PHOTOS para ver el historial de fotos de progreso con resumen de cambios
+- Usa PROGRESS_GET_PHOTO_DETAIL para ver los datos completos de una foto específica
+- Usa PROGRESS_COMPARE_PHOTOS para comparar dos fotos y mostrar la evolución del usuario
+- Cuando el usuario pregunte sobre su progreso, transformación o evolución, consulta sus fotos
+- Las fotos guardan snapshot de peso, medidas, entrenamiento, nutrición y suplementos de ese momento
+- Usa esta información para personalizar recomendaciones y ajustar planes`;
   }, [
     screenContext,
     sportMode,
@@ -1504,6 +1989,7 @@ IMPORTANTE: Puedes ejecutar múltiples herramientas si la solicitud lo requiere.
     activeAsset,
     aliases,
     getSportInstructions,
+    planBuilderState,
   ]);
 
   // -------------------------------------------------------------------------
@@ -1529,6 +2015,10 @@ IMPORTANTE: Puedes ejecutar múltiples herramientas si la solicitud lo requiere.
       sportMode,
       userProfile,
       availableExercises,
+
+      // Plan Builder
+      planBuilder: planBuilderState,
+      planBuilderActions,
 
       // Aliases
       aliases,
@@ -1568,6 +2058,7 @@ IMPORTANTE: Puedes ejecutar múltiples herramientas si la solicitud lo requiere.
       targetState: {
         currentTarget,
         animationPhase,
+        writeToolDetected,
         setTarget: setCurrentTarget,
         startAnimation: startTargetAnimation,
         completeAnimation: completeTargetAnimation,
@@ -1584,6 +2075,8 @@ IMPORTANTE: Puedes ejecutar múltiples herramientas si la solicitud lo requiere.
       sportMode,
       userProfile,
       availableExercises,
+      planBuilderState,
+      planBuilderActions,
       aliases,
       executeCommand,
       executeTool,
@@ -1602,6 +2095,7 @@ IMPORTANTE: Puedes ejecutar múltiples herramientas si la solicitud lo requiere.
       getSystemPrompt,
       currentTarget,
       animationPhase,
+      writeToolDetected,
       startTargetAnimation,
       completeTargetAnimation,
       registerTarget,
@@ -1624,6 +2118,18 @@ const defaultHankState: HankContextState = {
   sportMode: null,
   userProfile: null,
   availableExercises: [],
+  planBuilder: defaultPlanBuilderState,
+  planBuilderActions: {
+    start: () => {},
+    addMeal: () => ({ success: false, message: 'HankProvider no disponible' }),
+    editMeal: () => ({ success: false, message: 'HankProvider no disponible' }),
+    removeMeal: () => ({ success: false, message: 'HankProvider no disponible' }),
+    addSupplement: () => ({ success: false, message: 'HankProvider no disponible' }),
+    removeSupplement: () => ({ success: false, message: 'HankProvider no disponible' }),
+    show: () => ({ success: false, message: 'HankProvider no disponible' }),
+    clear: () => {},
+    execute: async () => ({ success: false, message: 'HankProvider no disponible' }),
+  },
   aliases: [],
   executeCommand: async () => [],
   executeTool: async () => ({ success: false, message: 'HankProvider no disponible' }),
@@ -1645,6 +2151,7 @@ const defaultHankState: HankContextState = {
   targetState: {
     currentTarget: null,
     animationPhase: 'idle',
+    writeToolDetected: false,
     setTarget: () => {},
     startAnimation: () => {},
     completeAnimation: () => {},

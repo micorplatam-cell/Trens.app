@@ -10,9 +10,10 @@ export type HankToolName =
   | 'GYM_ADD_EXERCISE'
   | 'GYM_REMOVE_EXERCISE'
   | 'GYM_REPLACE_EXERCISE'
-  | 'GYM_MODIFY_SERIES'
   | 'GYM_GET_TODAY_ROUTINE'
   | 'GYM_LIST_EXERCISES'
+  | 'GYM_GET_EXERCISE_DETAILS'
+  | 'GYM_UPDATE_SERIES_DETAIL'
   // Asset Tools (LIQUID DATA)
   | 'ASSET_UPDATE_FIELD'
   | 'ASSET_READ'
@@ -25,15 +26,20 @@ export type HankToolName =
   | 'ADN_GET_PROFILE'
   | 'ADN_GET_RECORDS'
   | 'ADN_UPDATE_PROFILE'
+  | 'ADN_SET_BIOMETRICS'
   | 'ADN_ADD_MEASUREMENT'
   | 'ADN_REMOVE_MEASUREMENT'
+  | 'ADN_UPDATE_MEASUREMENT'
   // OMNISCIENT Tools (HANK es Dios)
   | 'GET_FULL_USER_CONTEXT'
   | 'PLAN_GET_MEAL_DETAILS'
+  | 'AUTO_ADJUST_ALL'
+  // Progress Photos
+  | 'PROGRESS_GET_PHOTOS'
+  | 'PROGRESS_GET_PHOTO_DETAIL'
+  | 'PROGRESS_COMPARE_PHOTOS'
   // PLAN Tools (Nutrición y Farmacología)
   | 'PLAN_ADD_MEAL'
-  | 'PLAN_EDIT_MEAL'
-  | 'PLAN_DELETE_MEAL'
   | 'PLAN_REMOVE_MEAL'
   | 'PLAN_UPDATE_MEAL_TIME'
   | 'PLAN_UPDATE_INGREDIENTS'
@@ -45,14 +51,34 @@ export type HankToolName =
   | 'PLAN_GET_STACK'
   | 'PLAN_ANALYZE_NUTRITION'
   | 'PLAN_GET_NEXT_MEAL'
+  // PLAN BUILDER Tools (Construcción interactiva de planes)
+  | 'PLAN_BUILDER_START'
+  | 'PLAN_BUILDER_ADD_MEAL'
+  | 'PLAN_BUILDER_EDIT_MEAL'
+  | 'PLAN_BUILDER_REMOVE_MEAL'
+  | 'PLAN_BUILDER_ADD_SUPPLEMENT'
+  | 'PLAN_BUILDER_REMOVE_SUPPLEMENT'
+  | 'PLAN_BUILDER_SHOW'
+  | 'PLAN_BUILDER_CLEAR'
+  | 'PLAN_BUILDER_EXECUTE'
+  // TRAINING PLAN Tools (Asignación de planes de entrenamiento)
+  | 'TRAINING_LIST_TEMPLATES'
+  | 'TRAINING_ASSIGN_PLAN'
+  | 'TRAINING_GET_CURRENT_PLAN'
+  | 'TRAINING_RESTRUCTURE'
+  | 'TRAINING_RENAME_DAY'
+  | 'TRAINING_ADD_DAY'
+  | 'TRAINING_REMOVE_DAY'
+  // SYNC Tools (Sincronización completa)
+  | 'GET_FULL_PLAN_STATUS'
+  | 'SYNC_NUTRITION_MACROS'
   // Spotify Tools
   | 'SPOTIFY_GET_CURRENT_TRACK'
-  // Diet Tools (Legacy)
-  | 'DIET_UPDATE_MEAL'
+  // Diet Tools (Legacy pero funcional)
   | 'DIET_ADD_CALORIES'
   // Logging Tools
   | 'LOG_WORKOUT_SET'
-  // Context Tools
+  // Context Tools (Legacy - usar GET_FULL_USER_CONTEXT)
   | 'GET_USER_CONTEXT'
   // System Tools
   | 'HANK_CLEAR_HISTORY'
@@ -73,7 +99,6 @@ export type HankToolName =
   // SURF Tools
   | 'SURF_LOG_SESSION'
   | 'SURF_GET_SESSIONS'
-  | 'SURF_GET_CONDITIONS'
   | 'SURF_FAVORITE_SPOT'
   | 'SURF_GET_SPOTS';
 
@@ -135,7 +160,8 @@ export interface ScreenContext {
 }
 
 export interface ActiveAsset {
-  id: string;
+  id: string; // exercise_id (de tabla exercises)
+  configId: string; // user_exercise_config.id - ESTABLE para modificar series
   type: string;
   name: string;
   liquidData: Record<string, unknown>; // JSONB dinámico
@@ -181,6 +207,32 @@ export interface HankContextState {
   sportMode: SportMode;
   userProfile: UserProfile | null;
   availableExercises: string[];
+
+  // Plan Builder State
+  planBuilder: PlanBuilderState;
+  planBuilderActions: {
+    start: (clearExisting?: boolean) => void;
+    addMeal: (time: string, ingredients: PlanBuilderIngredient[], name?: string) => HankToolResult;
+    editMeal: (
+      identifier: string | number,
+      updates: { time?: string; ingredients?: PlanBuilderIngredient[]; name?: string }
+    ) => HankToolResult;
+    removeMeal: (identifier: string | number) => HankToolResult;
+    addSupplement: (
+      name: string,
+      dose: string,
+      options?: {
+        type?: 'pill' | 'powder' | 'liquid' | 'syringe';
+        time?: string;
+        isPreWorkout?: boolean;
+        isPostWorkout?: boolean;
+      }
+    ) => HankToolResult;
+    removeSupplement: (nameOrIndex: string | number) => HankToolResult;
+    show: () => HankToolResult;
+    clear: () => void;
+    execute: () => Promise<HankToolResult>;
+  };
 
   // Aliases
   aliases: UserAlias[];
@@ -268,9 +320,106 @@ export type HankAnimationPhase =
 export interface HankTargetState {
   currentTarget: HankTarget | null;
   animationPhase: HankAnimationPhase;
+  writeToolDetected: boolean; // Se activa cuando se detecta una herramienta de escritura
   setTarget: (target: HankTarget | null) => void;
   startAnimation: (target: HankTarget) => void;
   completeAnimation: (success: boolean) => void;
   registerTarget: (id: string, target: Omit<HankTarget, 'id'>) => void;
   unregisterTarget: (id: string) => void;
+}
+
+// ============================================================================
+// PLAN BUILDER TYPES - Sistema de construcción de planes
+// ============================================================================
+
+/**
+ * Un ingrediente en el plan builder
+ */
+export interface PlanBuilderIngredient {
+  name: string;
+  quantity?: string;
+  portion?: string;
+}
+
+/**
+ * Una comida en el plan builder (aún no guardada)
+ */
+export interface PlanBuilderMeal {
+  tempId: string; // ID temporal para referencia
+  time: string; // Hora en formato 24h (ej: "07:00")
+  name?: string; // Nombre opcional (ej: "Desayuno")
+  ingredients: PlanBuilderIngredient[];
+}
+
+/**
+ * Un suplemento en el plan builder (aún no guardado)
+ */
+export interface PlanBuilderSupplement {
+  tempId: string;
+  name: string;
+  dose: string;
+  type?: 'pill' | 'powder' | 'liquid' | 'syringe';
+  time?: string;
+  isPreWorkout?: boolean;
+  isPostWorkout?: boolean;
+  daysOfWeek?: number[];
+}
+
+/**
+ * El estado completo del plan builder
+ */
+export interface PlanBuilderState {
+  isActive: boolean;
+  meals: PlanBuilderMeal[];
+  supplements: PlanBuilderSupplement[];
+  startedAt: Date | null;
+  clearExistingOnExecute: boolean; // Si true, borra el plan actual antes de insertar
+}
+
+/**
+ * Resultado de ejecutar el plan builder
+ */
+export interface PlanBuilderExecuteResult {
+  mealsCreated: number;
+  supplementsCreated: number;
+  errors: string[];
+}
+
+// ============================================================================
+// TRAINING PLAN TEMPLATES - Plantillas de entrenamiento predefinidas
+// ============================================================================
+
+/**
+ * Un día de entrenamiento en una plantilla
+ */
+export interface TrainingTemplateDay {
+  dayIndex: number; // 0-based
+  name: string; // "Pecho y Tríceps"
+  muscleGroups: string[]; // ["Pecho", "Tríceps"]
+  exerciseCount: number; // Cantidad sugerida de ejercicios
+}
+
+/**
+ * Una plantilla de entrenamiento completa
+ */
+export interface TrainingPlanTemplate {
+  id: string; // Identificador único
+  name: string; // "Push/Pull/Legs"
+  description: string;
+  frequency: number; // 3, 4, 5, 6 días por semana
+  level: 'PRINCIPIANTE' | 'INTERMEDIO' | 'AVANZADO';
+  goal: 'HIPERTROFIA' | 'FUERZA' | 'DEFINICION' | 'RECOMPOSICION' | 'GENERAL';
+  days: TrainingTemplateDay[];
+  tags?: string[];
+}
+
+/**
+ * Resultado de asignar un plan de entrenamiento
+ */
+export interface TrainingPlanAssignResult {
+  success: boolean;
+  planName: string;
+  frequency: number;
+  daysConfigured: number;
+  message: string;
 }

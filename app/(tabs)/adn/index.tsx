@@ -824,7 +824,7 @@ export default function AdnScreen() {
         )}
 
         {/* TRENS ID (Solo visible para el dueño) */}
-        <View className="px-4 -mt-4">
+        <View className="px-4 mt-4">
           {isOwner && (
             <TrensID
               userId={user?.id || 'guest'}

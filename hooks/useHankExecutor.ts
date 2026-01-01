@@ -9,6 +9,8 @@ import {
   gymReplaceExercise,
   gymGetTodayRoutine,
   gymListExercises,
+  gymGetExerciseDetails,
+  gymUpdateSeriesDetail,
   assetUpdateField,
   assetRead,
   assetGetSchema,
@@ -23,6 +25,9 @@ import {
   adnUpdateProfile,
   adnAddMeasurement,
   adnRemoveMeasurement,
+  adnUpdateMeasurement,
+  adnSetBiometrics,
+  autoAdjustAll,
   // PLAN Tools
   planAddMeal,
   planRemoveMeal,
@@ -40,6 +45,21 @@ import {
   planGetMealDetails,
   // System Tools
   hankClearHistory,
+  // Training Plan Tools
+  trainingListTemplates,
+  trainingAssignPlan,
+  trainingGetCurrentPlan,
+  trainingRestructure,
+  trainingRenameDay,
+  trainingAddDay,
+  trainingRemoveDay,
+  // Sync Tools
+  getFullPlanStatus,
+  syncNutritionMacros,
+  // Progress Photos
+  progressGetPhotos,
+  progressGetPhotoDetail,
+  progressComparePhotos,
   TOOL_DEFINITIONS,
 } from '../services/hank/tools';
 import {
@@ -134,6 +154,45 @@ export const useHankExecutor = (
             result = await gymListExercises(userId, p.trainingDay as number | undefined);
             break;
 
+          case 'GYM_GET_EXERCISE_DETAILS':
+            result = await gymGetExerciseDetails(
+              userId,
+              p.exerciseName as string,
+              p.trainingDay as number | undefined
+            );
+            break;
+
+          case 'GYM_UPDATE_SERIES_DETAIL': {
+            const seriesIdx = p.seriesIndex as string;
+            const resolvedIdx =
+              seriesIdx === 'first' ? 'first' : seriesIdx === 'last' ? 'last' : parseInt(seriesIdx);
+            result = await gymUpdateSeriesDetail(
+              userId,
+              p.exerciseName as string,
+              resolvedIdx,
+              (p.trainingDay as number) ?? currentTrainingDay,
+              {
+                reps: p.reps as number | undefined,
+                weight: p.weight as number | undefined,
+                type: p.type as
+                  | 'WARMUP'
+                  | 'APPROACH'
+                  | 'EFFECTIVE'
+                  | 'FAILURE'
+                  | 'CALENTAMIENTO'
+                  | 'APROXIMACION'
+                  | 'EFECTIVA'
+                  | 'FALLO'
+                  | undefined,
+                rir: p.rir as number | undefined,
+                tempo: p.tempo as string | undefined,
+                restSeconds: p.restSeconds as number | undefined,
+                note: p.note as string | undefined,
+              }
+            );
+            break;
+          }
+
           case 'ASSET_UPDATE_FIELD':
             result = await assetUpdateField(
               userId,
@@ -175,13 +234,24 @@ export const useHankExecutor = (
             break;
 
           case 'ASSET_REMOVE_SERIES':
+            console.warn(
+              '🎯 HANK ASSET_REMOVE_SERIES: configId=',
+              p.configId,
+              'assetName=',
+              p.assetName,
+              'seriesIndex=',
+              p.seriesIndex,
+              'trainingDay=',
+              currentTrainingDay
+            );
             result = await assetRemoveSeries(
               userId,
-              p.assetName as string,
+              p.assetName as string | undefined,
               p.seriesIndex === 'last' || p.seriesIndex === 'first'
                 ? p.seriesIndex
                 : parseInt(String(p.seriesIndex), 10),
-              currentTrainingDay // Usar día del contexto de pantalla
+              currentTrainingDay, // Usar día del contexto de pantalla
+              p.configId as string | undefined
             );
             break;
 
@@ -193,14 +263,23 @@ export const useHankExecutor = (
             } else if (p.position === 'start') {
               addPosition = 'start';
             }
+            console.warn(
+              '🎯 HANK ASSET_ADD_SERIES: configId=',
+              p.configId,
+              'assetName=',
+              p.assetName,
+              'trainingDay=',
+              currentTrainingDay
+            );
             result = await assetAddSeries(
               userId,
-              p.assetName as string,
+              p.assetName as string | undefined,
               (p.reps as number) || 10,
               (p.weight as number) || 0,
               (p.seriesType as 'WARMUP' | 'APPROACH' | 'EFFECTIVE' | 'FAILURE') || 'EFFECTIVE',
               addPosition,
-              currentTrainingDay // Usar día del contexto de pantalla
+              currentTrainingDay, // Usar día del contexto de pantalla
+              p.configId as string | undefined
             );
             break;
 
@@ -218,12 +297,13 @@ export const useHankExecutor = (
             }
             result = await assetReplaceSeries(
               userId,
-              p.assetName as string,
+              p.assetName as string | undefined,
               replaceIdx,
               (p.reps as number) || 10,
               (p.weight as number) || 0,
               (p.seriesType as 'WARMUP' | 'APPROACH' | 'EFFECTIVE' | 'FAILURE') || 'EFFECTIVE',
-              currentTrainingDay // Usar día del contexto de pantalla
+              currentTrainingDay, // Usar día del contexto de pantalla
+              p.configId as string | undefined
             );
             break;
 
@@ -256,9 +336,10 @@ export const useHankExecutor = (
             }));
             result = await assetSetSeries(
               userId,
-              p.assetName as string,
+              p.assetName as string | undefined,
               formattedSeries,
-              currentTrainingDay // Usar día del contexto de pantalla
+              currentTrainingDay, // Usar día del contexto de pantalla
+              p.configId as string | undefined
             );
             break;
 
@@ -295,6 +376,39 @@ export const useHankExecutor = (
 
           case 'ADN_REMOVE_MEASUREMENT':
             result = await adnRemoveMeasurement(userId, p.measurementName as string);
+            break;
+
+          case 'ADN_UPDATE_MEASUREMENT':
+            result = await adnUpdateMeasurement(
+              userId,
+              p.measurementName as string,
+              p.newValue as string,
+              (p.isDominant as boolean) || undefined
+            );
+            break;
+
+          case 'ADN_SET_BIOMETRICS':
+            result = await adnSetBiometrics(userId, JSON.parse(p.updates as string));
+            break;
+
+          case 'AUTO_ADJUST_ALL':
+            result = await autoAdjustAll(userId);
+            break;
+
+          // PROGRESS PHOTOS
+          case 'PROGRESS_GET_PHOTOS':
+            result = await progressGetPhotos(userId);
+            break;
+
+          case 'PROGRESS_GET_PHOTO_DETAIL':
+            result = await progressGetPhotoDetail(userId, p.photoId as string);
+            break;
+
+          case 'PROGRESS_COMPARE_PHOTOS':
+            result = await progressComparePhotos(userId, {
+              firstPhotoId: p.firstPhotoId as string | undefined,
+              lastPhotoId: p.lastPhotoId as string | undefined,
+            });
             break;
 
           // PLAN TOOLS
@@ -492,6 +606,169 @@ ${analysis.recommendations.map((r) => `• ${r}`).join('\n')}`,
           // SYSTEM TOOLS
           case 'HANK_CLEAR_HISTORY':
             result = await hankClearHistory(userId);
+            break;
+
+          // =========================================================================
+          // PLAN BUILDER TOOLS
+          // Nota: Estas herramientas devuelven instrucciones para que el contexto
+          // maneje el estado. El ejecutor solo valida y devuelve el mensaje apropiado.
+          // =========================================================================
+          case 'PLAN_BUILDER_START':
+            // El estado real se maneja en HankContext
+            result = {
+              success: true,
+              message: `🚀 ¡MODO PLAN BUILDER ACTIVADO!
+
+Ahora puedes construir tu plan completo conversacionalmente. Dime:
+• 📍 Las comidas que quieres (ej: "desayuno a las 7 con huevos y avena")
+• 💊 Los suplementos (ej: "creatina 5g en la mañana")
+
+Cuando termines, di **"ejecuta el plan"** y lo guardaré todo.`,
+              data: {
+                action: 'PLAN_BUILDER_START',
+                clearExisting: (p.clearExisting as boolean) || false,
+              },
+            };
+            break;
+
+          case 'PLAN_BUILDER_ADD_MEAL':
+            result = {
+              success: true,
+              message: `✅ Comida agregada al plan.`,
+              data: {
+                action: 'PLAN_BUILDER_ADD_MEAL',
+                time: p.time as string,
+                ingredients: p.ingredients,
+                name: p.name as string | undefined,
+              },
+            };
+            break;
+
+          case 'PLAN_BUILDER_EDIT_MEAL':
+            result = {
+              success: true,
+              message: `✅ Comida editada en el plan.`,
+              data: {
+                action: 'PLAN_BUILDER_EDIT_MEAL',
+                mealIdentifier: p.mealIdentifier,
+                updates: {
+                  time: p.time as string | undefined,
+                  ingredients: p.ingredients,
+                  name: p.name as string | undefined,
+                },
+              },
+            };
+            break;
+
+          case 'PLAN_BUILDER_REMOVE_MEAL':
+            result = {
+              success: true,
+              message: `🗑️ Comida eliminada del plan.`,
+              data: {
+                action: 'PLAN_BUILDER_REMOVE_MEAL',
+                mealIdentifier: p.mealIdentifier,
+              },
+            };
+            break;
+
+          case 'PLAN_BUILDER_ADD_SUPPLEMENT':
+            result = {
+              success: true,
+              message: `✅ Suplemento agregado al plan.`,
+              data: {
+                action: 'PLAN_BUILDER_ADD_SUPPLEMENT',
+                name: p.name as string,
+                dose: p.dose as string,
+                type: p.type as string | undefined,
+                time: p.time as string | undefined,
+                isPreWorkout: p.isPreWorkout as boolean | undefined,
+                isPostWorkout: p.isPostWorkout as boolean | undefined,
+              },
+            };
+            break;
+
+          case 'PLAN_BUILDER_REMOVE_SUPPLEMENT':
+            result = {
+              success: true,
+              message: `🗑️ Suplemento eliminado del plan.`,
+              data: {
+                action: 'PLAN_BUILDER_REMOVE_SUPPLEMENT',
+                nameOrIndex: p.nameOrIndex,
+              },
+            };
+            break;
+
+          case 'PLAN_BUILDER_SHOW':
+            result = {
+              success: true,
+              message: `📋 Mostrando el plan en construcción...`,
+              data: {
+                action: 'PLAN_BUILDER_SHOW',
+              },
+            };
+            break;
+
+          case 'PLAN_BUILDER_CLEAR':
+            result = {
+              success: true,
+              message: `🧹 Plan Builder limpiado. Se descartaron los cambios.`,
+              data: {
+                action: 'PLAN_BUILDER_CLEAR',
+              },
+            };
+            break;
+
+          case 'PLAN_BUILDER_EXECUTE':
+            result = {
+              success: true,
+              message: `🏃 Ejecutando el plan...`,
+              data: {
+                action: 'PLAN_BUILDER_EXECUTE',
+              },
+            };
+            break;
+
+          // =========================================================================
+          // TRAINING PLAN TOOLS
+          // =========================================================================
+          case 'TRAINING_LIST_TEMPLATES':
+            result = await trainingListTemplates({
+              level: p.level as string | undefined,
+              goal: p.goal as string | undefined,
+              frequency: p.frequency as number | undefined,
+            });
+            break;
+
+          case 'TRAINING_ASSIGN_PLAN':
+            result = await trainingAssignPlan(userId, p.planId as string);
+            break;
+
+          case 'TRAINING_GET_CURRENT_PLAN':
+            result = await trainingGetCurrentPlan(userId);
+            break;
+
+          case 'TRAINING_RESTRUCTURE':
+            result = await trainingRestructure(userId, JSON.parse(p.newDays as string));
+            break;
+
+          case 'TRAINING_RENAME_DAY':
+            result = await trainingRenameDay(userId, p.dayIndex as number, p.newName as string);
+            break;
+
+          case 'TRAINING_ADD_DAY':
+            result = await trainingAddDay(userId, p.dayName as string);
+            break;
+
+          case 'TRAINING_REMOVE_DAY':
+            result = await trainingRemoveDay(userId, p.dayIndex as number);
+            break;
+
+          case 'GET_FULL_PLAN_STATUS':
+            result = await getFullPlanStatus(userId);
+            break;
+
+          case 'SYNC_NUTRITION_MACROS':
+            result = await syncNutritionMacros(userId);
             break;
 
           // =========================================================================

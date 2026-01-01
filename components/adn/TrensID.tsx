@@ -1,12 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  ScrollView,
-  ActivityIndicator,
-} from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ScrollView } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -14,25 +7,17 @@ import Animated, {
   interpolate,
   Easing,
 } from 'react-native-reanimated';
-import {
-  ChevronDown,
-  X,
-  Edit2,
-  Save,
-  ShieldAlert,
-  Crown,
-  Trash2,
-  RefreshCw,
-} from 'lucide-react-native';
+import { ChevronDown, X, Edit2, Save, ShieldAlert, Crown, Trash2 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { supabase } from '../../lib/supabase';
 import { useSaveGuard } from '../../context/SaveGuardContext';
 import { useHankTarget } from '../../hooks/useHankTarget';
 import HankInlineHighlight from '../hank/HankInlineHighlight';
-import {
-  calculateUserDailyMacros,
-  calculateMealWithUserMacros,
-} from '../../services/hank/nutrition';
+import ProgressSlider from './ProgressSlider';
+import AddProgressPhotoModal from './AddProgressPhotoModal';
+import ProgressPhotoDetailModal from './ProgressPhotoDetailModal';
+import type { ProgressPhoto } from '../../types/progress';
+// Las sincronizaciones de macros ahora se hacen conversando con Hank
 
 interface Measurement {
   id: string;
@@ -81,8 +66,11 @@ export default function TrensID({ userId, profileData, measurements, onUpdate }:
   const [showMeasureForm, setShowMeasureForm] = useState(false);
   const [newMeasurement, setNewMeasurement] = useState({ name: '', value: '', is_dominant: false });
   const [isSaving, setIsSaving] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [syncProgress, setSyncProgress] = useState('');
+  // Progress Photos
+  const [showAddPhotoModal, setShowAddPhotoModal] = useState(false);
+  const [showPhotoDetailModal, setShowPhotoDetailModal] = useState(false);
+  const [selectedPhoto, setSelectedPhoto] = useState<ProgressPhoto | null>(null);
+  const [progressRefreshTrigger, setProgressRefreshTrigger] = useState(0);
 
   const expandProgress = useSharedValue(0);
 
@@ -218,163 +206,8 @@ export default function TrensID({ userId, profileData, measurements, onUpdate }:
     }
   };
 
-  // Guardar Y sincronizar con el plan (recalcula macros e ingredientes)
-  const saveAndSyncWithPlan = async () => {
-    // Guard: Verificar si puede guardar
-    if (!canSave('save_profile')) return;
-
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    setIsSyncing(true);
-    setSyncProgress('Guardando perfil...');
-
-    try {
-      // 1. Guardar perfil e INVALIDAR CACHÉ DE MACROS
-      const { error: profileError } = await supabase
-        .from('user_profiles')
-        .update({
-          goal: editData.goal,
-          weight: editData.weight,
-          height: editData.height,
-          injuries: editData.injuries,
-          allergies: editData.allergies,
-          age: editData.age || null,
-          sex: editData.sex || null,
-          body_fat_percentage: editData.body_fat_percentage || null,
-          muscle_mass: editData.muscle_mass || null,
-          activity_level: editData.activity_level || 'MODERADO',
-          training_experience: editData.training_experience || 'INTERMEDIO',
-          metabolic_rate: editData.metabolic_rate || 'NORMAL',
-          training_days_per_week: editData.training_days_per_week || 4,
-          // Invalidar caché de macros para forzar recalcular
-          cached_daily_macros: null,
-          cached_macros_meal_count: null,
-          cached_macros_updated_at: null,
-        })
-        .eq('user_id', userId);
-
-      if (profileError) throw profileError;
-
-      // 2. Obtener todas las comidas del usuario
-      setSyncProgress('Obteniendo comidas...');
-      const { data: mealsData, error: mealsError } = await supabase
-        .from('meals')
-        .select('id, name, ingredients')
-        .eq('user_id', userId);
-
-      if (mealsError) throw mealsError;
-
-      if (!mealsData || mealsData.length === 0) {
-        setSyncProgress('No hay comidas para sincronizar');
-        setTimeout(() => {
-          onUpdate();
-          setIsExpanded(false);
-          setIsSyncing(false);
-          setSyncProgress('');
-        }, 1000);
-        return;
-      }
-
-      // 3. Calcular nuevos macros con IA usando el perfil actualizado + medidas
-      setSyncProgress('Calculando macros con IA...');
-
-      // Preparar medidas corporales para el cálculo
-      const bodyMeasurementsForCalc = editMeasurements.map((m) => ({
-        name: m.name,
-        value: m.value,
-        is_dominant: m.is_dominant,
-      }));
-
-      const dailyMacros = await calculateUserDailyMacros({
-        weight: editData.weight,
-        height: editData.height,
-        goal: editData.goal,
-        mealCount: mealsData.length,
-        age: editData.age,
-        sex: editData.sex,
-        bodyFatPercentage: editData.body_fat_percentage,
-        muscleMass: editData.muscle_mass,
-        activityLevel: editData.activity_level || 'MODERADO',
-        trainingExperience: editData.training_experience,
-        metabolicRate: editData.metabolic_rate,
-        trainingDaysPerWeek: editData.training_days_per_week,
-        // Incluir todas las medidas corporales
-        bodyMeasurements: bodyMeasurementsForCalc,
-      });
-
-      const perMealMacros = dailyMacros.perMeal;
-      console.warn('🎯 Nuevos macros por comida:', perMealMacros);
-
-      // 4. Recalcular cada comida con IA
-      let processedCount = 0;
-      for (const meal of mealsData) {
-        processedCount++;
-        setSyncProgress(`Recalculando ${processedCount}/${mealsData.length}...`);
-
-        const ingredients = meal.ingredients || [];
-        if (ingredients.length === 0) continue;
-
-        // Preparar ingredientes para recálculo
-        const ingredientsWithIds = ingredients.map((ing: any, i: number) => ({
-          id: `ing-${i}`,
-          name: ing.name,
-          quantity: '', // Vacío para que IA recalcule
-          portion: '',
-        }));
-
-        // Recalcular con IA
-        const calculated = await calculateMealWithUserMacros(ingredientsWithIds, perMealMacros);
-
-        // Actualizar en la base de datos
-        const updatedIngredients = calculated.map((ing) => ({
-          name: ing.name,
-          quantity: ing.quantity,
-          portion: ing.portion || '',
-        }));
-
-        // Calcular macros totales de la comida
-        let totalCals = 0,
-          totalP = 0,
-          totalC = 0,
-          totalF = 0;
-        calculated.forEach((ing) => {
-          totalCals += ing.nutritionInfo?.calories || 0;
-          totalP += ing.nutritionInfo?.protein || 0;
-          totalC += ing.nutritionInfo?.carbs || 0;
-          totalF += ing.nutritionInfo?.fat || 0;
-        });
-
-        await supabase
-          .from('meals')
-          .update({
-            ingredients: updatedIngredients,
-            calories: Math.round(totalCals),
-            protein_g: Math.round(totalP),
-            carbs_g: Math.round(totalC),
-            fat_g: Math.round(totalF),
-          })
-          .eq('id', meal.id);
-      }
-
-      setSyncProgress('✓ Plan sincronizado');
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-
-      setTimeout(() => {
-        onUpdate();
-        setIsExpanded(false);
-        setShowMeasureForm(false);
-        setIsSyncing(false);
-        setSyncProgress('');
-      }, 1500);
-    } catch (err) {
-      console.error('Error syncing with plan:', err);
-      setSyncProgress('Error al sincronizar');
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setTimeout(() => {
-        setIsSyncing(false);
-        setSyncProgress('');
-      }, 2000);
-    }
-  };
+  // ⚡ Para sincronizar macros con tu plan, habla con Hank
+  // Ejemplo: "Hank, recalcula mis macros con mi nuevo peso"
 
   const chevronStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: `${interpolate(expandProgress.value, [0, 1], [0, 180])}deg` }],
@@ -835,47 +668,27 @@ export default function TrensID({ userId, profileData, measurements, onUpdate }:
 
               {/* BOTONES DE GUARDADO */}
               <View className="mt-6 gap-3">
-                {/* Botón principal: Guardar y Sincronizar */}
-                <TouchableOpacity
-                  onPress={saveAndSyncWithPlan}
-                  disabled={isSyncing || isSaving}
-                  className={`py-4 flex-row items-center justify-center gap-2 ${
-                    isSyncing ? 'bg-savage-red' : 'bg-white'
-                  }`}
-                >
-                  {isSyncing ? (
-                    <>
-                      <ActivityIndicator size="small" color="#fff" />
-                      <Text className="text-white font-black uppercase tracking-widest text-xs">
-                        {syncProgress}
-                      </Text>
-                    </>
-                  ) : (
-                    <>
-                      <RefreshCw size={14} color="#000" />
-                      <Text className="text-black font-black uppercase tracking-widest text-xs">
-                        Guardar y Sincronizar Plan
-                      </Text>
-                    </>
-                  )}
-                </TouchableOpacity>
-
-                {/* Botón secundario: Solo guardar ficha */}
+                {/* Botón: Guardar Ficha */}
                 <TouchableOpacity
                   onPress={saveProfileOnly}
-                  disabled={isSyncing || isSaving}
-                  className="py-3 flex-row items-center justify-center gap-2 border border-zinc-700"
+                  disabled={isSaving}
+                  className="py-4 flex-row items-center justify-center gap-2 bg-white"
                 >
-                  <Save size={12} color="#71717a" />
-                  <Text className="text-zinc-500 font-bold uppercase tracking-widest text-[10px]">
-                    {isSaving ? 'Guardando...' : 'Solo Guardar Ficha'}
+                  <Save size={14} color="#000" />
+                  <Text className="text-black font-black uppercase tracking-widest text-xs">
+                    {isSaving ? 'Guardando...' : 'Guardar Ficha'}
                   </Text>
                 </TouchableOpacity>
 
-                {/* Nota explicativa */}
-                <Text className="text-[9px] text-zinc-600 text-center">
-                  Sincronizar recalcula todos los macros e ingredientes de tu plan con IA
-                </Text>
+                {/* Nota explicativa - Hank */}
+                <View className="bg-zinc-900/50 p-3 rounded border border-zinc-800">
+                  <Text className="text-[10px] text-zinc-400 text-center">
+                    💡 Para sincronizar macros con tu plan, habla con Hank:
+                  </Text>
+                  <Text className="text-[10px] text-savage-red text-center font-mono mt-1">
+                    "Recalcula mis macros con mi nuevo peso"
+                  </Text>
+                </View>
               </View>
             </ScrollView>
           )}
@@ -890,6 +703,48 @@ export default function TrensID({ userId, profileData, measurements, onUpdate }:
           </Text>
         </View>
       )}
+
+      {/* Progress Photos Slider - Solo visible cuando no está expandido */}
+      {!isExpanded && (
+        <View className="mt-4 -mx-4">
+          <ProgressSlider
+            userId={userId}
+            onAddPhoto={() => setShowAddPhotoModal(true)}
+            onViewPhoto={(photo) => {
+              setSelectedPhoto(photo);
+              setShowPhotoDetailModal(true);
+            }}
+            refreshTrigger={progressRefreshTrigger}
+          />
+        </View>
+      )}
+
+      {/* Modal: Agregar Foto de Progreso */}
+      <AddProgressPhotoModal
+        visible={showAddPhotoModal}
+        userId={userId}
+        onClose={() => setShowAddPhotoModal(false)}
+        onSuccess={() => {
+          setShowAddPhotoModal(false);
+          setProgressRefreshTrigger((prev) => prev + 1);
+        }}
+      />
+
+      {/* Modal: Detalle de Foto */}
+      <ProgressPhotoDetailModal
+        visible={showPhotoDetailModal}
+        photo={selectedPhoto}
+        userId={userId}
+        onClose={() => {
+          setShowPhotoDetailModal(false);
+          setSelectedPhoto(null);
+        }}
+        onDeleted={() => {
+          setShowPhotoDetailModal(false);
+          setSelectedPhoto(null);
+          setProgressRefreshTrigger((prev) => prev + 1);
+        }}
+      />
     </View>
   );
 }

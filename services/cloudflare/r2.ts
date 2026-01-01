@@ -240,6 +240,61 @@ class CloudflareR2Service {
     if (!url.startsWith(PUBLIC_URL)) return null;
     return url.replace(`${PUBLIC_URL}/`, '');
   }
+
+  // --------------------------------------------------------------------------
+  // SUBIR DESDE BASE64 (guarda temporalmente y sube)
+  // --------------------------------------------------------------------------
+  async uploadFromBase64(
+    base64Data: string,
+    key: string,
+    contentType: string
+  ): Promise<R2UploadResult> {
+    try {
+      // Crear archivo temporal
+      const tempUri = `${FileSystem.cacheDirectory}temp_upload_${Date.now()}.tmp`;
+
+      // Escribir base64 a archivo temporal
+      await FileSystem.writeAsStringAsync(tempUri, base64Data, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      // Subir usando el método existente
+      const result = await this.uploadFile(tempUri, key, contentType);
+
+      // Limpiar archivo temporal
+      try {
+        await FileSystem.deleteAsync(tempUri, { idempotent: true });
+      } catch {
+        // Ignorar errores de limpieza
+      }
+
+      return result;
+    } catch (error) {
+      console.error('💥 R2 Base64 Upload Exception:', error);
+      return { success: false, error: String(error) };
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // SUBIR FOTO DE PROGRESO (HELPER)
+  // --------------------------------------------------------------------------
+  async uploadProgressPhoto(base64Data: string, userId: string): Promise<R2UploadResult> {
+    const timestamp = Date.now();
+    const key = `progress/${userId}/${timestamp}.jpg`;
+
+    return this.uploadFromBase64(base64Data, key, 'image/jpeg');
+  }
+
+  // --------------------------------------------------------------------------
+  // ELIMINAR FOTO DE PROGRESO
+  // --------------------------------------------------------------------------
+  async deleteProgressPhoto(photoUrl: string): Promise<R2DeleteResult> {
+    const key = this.getKeyFromUrl(photoUrl);
+    if (!key) {
+      return { success: false, error: 'URL inválida' };
+    }
+    return this.deleteFile(key);
+  }
 }
 
 // Singleton

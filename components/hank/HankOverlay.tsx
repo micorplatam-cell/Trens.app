@@ -1240,6 +1240,16 @@ export const HankOverlay: React.FC = () => {
   }, [isOpen, translateY]);
 
   // -------------------------------------------------------------------------
+  // CERRAR CHAT CUANDO SE DETECTA UN WRITE TOOL (para ver la animación)
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    if (targetState.writeToolDetected && isOpen) {
+      console.warn('🎬 HANK UI: Write tool detectado, cerrando chat para mostrar animación');
+      setIsOpen(false);
+    }
+  }, [targetState.writeToolDetected, isOpen]);
+
+  // -------------------------------------------------------------------------
   // HELPER: Verificar si debe limpiar la UI del chat
   // -------------------------------------------------------------------------
   const checkAndClearUIChat = useCallback(
@@ -1406,15 +1416,15 @@ export const HankOverlay: React.FC = () => {
     setMessages((prev) => [...prev, userMessage]);
     setInputText('');
 
-    // Cerrar el chat ANTES de ejecutar para ver la animación
-    setIsOpen(false);
+    // NO cerrar el chat aquí - el useEffect detectará writeToolDetected y cerrará automáticamente
+    // Esto permite que consultas/chat casual permanezcan con el chat abierto
 
     // Execute command
     const results = await executeCommand(messageText);
 
-    // Verificar si hubo tool calls para decidir si reabrir chat
-    const hadToolCalls = results.some(
-      (r) => (r.data as { hadToolCalls?: boolean })?.hadToolCalls === true
+    // Verificar si hubo herramientas de ESCRITURA (no solo lectura/consultas)
+    const hadWriteToolCalls = results.some(
+      (r) => (r.data as { hadWriteToolCalls?: boolean })?.hadWriteToolCalls === true
     );
 
     // Verificar si debe limpiar la UI del chat
@@ -1441,19 +1451,18 @@ export const HankOverlay: React.FC = () => {
 
     setMessages((prev) => [...prev, hankMessage]);
 
-    // Si hubo tool calls, reabrir el chat después de la animación
-    // Si no hubo tool calls (solo conversación), reabrir inmediatamente
-    if (hadToolCalls) {
-      // Esperar que termine la animación completa antes de reabrir
+    // Si hubo herramientas de ESCRITURA, esperar que termine la animación antes de reabrir
+    if (hadWriteToolCalls) {
+      // La animación ya terminó (el executeCommand es síncrono con la animación)
+      // Pero agregamos un pequeño delay para que el usuario vea el resultado final
       setTimeout(() => {
         setIsOpen(true);
         setTimeout(() => {
           flatListRef.current?.scrollToEnd({ animated: true });
         }, 100);
-      }, 4500); // flying(800) + working(3000) + success(400) + returning(600) = 4800ms
+      }, 4500); // flying(800) + working(5000) + success(400) + returning(600)
     } else {
-      // Solo conversación, reabrir inmediatamente
-      setIsOpen(true);
+      // Solo consulta/conversación, mantener el chat abierto y hacer scroll
       setTimeout(() => {
         flatListRef.current?.scrollToEnd({ animated: true });
       }, 100);
@@ -1682,10 +1691,10 @@ export const HankOverlay: React.FC = () => {
                     return `Eliminar suplemento: ${tc.parameters.name}`;
                   case 'PLAN_ADD_MEAL':
                     return `Agregar comida a las ${tc.parameters.time}`;
-                  case 'PLAN_EDIT_MEAL':
-                    return `Editar comida`;
-                  case 'PLAN_DELETE_MEAL':
+                  case 'PLAN_REMOVE_MEAL':
                     return `Eliminar comida`;
+                  case 'PLAN_UPDATE_MEAL_TIME':
+                    return `Actualizar hora de comida`;
                   default:
                     return tc.tool.replace(/_/g, ' ');
                 }

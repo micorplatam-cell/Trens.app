@@ -871,7 +871,7 @@ function GymScreen() {
   // Video playback control - trackea el ejercicio actualmente visible
   const [activeExerciseIndex, setActiveExerciseIndex] = useState(0);
   const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 50, // Considera visible si está 50% en pantalla
+    itemVisiblePercentThreshold: 70, // Considera visible si está 70% en pantalla (más estricto)
   });
 
   // Trackear alternativa activa por cada ejercicio (exerciseIndex -> alternativeIndex)
@@ -1811,9 +1811,14 @@ function GymScreen() {
     try {
       const { data: profile } = await supabase
         .from('profiles')
-        .select('training_last_access, training_current_day, training_routine_names')
+        .select(
+          'training_last_access, training_current_day, training_routine_names, training_frequency'
+        )
         .eq('id', user.id)
         .single();
+
+      // Cargar frecuencia desde la base de datos (si existe)
+      const savedFrequency = profile?.training_frequency || 3;
 
       // Cargar nombres de rutinas desde la base de datos
       let routineNames = profile?.training_routine_names || {};
@@ -1835,15 +1840,19 @@ function GymScreen() {
         console.warn('🏋️ GYM: Nombres de rutinas inicializados:', defaultNames);
       }
 
-      if (Object.keys(routineNames).length > 0) {
-        setTrainingProgram((prev) => ({
-          ...prev,
-          days: prev.days.map((day, idx) => ({
-            ...day,
-            muscleGroups: routineNames[String(idx)] || day.muscleGroups,
-          })),
-        }));
-      }
+      // Reconstruir días basados en la frecuencia guardada
+      const numDays = Math.max(Object.keys(routineNames).length, savedFrequency);
+      const updatedDays = Array.from({ length: numDays }, (_, idx) => ({
+        id: String(idx + 1),
+        muscleGroups: routineNames[String(idx)] || `DÍA ${idx + 1}`,
+        exercises: [],
+      }));
+
+      setTrainingProgram((prev) => ({
+        ...prev,
+        frequency: numDays,
+        days: updatedDays,
+      }));
 
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -1859,7 +1868,7 @@ function GymScreen() {
         // Si han pasado uno o más días, avanzar al siguiente día de entrenamiento
         if (todayISO > lastAccessISO) {
           newDayIndex = (profile.training_current_day || 0) + 1;
-          if (newDayIndex >= trainingProgram.frequency) {
+          if (newDayIndex >= numDays) {
             newDayIndex = 0; // Reiniciar ciclo
           }
         } else {
