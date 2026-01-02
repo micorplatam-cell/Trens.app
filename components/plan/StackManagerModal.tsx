@@ -399,7 +399,10 @@ export const StackManagerModal: React.FC<StackManagerModalProps> = ({
                   />
 
                   {/* Action Buttons */}
-                  <View className="flex-row gap-3" style={{ marginBottom: Math.max(insets.bottom, 16) + 8 }}>
+                  <View
+                    className="flex-row gap-3"
+                    style={{ marginBottom: Math.max(insets.bottom, 16) + 8 }}
+                  >
                     <Pressable
                       onPress={resetForm}
                       className="flex-1 py-3 rounded-xl border border-zinc-700"

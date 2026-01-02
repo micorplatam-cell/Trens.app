@@ -2101,7 +2101,7 @@ export const HankOverlay: React.FC = () => {
               />
 
               {/* Input Area - con padding para la barra de navegación */}
-              <View 
+              <View
                 className="flex-row items-center px-4 py-3 border-t border-zinc-800 bg-black"
                 style={{ paddingBottom: Math.max(insets.bottom, 12) }}
               >

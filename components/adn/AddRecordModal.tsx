@@ -261,7 +261,10 @@ export default function AddRecordModal({
         </ScrollView>
 
         {/* Footer con botón */}
-        <View className="p-4 border-t border-zinc-800" style={{ paddingBottom: Math.max(insets.bottom, 16) }}>
+        <View
+          className="p-4 border-t border-zinc-800"
+          style={{ paddingBottom: Math.max(insets.bottom, 16) }}
+        >
           <TouchableOpacity
             disabled={!canSave}
             onPress={handleSave}
