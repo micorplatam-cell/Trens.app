@@ -8,6 +8,8 @@ import {
   Image,
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { X, Camera, Image as ImageIcon, Upload } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
@@ -114,7 +116,10 @@ export default function AddProgressPhotoModal({
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
-      <View className="flex-1 bg-black/90 justify-end">
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        className="flex-1 bg-black/90 justify-end"
+      >
         <View className="bg-[#0a0a0a] rounded-t-3xl border-t border-zinc-800">
           {/* Header */}
           <View className="flex-row items-center justify-between p-4 border-b border-zinc-800">
@@ -206,7 +211,7 @@ export default function AddProgressPhotoModal({
             </TouchableOpacity>
           </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

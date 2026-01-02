@@ -12,7 +12,10 @@ import {
   PanResponder,
   NativeSyntheticEvent,
   NativeScrollEvent,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import Slider from '@react-native-community/slider';
 import {
@@ -829,6 +832,9 @@ export default function SpotifyModal({
   onPrevious,
   onTrackChange,
 }: SpotifyModalProps) {
+  // Safe area insets para evitar la barra de navegación
+  const insets = useSafeAreaInsets();
+  
   // Inicializar estado desde variables persistentes
   const [activeTab, setActiveTab] = useState<TabType>(persistedTab);
   const [playlists, setPlaylists] = useState<SpotifyPlaylist[]>([]);
@@ -1986,11 +1992,15 @@ export default function SpotifyModal({
   // -------------------------------------------------------------------------
   return (
     <Modal visible={visible} animationType="slide" transparent={true} onRequestClose={onClose}>
-      <View className="flex-1 bg-transparent justify-end">
-        <Animated.View
-          className="bg-black rounded-t-3xl"
-          style={[{ height: '95%' }, animatedStyle]}
-        >
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        className="flex-1"
+      >
+        <View className="flex-1 bg-transparent justify-end">
+          <Animated.View
+            className="bg-black rounded-t-3xl"
+            style={[{ height: '95%', paddingBottom: insets.bottom }, animatedStyle]}
+          >
           {/* Header - Draggable para cerrar */}
           <View
             {...panResponder.panHandlers}
@@ -2057,7 +2067,8 @@ export default function SpotifyModal({
             renderNotConnectedView()
           )}
         </Animated.View>
-      </View>
+        </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

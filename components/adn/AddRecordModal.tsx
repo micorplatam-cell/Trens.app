@@ -8,6 +8,8 @@ import {
   ScrollView,
   NativeSyntheticEvent,
   NativeScrollEvent,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { X, Link as LinkIcon, CheckCircle } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
@@ -154,7 +156,10 @@ export default function AddRecordModal({
       presentationStyle="pageSheet"
       onRequestClose={handleClose}
     >
-      <View className="flex-1 bg-[#0F0F0F]">
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        className="flex-1 bg-[#0F0F0F]"
+      >
         {/* Header */}
         <View className="flex-row justify-between items-center p-4 border-b border-zinc-800">
           <Text className="text-white font-bold uppercase tracking-widest text-sm">
@@ -274,7 +279,7 @@ export default function AddRecordModal({
             </Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
