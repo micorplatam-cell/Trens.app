@@ -2281,7 +2281,7 @@ export async function autoAdjustAll(userId: string): Promise<HankToolResult> {
       .eq('id', userId)
       .single();
 
-    const trainingFrequency = profile?.training_frequency || 3;
+    const trainingFrequency = profile?.training_frequency ?? 0;
     const routineNames = profile?.training_routine_names || {};
 
     results.push(`🏋️ Entrenamiento: ${trainingFrequency} días/semana`);
@@ -3074,8 +3074,15 @@ export async function planUpdateIngredients(
 // ============================================================================
 export async function getFullUserContext(userId: string): Promise<HankToolResult> {
   try {
-    // 1. Perfil del usuario
+    // 1. Perfil del usuario (training data)
     const { data: profile } = await supabase.from('profiles').select('*').eq('id', userId).single();
+
+    // 1.5 User profile (body data - peso, altura, objetivo)
+    const { data: userProfile } = await supabase
+      .from('user_profiles')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
 
     // 2. Todas las comidas con todas sus opciones
     const { data: meals } = await supabase
@@ -3107,10 +3114,27 @@ export async function getFullUserContext(userId: string): Promise<HankToolResult
       .eq('asset_type', 'gym_exercise')
       .is('deleted_at', null);
 
+    // 4.5 Fotos de progreso (las últimas 5 para contexto de composición corporal)
+    // El snapshot contiene: weight, body_fat_percentage, goal, measurements, etc.
+    const { data: progressPhotos } = await supabase
+      .from('progress_photos')
+      .select('id, snapshot, notes, created_at')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(5);
+
+    // 4.6 Personal Records (para contexto de nivel)
+    const { data: personalRecords } = await supabase
+      .from('personal_records')
+      .select('exercise_name, weight_kg, reps')
+      .eq('user_id', userId)
+      .order('weight_kg', { ascending: false })
+      .limit(5);
+
     // 5. Nombres de rutinas
     const routineNames = profile?.training_routine_names || {};
-    const currentDay = profile?.training_current_day || 0;
-    const frequency = profile?.training_frequency || 3;
+    const currentDay = profile?.training_current_day ?? 0;
+    const frequency = profile?.training_frequency ?? 0;
 
     // Formatear resumen
     const formatTime = (t: string) => {
@@ -3157,24 +3181,80 @@ export async function getFullUserContext(userId: string): Promise<HankToolResult
     // Stack
     const stackContext = stack?.map((s) => `${s.name} (${s.dose})`).join(', ') || 'Sin suplementos';
 
+    // Datos físicos del usuario
+    const bodyData = userProfile
+      ? `
+👤 DATOS FÍSICOS:
+- Nombre: ${userProfile.display_name || 'Sin nombre'}
+- Peso: ${userProfile.weight || 'No registrado'}
+- Altura: ${userProfile.height || 'No registrado'}
+- Objetivo: ${userProfile.goal || 'No definido'}
+- Deporte: ${userProfile.sport || 'GYM'}
+- Nivel: ${userProfile.level || 'INTERMEDIO'}`
+      : `
+👤 DATOS FÍSICOS: No configurados (usar valores estándar)`;
+
+    // Progreso físico (snapshot contiene weight, body_fat_percentage, etc.)
+    const progressContext =
+      progressPhotos && progressPhotos.length > 0
+        ? `
+📸 HISTORIAL DE PROGRESO (últimas ${progressPhotos.length} fotos):
+${progressPhotos
+  .map(
+    (p: {
+      snapshot?: { weight?: string; body_fat_percentage?: string };
+      notes?: string;
+      created_at: string;
+    }) => {
+      const date = new Date(p.created_at).toLocaleDateString('es-PE');
+      const snap = p.snapshot || {};
+      return `- ${date}: ${snap.weight ? `${snap.weight}` : 'Sin peso'}${snap.body_fat_percentage ? `, ${snap.body_fat_percentage}% grasa` : ''}${p.notes ? ` - "${p.notes}"` : ''}`;
+    }
+  )
+  .join('\n')}`
+        : '';
+
+    // Personal Records para contexto de nivel
+    const prContext =
+      personalRecords && personalRecords.length > 0
+        ? `
+🏆 MEJORES MARCAS:
+${personalRecords.map((pr) => `- ${pr.exercise_name}: ${pr.weight_kg}kg x ${pr.reps}`).join('\n')}`
+        : '';
+
     const fullContext = `
 📊 CONTEXTO COMPLETO DEL USUARIO:
+${bodyData}
+${progressContext}
+${prContext}
 
 🏋️ ENTRENAMIENTO:
+- Frecuencia: ${frequency} días/semana
+- Día actual: ${currentDay}
 - Rutina de hoy: ${routineNames[currentDay] || 'Sin rutina configurada'}
 ${routinesContext}
 
-🍽️ COMIDAS:
+🍽️ COMIDAS ACTUALES:
 ${mealsContext}
 
-💊 STACK:
+💊 STACK ACTUAL:
 ${stackContext}
 `.trim();
 
     return {
       success: true,
       message: fullContext,
-      data: { profile, meals, stack, exercises, routineNames, currentDay },
+      data: {
+        profile,
+        userProfile,
+        meals,
+        stack,
+        exercises,
+        routineNames,
+        currentDay,
+        progressPhotos,
+        personalRecords,
+      },
     };
   } catch (error) {
     console.error('getFullUserContext error:', error);
@@ -4924,11 +5004,11 @@ export async function trainingGetCurrentPlan(userId: string): Promise<HankToolRe
       };
     }
 
-    const frequency = profile.training_frequency || 3;
-    const currentDay = profile.training_current_day || 0;
+    const frequency = profile.training_frequency ?? 0;
+    const currentDay = profile.training_current_day ?? 0;
     const routineNames = profile.training_routine_names || {};
 
-    if (Object.keys(routineNames).length === 0) {
+    if (frequency === 0 || Object.keys(routineNames).length === 0) {
       return {
         success: true,
         message: `📋 No tienes un plan estructurado todavía.
@@ -5059,7 +5139,14 @@ export async function trainingRenameDay(
       .single();
 
     const routineNames = profile?.training_routine_names || {};
-    const frequency = profile?.training_frequency || 3;
+    const frequency = profile?.training_frequency ?? 0;
+
+    if (frequency === 0) {
+      return {
+        success: false,
+        message: 'No tienes días de entrenamiento. Agrega uno primero.',
+      };
+    }
 
     if (dayIndex < 0 || dayIndex >= frequency) {
       return {
@@ -5102,7 +5189,7 @@ export async function trainingAddDay(userId: string, dayName: string): Promise<H
       .single();
 
     const routineNames = profile?.training_routine_names || {};
-    const frequency = profile?.training_frequency || 3;
+    const frequency = profile?.training_frequency ?? 0;
 
     if (frequency >= 7) {
       return { success: false, message: 'Ya tienes 7 días. No puedes agregar más.' };
@@ -5146,11 +5233,11 @@ export async function trainingRemoveDay(userId: string, dayIndex: number): Promi
       .single();
 
     const routineNames = profile?.training_routine_names || {};
-    const frequency = profile?.training_frequency || 3;
-    const currentDay = profile?.training_current_day || 0;
+    const frequency = profile?.training_frequency ?? 0;
+    const currentDay = profile?.training_current_day ?? 0;
 
-    if (frequency <= 1) {
-      return { success: false, message: 'No puedes eliminar el último día. Mínimo 1 día.' };
+    if (frequency === 0) {
+      return { success: false, message: 'No tienes días de entrenamiento para eliminar.' };
     }
 
     if (dayIndex < 0 || dayIndex >= frequency) {
@@ -5170,13 +5257,20 @@ export async function trainingRemoveDay(userId: string, dayIndex: number): Promi
     }
 
     // Ajustar día actual si es necesario
+    const newFrequency = frequency - 1;
     const newCurrentDay =
-      currentDay >= frequency - 1 ? 0 : currentDay > dayIndex ? currentDay - 1 : currentDay;
+      newFrequency === 0
+        ? 0
+        : currentDay >= frequency - 1
+          ? 0
+          : currentDay > dayIndex
+            ? currentDay - 1
+            : currentDay;
 
     const { error } = await supabase
       .from('profiles')
       .update({
-        training_frequency: frequency - 1,
+        training_frequency: newFrequency,
         training_routine_names: newRoutineNames,
         training_current_day: newCurrentDay,
       })
@@ -5184,6 +5278,15 @@ export async function trainingRemoveDay(userId: string, dayIndex: number): Promi
 
     if (error) {
       return { success: false, message: 'Error al eliminar el día.' };
+    }
+
+    // Si eliminamos el último día, mensaje especial
+    if (newFrequency === 0) {
+      return {
+        success: true,
+        message: `🗑️ "${deletedName}" eliminado. Tu plan de entrenamiento está vacío. Agrega un nuevo día cuando quieras.`,
+        affectedRecords: 1,
+      };
     }
 
     // Actualizar ejercicios: reindexar días
@@ -5263,23 +5366,26 @@ export async function getFullPlanStatus(userId: string): Promise<HankToolResult>
       .eq('user_id', userId);
 
     // Procesar datos de entrenamiento
-    const trainingFrequency = profile?.training_frequency || 3;
+    const trainingFrequency = profile?.training_frequency ?? 0;
     const routineNames = profile?.training_routine_names || {};
-    const currentDay = profile?.training_current_day || 0;
+    const currentDay = profile?.training_current_day ?? 0;
 
-    const trainingDays = Array.from({ length: trainingFrequency }, (_, i) => {
-      const dayExercises =
-        exercises
-          ?.filter((ex: any) => (ex.training_days || []).includes(i))
-          .map((ex: any) => ex.exercises?.name || 'Sin nombre') || [];
+    const trainingDays =
+      trainingFrequency > 0
+        ? Array.from({ length: trainingFrequency }, (_, i) => {
+            const dayExercises =
+              exercises
+                ?.filter((ex: any) => (ex.training_days || []).includes(i))
+                .map((ex: any) => ex.exercises?.name || 'Sin nombre') || [];
 
-      return {
-        day: i + 1,
-        name: routineNames[String(i)] || `DÍA ${i + 1}`,
-        exercises: dayExercises,
-        exerciseCount: dayExercises.length,
-      };
-    });
+            return {
+              day: i + 1,
+              name: routineNames[String(i)] || `DÍA ${i + 1}`,
+              exercises: dayExercises,
+              exerciseCount: dayExercises.length,
+            };
+          })
+        : [];
 
     // Procesar datos de nutrición
     const mealsSummary =
@@ -5306,12 +5412,15 @@ export async function getFullPlanStatus(userId: string): Promise<HankToolResult>
     );
 
     // Construir resumen legible
-    const trainingInfo = trainingDays
-      .map(
-        (d) =>
-          `• Día ${d.day}: ${d.name} (${d.exerciseCount} ejercicios${d.exercises.length > 0 ? `: ${d.exercises.slice(0, 3).join(', ')}${d.exercises.length > 3 ? '...' : ''}` : ''})`
-      )
-      .join('\n');
+    const trainingInfo =
+      trainingDays.length > 0
+        ? trainingDays
+            .map(
+              (d) =>
+                `• Día ${d.day}: ${d.name} (${d.exerciseCount} ejercicios${d.exercises.length > 0 ? `: ${d.exercises.slice(0, 3).join(', ')}${d.exercises.length > 3 ? '...' : ''}` : ''})`
+            )
+            .join('\n')
+        : 'Sin plan de entrenamiento configurado';
 
     const nutritionInfo = mealsSummary
       .map(
@@ -5338,7 +5447,7 @@ export async function getFullPlanStatus(userId: string): Promise<HankToolResult>
 • Objetivo: ${userProfile?.goal || 'No definido'}
 • Nivel: ${userProfile?.level || 'INTERMEDIO'}
 
-🏋️ ENTRENAMIENTO (${trainingFrequency} días, hoy: día ${currentDay + 1}):
+🏋️ ENTRENAMIENTO (${trainingFrequency} días${trainingFrequency > 0 ? `, hoy: día ${currentDay + 1}` : ''}):
 ${trainingInfo}
 
 🍽️ NUTRICIÓN (${mealsSummary.length} comidas):
@@ -6136,7 +6245,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: 'GET_FULL_USER_CONTEXT',
     description:
-      'HERRAMIENTA MAESTRA: Obtiene TODO el contexto del usuario de una vez - comidas, ejercicios, rutinas, suplementos, perfil. Usa cuando necesites información general, el usuario pregunte algo ambiguo, o para entender el contexto completo antes de actuar. SIEMPRE úsala primero si tienes dudas.',
+      'HERRAMIENTA MAESTRA OBLIGATORIA: Obtiene TODO sobre el usuario - peso, altura, objetivo (bulking/cutting/recomp), fotos de progreso, récords personales, comidas actuales, ejercicios, rutinas, suplementos. DEBES usarla SIEMPRE antes de crear planes de nutrición o entrenamiento para personalizar según los datos reales del usuario. También úsala si el usuario pregunta algo ambiguo o necesitas contexto.',
     parameters: {},
     requiredParams: [],
   },
@@ -6272,7 +6381,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: 'PLAN_BUILDER_START',
     description:
-      'Inicia el modo Plan Builder para crear un plan de nutrición y stack de suplementos conversacionalmente. El usuario irá agregando comidas y suplementos, y al final dirá "ejecuta el plan" para guardarlo todo. SIEMPRE usa esta herramienta cuando el usuario diga "crea mi plan", "hazme un plan", "arma mi dieta", "diseña mi plan de comidas", "quiero organizar mis comidas", "planifica mi nutrición".',
+      'Inicia el modo Plan Builder para crear un plan de nutrición. CUÁNDO USAR: Solo cuando el usuario CONFIRMA que quiere crear el plan (dice "sí", "dale", "confírmalo", "hazlo", "ejecuta"). ANTES de llamar esta herramienta, SIEMPRE muestra un PREVIEW en texto de lo que vas a crear. NUNCA uses esta herramienta si el usuario aún no ha confirmado el plan.',
     parameters: {
       clearExisting: {
         type: 'boolean',
@@ -6287,7 +6396,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: 'PLAN_BUILDER_ADD_MEAL',
     description:
-      'Agrega una comida al plan en construcción (NO guarda en DB todavía). Usa cuando el usuario diga "agrega desayuno a las 7", "pon almuerzo con pollo y arroz", "quiero cenar a las 8 con ensalada" MIENTRAS EL PLAN BUILDER ESTÁ ACTIVO.',
+      'Agrega una comida al plan en construcción (NO guarda en DB todavía). CRÍTICO: Debes llamar esta herramienta INMEDIATAMENTE después de PLAN_BUILDER_START para CADA comida acordada. Si el usuario dijo X comidas, debes llamar esta herramienta X veces. Distribuye las horas uniformemente entre la primera y última hora mencionadas.',
     parameters: {
       time: {
         type: 'string',
@@ -6303,7 +6412,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       name: {
         type: 'string',
         description:
-          'Nombre opcional de la comida (ej: "Desayuno", "Almuerzo"). Si no se da, se genera automáticamente.',
+          'Nombre de la comida: DESAYUNO, ALMUERZO, MERIENDA, CENA, SNACK, PRE-ENTRENO, POST-ENTRENO',
         required: false,
       },
     },
@@ -6355,7 +6464,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: 'PLAN_BUILDER_ADD_SUPPLEMENT',
     description:
-      'Agrega un suplemento al stack del plan en construcción. Usa cuando el usuario diga "agrega creatina 5g", "pon proteína post entreno", "incluye omega 3" MIENTRAS EL PLAN BUILDER ESTÁ ACTIVO.',
+      'Agrega un suplemento al stack del plan en construcción. CRÍTICO: Debes llamar esta herramienta para CADA suplemento que el usuario mencionó en la conversación (creatina, proteína, omega 3, multivitamínico, pre-entreno, etc). No esperes confirmación. Si el usuario dijo "tomo creatina, proteína y omega 3", llama PLAN_BUILDER_ADD_SUPPLEMENT 3 veces seguidas.',
     parameters: {
       name: {
         type: 'string',
@@ -6421,7 +6530,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: 'PLAN_BUILDER_EXECUTE',
     description:
-      'EJECUTA Y GUARDA todo el plan en construcción en la base de datos. Esta es la herramienta FINAL que materializa el plan. Usa SOLO cuando el usuario diga "ejecuta el plan", "guarda el plan", "aplica el plan", "listo con el plan", "ya terminé el plan", "confirma el plan".',
+      'EJECUTA Y GUARDA todo el plan en construcción en la base de datos. ⚠️ ADVERTENCIA: NUNCA llames esta herramienta si el plan está vacío. PRIMERO debes haber llamado PLAN_BUILDER_ADD_MEAL y/o PLAN_BUILDER_ADD_SUPPLEMENT para agregar contenido. Si el Plan Builder muestra 0 comidas y 0 suplementos, NO ejecutes. Usa SOLO cuando ya agregaste contenido al plan.',
     parameters: {},
     requiredParams: [],
   },

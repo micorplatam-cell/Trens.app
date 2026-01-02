@@ -1817,43 +1817,60 @@ function GymScreen() {
         .eq('id', user.id)
         .single();
 
-      // Cargar frecuencia desde la base de datos (si existe)
-      const savedFrequency = profile?.training_frequency || 3;
+      // Cargar frecuencia desde la base de datos (0 significa sin plan)
+      const savedFrequency = profile?.training_frequency ?? 3;
 
       // Cargar nombres de rutinas desde la base de datos
       let routineNames = profile?.training_routine_names || {};
 
-      // Si no hay nombres guardados, inicializar con los valores por defecto
-      if (Object.keys(routineNames).length === 0) {
-        const defaultNames: Record<string, string> = {};
-        trainingProgram.days.forEach((day, idx) => {
-          defaultNames[String(idx)] = day.muscleGroups;
-        });
+      // Si frequency es 0, el usuario no tiene días de entrenamiento
+      if (savedFrequency === 0) {
+        setTrainingProgram((prev) => ({
+          ...prev,
+          frequency: 0,
+          days: [],
+          currentDayIndex: 0,
+        }));
+        console.warn('🏋️ GYM: Usuario sin plan de entrenamiento (0 días)');
+      } else {
+        // Si no hay nombres guardados, inicializar con los valores por defecto
+        if (Object.keys(routineNames).length === 0) {
+          const defaultNames: Record<string, string> = {};
+          trainingProgram.days.forEach((day, idx) => {
+            defaultNames[String(idx)] = day.muscleGroups;
+          });
 
-        // Guardar los nombres por defecto en la base de datos
-        await supabase
-          .from('profiles')
-          .update({ training_routine_names: defaultNames })
-          .eq('id', user.id);
+          // Guardar los nombres por defecto en la base de datos
+          await supabase
+            .from('profiles')
+            .update({ training_routine_names: defaultNames })
+            .eq('id', user.id);
 
-        routineNames = defaultNames;
-        console.warn('🏋️ GYM: Nombres de rutinas inicializados:', defaultNames);
+          routineNames = defaultNames;
+          console.warn('🏋️ GYM: Nombres de rutinas inicializados:', defaultNames);
+        }
+
+        // Reconstruir días basados en la frecuencia guardada
+        const numDays = savedFrequency;
+        const updatedDays = Array.from({ length: numDays }, (_, idx) => ({
+          id: String(idx + 1),
+          muscleGroups: routineNames[String(idx)] || `DÍA ${idx + 1}`,
+          exercises: [],
+        }));
+
+        setTrainingProgram((prev) => ({
+          ...prev,
+          frequency: numDays,
+          days: updatedDays,
+        }));
       }
 
-      // Reconstruir días basados en la frecuencia guardada
-      const numDays = Math.max(Object.keys(routineNames).length, savedFrequency);
-      const updatedDays = Array.from({ length: numDays }, (_, idx) => ({
-        id: String(idx + 1),
-        muscleGroups: routineNames[String(idx)] || `DÍA ${idx + 1}`,
-        exercises: [],
-      }));
+      // Si no hay días, no hay nada más que hacer
+      if (savedFrequency === 0) {
+        return;
+      }
 
-      setTrainingProgram((prev) => ({
-        ...prev,
-        frequency: numDays,
-        days: updatedDays,
-      }));
-
+      const numDays = savedFrequency;
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const todayISO = today.toISOString();
@@ -2102,19 +2119,45 @@ function GymScreen() {
 
       console.log('🔍 DEBUG userConfigs:', JSON.stringify(userConfigs?.[0], null, 2));
 
+      // 1.5 Cargar imágenes persistentes de user_exercise_media (sobreviven eliminación)
+      const allExerciseIdsForMedia = userConfigs?.map((cfg: any) => cfg.exercise_id) || [];
+      let persistentMediaMap: Record<string, string> = {};
+
+      if (allExerciseIdsForMedia.length > 0) {
+        const { data: persistentMedia } = await supabase
+          .from('user_exercise_media')
+          .select('exercise_id, custom_media_url')
+          .eq('user_id', user.id)
+          .in('exercise_id', allExerciseIdsForMedia);
+
+        if (persistentMedia) {
+          persistentMedia.forEach((pm: any) => {
+            if (pm.custom_media_url) {
+              persistentMediaMap[pm.exercise_id] = pm.custom_media_url;
+            }
+          });
+        }
+      }
+
       // Mapear al formato que espera el código existente
       const data =
         userConfigs?.map((item: any) => {
           // El join puede venir como 'exercises' (objeto) o array dependiendo de la FK
           const exercise = item.exercises;
+          // Prioridad: 1) custom_media_url de config, 2) persistentMedia, 3) default
+          const mediaUrl =
+            item.custom_media_url ||
+            persistentMediaMap[item.exercise_id] ||
+            exercise?.default_media_url ||
+            exercise?.thumbnail_url ||
+            '';
           return {
             id: item.id, // user_exercise_config.id
             exercise_id: item.exercise_id, // referencia al ejercicio global
             user_id: user.id,
             type: 'exercise',
             name: exercise?.name || 'UNNAMED',
-            media_url:
-              item.custom_media_url || exercise?.default_media_url || exercise?.thumbnail_url || '',
+            media_url: mediaUrl,
             training_days: item.training_days || [0],
             order: item.display_order || 0,
             deleted_at: null,
@@ -2213,6 +2256,22 @@ function GymScreen() {
               '  - Alternativas con imagen personalizada:',
               Object.keys(alternativeCustomMedia).length
             );
+          }
+
+          // TAMBIÉN buscar en tabla PERSISTENTE user_exercise_media (sobrevive eliminación)
+          const { data: persistentMedia } = await supabase
+            .from('user_exercise_media')
+            .select('exercise_id, custom_media_url')
+            .eq('user_id', user.id)
+            .in('exercise_id', allAlternativeIds);
+
+          if (persistentMedia) {
+            persistentMedia.forEach((pm: any) => {
+              // Solo usar si no hay ya una imagen en user_exercise_config
+              if (pm.custom_media_url && !alternativeCustomMedia[pm.exercise_id]) {
+                alternativeCustomMedia[pm.exercise_id] = pm.custom_media_url;
+              }
+            });
           }
 
           console.log('  - Alternativas cargadas:', alternativeExercisesData.length);
@@ -2901,6 +2960,29 @@ function GymScreen() {
       }
 
       console.log('📹 Media uploaded to R2:', { type, url: result.url, isAlternative });
+
+      // Obtener el exercise_id global (no el config id) para la tabla persistente
+      const globalExerciseId = isAlternative
+        ? exerciseIdToUpdate // Ya es el ID global del ejercicio alternativa
+        : currentExercise.exercise_id || exerciseIdToUpdate; // Usar exercise_id global
+
+      // GUARDAR EN TABLA PERSISTENTE (user_exercise_media) - Sobrevive eliminación
+      const mediaType = type === 'video' ? 'video' : 'image';
+      const { error: persistError } = await supabase.from('user_exercise_media').upsert(
+        {
+          user_id: user.id,
+          exercise_id: globalExerciseId,
+          custom_media_url: result.url,
+          media_type: mediaType,
+        },
+        { onConflict: 'user_id,exercise_id' }
+      );
+
+      if (persistError) {
+        console.warn('⚠️ Error guardando en user_exercise_media:', persistError);
+      } else {
+        console.log('✅ Media guardado en tabla persistente user_exercise_media');
+      }
 
       // Actualizar en la base de datos
       if (isAlternative) {
@@ -4300,13 +4382,6 @@ function GymScreen() {
                       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                     }}
                     onLongPress={() => {
-                      if (trainingProgram.days.length <= 1) {
-                        Alert.alert(
-                          'Mínimo requerido',
-                          'Debes tener al menos 1 día de entrenamiento'
-                        );
-                        return;
-                      }
                       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
                       Alert.alert(
                         '🗑️ Eliminar día',
@@ -4323,19 +4398,19 @@ function GymScreen() {
                               const updatedDays = trainingProgram.days.filter(
                                 (_, i) => i !== deletedDayIndex
                               );
-                              const newSelectedIndex = Math.min(
-                                selectedDayIndex,
-                                updatedDays.length - 1
-                              );
+                              const newSelectedIndex =
+                                updatedDays.length > 0
+                                  ? Math.min(selectedDayIndex, updatedDays.length - 1)
+                                  : 0;
 
                               setTrainingProgram((prev) => ({
                                 ...prev,
                                 frequency: updatedDays.length,
                                 days: updatedDays.map((d, i) => ({ ...d, id: String(i + 1) })),
-                                currentDayIndex: Math.min(
-                                  prev.currentDayIndex,
-                                  updatedDays.length - 1
-                                ),
+                                currentDayIndex:
+                                  updatedDays.length > 0
+                                    ? Math.min(prev.currentDayIndex, updatedDays.length - 1)
+                                    : 0,
                               }));
                               setSelectedDayIndex(newSelectedIndex);
 
@@ -4351,10 +4426,13 @@ function GymScreen() {
                                   .from('profiles')
                                   .update({
                                     training_frequency: updatedDays.length,
-                                    training_current_day: Math.min(
-                                      trainingProgram.currentDayIndex,
-                                      updatedDays.length - 1
-                                    ),
+                                    training_current_day:
+                                      updatedDays.length > 0
+                                        ? Math.min(
+                                            trainingProgram.currentDayIndex,
+                                            updatedDays.length - 1
+                                          )
+                                        : 0,
                                     training_routine_names: updatedNames,
                                   })
                                   .eq('id', user.id);

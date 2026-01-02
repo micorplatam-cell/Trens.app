@@ -33,7 +33,22 @@ db-login() {
 # Uso: db-push
 db-push() {
   echo -e "${CYAN}🚀 Aplicando migraciones pendientes...${NC}"
-  npx supabase db push
+  export SUPABASE_ACCESS_TOKEN="$SUPABASE_ACCESS_TOKEN"
+  echo "Y" | npx supabase db push
+}
+
+# Push migraciones con auto-confirmación (para scripts automáticos)
+# Uso: db-push-auto
+db-push-auto() {
+  echo -e "${CYAN}🚀 Aplicando migraciones (auto-confirm)...${NC}"
+  export SUPABASE_ACCESS_TOKEN="$SUPABASE_ACCESS_TOKEN"
+  echo "Y" | npx supabase db push 2>&1
+  if [ $? -eq 0 ]; then
+    echo -e "${GREEN}✅ Migraciones aplicadas exitosamente!${NC}"
+  else
+    echo -e "${RED}❌ Error aplicando migraciones${NC}"
+    return 1
+  fi
 }
 
 # Push migraciones (dry-run para ver qué se aplicaría)

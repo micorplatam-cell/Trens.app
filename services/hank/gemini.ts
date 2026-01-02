@@ -305,12 +305,19 @@ Eres HANK, coach de alto rendimiento de TRENS. 15 años entrenando atletas. Dire
 • NUNCA respondas "Listo", "Hecho", "Ejecutando" sin PRIMERO invocar una función
 • Si el usuario pide una acción y NO hay herramienta disponible, di claramente "No tengo esa capacidad"
 • NUNCA simules una acción con texto - O ejecutas la función O dices que no puedes
+• ⚡ IMPORTANTE: Puedes llamar MÚLTIPLES herramientas en una sola respuesta. Si tienes toda la info, llama TODAS las herramientas necesarias de una vez.
 
 Ejemplos de cuándo DEBES usar herramientas:
 • "quita la última serie" → ASSET_REMOVE_SERIES
 • "agrega un ejercicio" → GYM_ADD_EXERCISE  
 • "cambia las reps a 10" → ASSET_UPDATE_FIELD
 • "qué me toca hoy" → GYM_GET_TODAY_ROUTINE
+
+[⚠️ REGLA DE ORO: USA EL HISTORIAL]
+• Si el usuario ya mencionó comidas, suplementos, horarios o cualquier dato en mensajes anteriores, ÚSALO SIN PREGUNTAR DE NUEVO.
+• NUNCA digas "dime las horas" o "cuáles comidas" si ya las acordaron antes en la conversación.
+• Revisa el historial antes de preguntar. Si la info está ahí, ACTÚA.
+• Cuando el usuario diga "sí", "dale", "está bien" después de acordar algo, EJECUTA las herramientas inmediatamente.
 
 [CONTEXTO]
 • Módulo: ${context.screenModule.toUpperCase()}
@@ -336,6 +343,101 @@ ${context.availableExercises && context.availableExercises.length > 0 ? `[CATÁL
 • Modificar series: ASSET_UPDATE_FIELD, ASSET_ADD_SERIES, ASSET_REMOVE_SERIES, ASSET_REPLACE_SERIES, ASSET_SET_SERIES
 • Comidas: PLAN_GET_MEALS, PLAN_ADD_MEAL, PLAN_REMOVE_MEAL
 • Contexto completo: GET_FULL_USER_CONTEXT
+
+[PLAN BUILDER - INSTRUCCIONES CRÍTICAS]
+${
+  context.planBuilderActive
+    ? `⚡ PLAN BUILDER ACTIVO - Estado actual:
+• Comidas: ${context.planBuilderSummary?.mealsCount || 0}
+• Suplementos: ${context.planBuilderSummary?.supplementsCount || 0}
+${context.planBuilderSummary?.meals?.map((m) => `  📍 ${m.time} - ${m.name || 'Sin nombre'} (${m.ingredientsCount} ingredientes)`).join('\n') || ''}
+${context.planBuilderSummary?.supplements?.map((s) => `  💊 ${s.name} - ${s.dose}`).join('\n') || ''}`
+    : '📋 Plan Builder INACTIVO'
+}
+
+🚨 FLUJO OBLIGATORIO para crear PLAN COMPLETO (nutrición + suplementación + entrenamiento):
+
+**PASO 0 - OBTENER CONTEXTO DEL USUARIO:**
+ANTES de crear cualquier plan, llama GET_FULL_USER_CONTEXT para conocer:
+• Peso, altura, edad, objetivo (bulking, cutting, recomp)
+• Nivel de experiencia y frecuencia de entrenamiento actual
+• Historial de progreso y fotos si existen
+
+**PASO 1 - RECOPILAR INFO COMPLETA DE NUTRICIÓN:**
+Pregunta por TODAS las categorías de alimentos:
+• 🥩 PROTEÍNAS: ¿Qué carnes/pescados/huevos prefiere? (pollo, res, cerdo, pescado, huevos, etc.)
+• 🍚 CARBOHIDRATOS: ¿Qué carbos prefiere? (arroz, papa, camote, avena, quinua, etc.)
+• 🥑 GRASAS: ¿Qué grasas saludables? (palta/aguacate, aceite de oliva, frutos secos, etc.)
+• 🥦 VEGETALES: ¿Qué verduras? (brócoli, espinaca, tomate, pepino, etc.)
+• 💊 SUPLEMENTOS: ¿Qué toma? (proteína, creatina, pre-entreno, omega3, multivitamínico)
+• ⏰ HORARIOS: Primera y última comida, hora de entrenamiento
+• 🏋️ ENTRENAMIENTO: ¿Cuántos días a la semana?
+
+Si el usuario dice "tú decide" o "a tu criterio":
+→ Usa ingredientes TÍPICOS Y ECONÓMICOS de PERÚ:
+  • Proteínas: pollo, huevos, pescado (bonito, jurel), res
+  • Carbos: arroz, papa, camote, quinua, avena, menestras (lentejas, frejoles)
+  • Grasas: palta, aceite de oliva, maní, pecanas
+  • Vegetales: brócoli, espinaca, tomate, pepino, zanahoria, vainitas
+  • Frutas: plátano, manzana, naranja, papaya, mango
+
+**PASO 2 - CALCULAR MACROS SEGÚN OBJETIVO:**
+Basado en los datos del usuario:
+• BULKING (ganar masa): +300-500 kcal sobre mantenimiento, 2g proteína/kg, 4-6g carbos/kg
+• CUTTING (perder grasa): -300-500 kcal bajo mantenimiento, 2.2g proteína/kg, 2-3g carbos/kg  
+• RECOMP (recomposición): calorías en mantenimiento, 2g proteína/kg, 3-4g carbos/kg
+• Grasas: 0.8-1g/kg para todos
+
+**PASO 3 - ARMAR COMIDAS COMPLETAS:**
+CADA comida debe tener los 4 macros:
+• Proteína principal (150-250g según comida)
+• Carbohidrato (100-200g según hora del día)
+• Grasa saludable (si no hay suficiente en la proteína)
+• Vegetales (mínimo 100g por comida principal)
+
+Ejemplo de comida completa:
+"Almuerzo: 200g pollo a la plancha + 150g arroz + 100g brócoli + 1/2 palta"
+
+**PASO 4 - MOSTRAR PREVIEW DETALLADO:**
+⚠️ OBLIGATORIO: Muestra el plan COMPLETO antes de ejecutar:
+"📋 PLAN PERSONALIZADO PARA [nombre]:
+📊 Macros objetivo: Xg proteína | Xg carbos | Xg grasa | X kcal
+
+🍽️ COMIDAS (X en total):
+• 08:00 - Post-entreno: 30g proteína isolatada + 1 plátano + 5g creatina
+• 10:00 - Desayuno: 3 huevos + 100g avena + 1/2 palta
+• 13:00 - Almuerzo: 200g pollo + 150g arroz + 100g brócoli + ensalada
+• 17:00 - Merienda: 150g atún + 150g camote + vegetales
+• 20:00 - Cena: 200g pescado + 100g quinua + ensalada mixta
+• 22:30 - Pre-sueño: 200g yogurt griego + 30g maní
+
+💊 SUPLEMENTOS:
+• Pre-entreno (7:30): [lista]
+• Post-entreno: Creatina 5g, Proteína 30g
+• Con desayuno: Omega 3, Multivitamínico
+
+🏋️ ENTRENAMIENTO: X días/semana - [tipo de rutina]
+
+¿Confirmo este plan?"
+
+**PASO 5 - EJECUTAR SOLO DESPUÉS DE CONFIRMACIÓN:**
+Cuando el usuario diga "sí", "dale", "confirmo":
+1. PLAN_BUILDER_START(clearExisting=true)
+2. PLAN_BUILDER_ADD_MEAL para CADA comida con TODOS sus ingredientes
+3. PLAN_BUILDER_ADD_SUPPLEMENT para CADA suplemento
+4. PLAN_BUILDER_EXECUTE
+5. TRAINING_ASSIGN_PLAN si pidió entrenamiento
+
+**REGLAS DE DISTRIBUCIÓN DE COMIDAS:**
+• Post-entreno: Inmediatamente después del gym (proteína rápida + carbo simple)
+• Desayuno: 1-2 horas después del entreno si es en ayunas
+• Comidas principales: Cada 3-4 horas
+• Pre-sueño: Proteína lenta (caseína, yogurt griego, huevos)
+• Carbos: Más hacia las mañanas y post-entreno, menos en la noche
+
+⛔ NUNCA crees comidas con SOLO proteína - siempre incluye carbos y vegetales
+⛔ NUNCA ejecutes sin mostrar preview primero
+⛔ NUNCA crees menos comidas de las que el usuario pidió
 
 [TONO]
 • Directo, sin bullshit, nunca irrespetuoso
@@ -373,6 +475,14 @@ export interface GeminiContext {
   } | null;
   customAliases?: Array<{ trigger: string; description?: string }>;
   availableExercises?: string[];
+  // Plan Builder state
+  planBuilderActive?: boolean;
+  planBuilderSummary?: {
+    mealsCount: number;
+    supplementsCount: number;
+    meals: Array<{ time: string; name: string | undefined; ingredientsCount: number }>;
+    supplements: Array<{ name: string; dose: string }>;
+  } | null;
 }
 
 // ============================================================================
@@ -413,8 +523,42 @@ export async function callGemini(
 
   // 🔍 DEBUG: Detectar si es un comando de acción
   const lowerMessage = userMessage.toLowerCase();
+
+  // Detectar si es una CONFIRMACIÓN para ejecutar plan (solo entonces forzar herramientas)
+  const isPlanConfirmation =
+    /^(s[ií]|dale|ok|okey|está bien|confirmo|hazlo|ejecuta|crea|aplica|guarda)/i.test(
+      lowerMessage.trim()
+    ) &&
+    (context.planBuilderActive ||
+      conversationHistory.some((m) =>
+        m.parts.some(
+          (p) =>
+            'text' in p &&
+            typeof p.text === 'string' &&
+            (p.text.includes('comida') || p.text.includes('suplemento') || p.text.includes('plan'))
+        )
+      ));
+
+  // Comandos de acción que SÍ deben forzar herramientas (excepto si están hablando de plan de nutrición)
+  const isNutritionPlanContext =
+    /comida|nutrici[oó]n|dieta|suplemento|meal|stack/i.test(lowerMessage) ||
+    conversationHistory
+      .slice(-4)
+      .some((m) =>
+        m.parts.some(
+          (p) =>
+            'text' in p &&
+            typeof p.text === 'string' &&
+            /comida|nutrici[oó]n|dieta|suplemento|plan/.test(p.text)
+        )
+      );
+
   const isActionCommand =
-    /quita|elimina|agrega|añade|cambia|pon|sube|baja|modifica|actualiza/i.test(lowerMessage);
+    !isNutritionPlanContext &&
+    /quita|elimina|agrega|añade|cambia|sube|baja|modifica|actualiza/i.test(lowerMessage);
+
+  // Solo forzar ANY si es confirmación de plan O es comando de acción fuera de contexto de nutrición
+  const shouldForceTools = isPlanConfirmation || isActionCommand;
 
   // Request body
   const requestBody = {
@@ -429,8 +573,8 @@ export async function callGemini(
     ],
     toolConfig: {
       functionCallingConfig: {
-        // 🔧 FIX: Usar ANY para comandos de acción, AUTO para preguntas
-        mode: isActionCommand ? 'ANY' : 'AUTO',
+        // 🔧 FIX: Usar ANY solo para confirmaciones de plan o comandos de acción directos
+        mode: shouldForceTools ? 'ANY' : 'AUTO',
       },
     },
     generationConfig: {
@@ -441,7 +585,9 @@ export async function callGemini(
     },
   };
 
-  console.warn(`🔧 Mode: ${isActionCommand ? 'ANY (forzado)' : 'AUTO'}, Temp: 0.3`);
+  console.warn(
+    `🔧 Mode: ${shouldForceTools ? 'ANY (forzado)' : 'AUTO'}, isPlanConfirmation: ${isPlanConfirmation}, isNutritionContext: ${isNutritionPlanContext}`
+  );
 
   try {
     // Timeout de 15 segundos para dar tiempo a Gemini 1.5 Flash
@@ -653,5 +799,123 @@ export async function continueAfterToolExecution(
     return text || '✅ Listo';
   } catch {
     return '✅ Listo';
+  }
+}
+
+// ============================================================================
+// HELPER: Continue with MORE tool calls after initial execution
+// Used for Plan Builder flow where multiple tools need to be called in sequence
+// ============================================================================
+export async function continueWithMoreTools(
+  originalMessage: string,
+  toolResults: Array<{ toolName: string; result: Record<string, unknown> }>,
+  context: GeminiContext,
+  apiKey: string,
+  additionalInstruction?: string,
+  conversationHistory?: GeminiMessage[]
+): Promise<GeminiResult> {
+  // Preparar herramientas en formato Gemini
+  const geminiTools = convertToGeminiTools(TOOL_DEFINITIONS);
+
+  // Construir historial incluyendo la conversación previa
+  const messages: GeminiMessage[] = [
+    // Incluir historial de conversación para que Gemini recuerde lo acordado
+    ...(conversationHistory || []),
+    {
+      role: 'user',
+      parts: [{ text: originalMessage }],
+    },
+    {
+      role: 'model',
+      parts: toolResults.map((tr) => ({
+        functionCall: {
+          name: tr.toolName,
+          args: {},
+        },
+      })),
+    },
+    {
+      role: 'user',
+      parts: [
+        ...toolResults.map((tr) => ({
+          functionResponse: {
+            name: tr.toolName,
+            response: tr.result,
+          },
+        })),
+        ...(additionalInstruction ? [{ text: additionalInstruction }] : []),
+      ],
+    },
+  ];
+
+  const requestBody = {
+    contents: messages,
+    systemInstruction: {
+      parts: [{ text: generateSystemPrompt(context) }],
+    },
+    tools: [
+      {
+        functionDeclarations: geminiTools,
+      },
+    ],
+    toolConfig: {
+      functionCallingConfig: {
+        mode: 'ANY', // Forzar uso de herramientas
+      },
+    },
+    generationConfig: {
+      temperature: 0.3,
+      maxOutputTokens: 1024,
+    },
+  };
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+    const response = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      return { message: '✅ Listo', toolCalls: [] };
+    }
+
+    const data: GeminiResponse = await response.json();
+    const candidate = data.candidates?.[0];
+    if (!candidate) {
+      return { message: '✅ Listo', toolCalls: [] };
+    }
+
+    const parts = candidate.content.parts;
+    const toolCalls: HankToolCall[] = [];
+    let textMessage = '';
+
+    for (const part of parts) {
+      if (part.functionCall) {
+        toolCalls.push({
+          tool: part.functionCall.name as HankToolName,
+          parameters: part.functionCall.args,
+        });
+      } else if (part.text) {
+        textMessage += part.text;
+      }
+    }
+
+    console.warn(`🔄 continueWithMoreTools: ${toolCalls.length} nuevas herramientas`);
+
+    return {
+      message: textMessage || (toolCalls.length > 0 ? '🔧 Ejecutando...' : '✅ Listo'),
+      toolCalls,
+    };
+  } catch {
+    return { message: '✅ Listo', toolCalls: [] };
   }
 }

@@ -15,7 +15,11 @@ import React, {
 } from 'react';
 import { useHankExecutor } from '../hooks/useHankExecutor';
 import { supabase } from '../lib/supabase';
-import { callGemini, continueAfterToolExecution } from '../services/hank/gemini';
+import {
+  callGemini,
+  continueAfterToolExecution,
+  continueWithMoreTools,
+} from '../services/hank/gemini';
 import { useSport } from './SportContext';
 import { hankLogger, syncLogger } from '../lib/logger';
 import type {
@@ -293,6 +297,14 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
   // Plan Builder State - Para construcción conversacional de planes
   const [planBuilderState, setPlanBuilderState] =
     useState<PlanBuilderState>(defaultPlanBuilderState);
+
+  // 🔧 REF para acceso sincrónico al estado más reciente del Plan Builder
+  // Esto es necesario porque Gemini puede llamar múltiples herramientas secuencialmente
+  // y el estado de React no se actualiza entre llamadas
+  const planBuilderStateRef = useRef<PlanBuilderState>(defaultPlanBuilderState);
+  useEffect(() => {
+    planBuilderStateRef.current = planBuilderState;
+  }, [planBuilderState]);
 
   // Sincronizar sportMode con el deporte activo del SportContext
   useEffect(() => {
@@ -1000,23 +1012,29 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
   const planBuilderActionsStart = useCallback((clearExisting: boolean = false) => {
     console.warn('🚀 Plan Builder: Iniciando...');
     const result = planBuilderStart(clearExisting);
-    setPlanBuilderState({
+    const newState: PlanBuilderState = {
       isActive: true,
       meals: [],
       supplements: [],
       startedAt: new Date(),
       clearExistingOnExecute: clearExisting,
-    });
+    };
+    setPlanBuilderState(newState);
+    // 🔧 Actualizar ref inmediatamente para llamadas secuenciales
+    planBuilderStateRef.current = newState;
     return result;
   }, []);
 
   const planBuilderActionsAddMeal = useCallback(
     (time: string, ingredients: PlanBuilderIngredient[], name?: string): HankToolResult => {
-      const { newState, result } = planBuilderAddMeal(planBuilderState, time, ingredients, name);
+      // 🔧 Usar ref para estado sincrónico (importante para llamadas secuenciales de Gemini)
+      const currentState = planBuilderStateRef.current;
+      const { newState, result } = planBuilderAddMeal(currentState, time, ingredients, name);
       setPlanBuilderState(newState);
+      planBuilderStateRef.current = newState; // Actualizar ref inmediatamente
       return result;
     },
-    [planBuilderState]
+    [] // Sin dependencias - usa ref
   );
 
   const planBuilderActionsEditMeal = useCallback(
@@ -1024,20 +1042,24 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
       identifier: string | number,
       updates: { time?: string; ingredients?: PlanBuilderIngredient[]; name?: string }
     ): HankToolResult => {
-      const { newState, result } = planBuilderEditMeal(planBuilderState, identifier, updates);
+      const currentState = planBuilderStateRef.current;
+      const { newState, result } = planBuilderEditMeal(currentState, identifier, updates);
       setPlanBuilderState(newState);
+      planBuilderStateRef.current = newState;
       return result;
     },
-    [planBuilderState]
+    []
   );
 
   const planBuilderActionsRemoveMeal = useCallback(
     (identifier: string | number): HankToolResult => {
-      const { newState, result } = planBuilderRemoveMeal(planBuilderState, identifier);
+      const currentState = planBuilderStateRef.current;
+      const { newState, result } = planBuilderRemoveMeal(currentState, identifier);
       setPlanBuilderState(newState);
+      planBuilderStateRef.current = newState;
       return result;
     },
-    [planBuilderState]
+    []
   );
 
   const planBuilderActionsAddSupplement = useCallback(
@@ -1051,29 +1073,34 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
         isPostWorkout?: boolean;
       }
     ): HankToolResult => {
-      const { newState, result } = planBuilderAddSupplement(planBuilderState, name, dose, options);
+      const currentState = planBuilderStateRef.current;
+      const { newState, result } = planBuilderAddSupplement(currentState, name, dose, options);
       setPlanBuilderState(newState);
+      planBuilderStateRef.current = newState;
       return result;
     },
-    [planBuilderState]
+    []
   );
 
   const planBuilderActionsRemoveSupplement = useCallback(
     (nameOrIndex: string | number): HankToolResult => {
-      const { newState, result } = planBuilderRemoveSupplement(planBuilderState, nameOrIndex);
+      const currentState = planBuilderStateRef.current;
+      const { newState, result } = planBuilderRemoveSupplement(currentState, nameOrIndex);
       setPlanBuilderState(newState);
+      planBuilderStateRef.current = newState;
       return result;
     },
-    [planBuilderState]
+    []
   );
 
   const planBuilderActionsShow = useCallback((): HankToolResult => {
-    return planBuilderShow(planBuilderState);
-  }, [planBuilderState]);
+    return planBuilderShow(planBuilderStateRef.current);
+  }, []);
 
   const planBuilderActionsClear = useCallback(() => {
     console.warn('🧹 Plan Builder: Limpiando...');
     setPlanBuilderState(defaultPlanBuilderState);
+    planBuilderStateRef.current = defaultPlanBuilderState;
   }, []);
 
   const planBuilderActionsExecute = useCallback(async (): Promise<HankToolResult> => {
@@ -1081,16 +1108,21 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
       return { success: false, message: 'Usuario no autenticado.' };
     }
     console.warn('🏃 Plan Builder: Ejecutando plan...');
-    const result = await planBuilderExecute(userId, planBuilderState);
+    const currentState = planBuilderStateRef.current;
+    console.warn(
+      `📋 Plan Builder Estado: ${currentState.meals.length} comidas, ${currentState.supplements.length} suplementos`
+    );
+    const result = await planBuilderExecute(userId, currentState);
 
     // Si fue exitoso, limpiar el estado y disparar refresh
     if (result.success || result.data?.mealsCreated > 0 || result.data?.supplementsCreated > 0) {
       setPlanBuilderState(defaultPlanBuilderState);
+      planBuilderStateRef.current = defaultPlanBuilderState;
       setRefreshTrigger((prev) => prev + 1);
     }
 
     return result;
-  }, [userId, planBuilderState]);
+  }, [userId]); // Solo depende de userId, usa ref para estado
 
   // Agrupar todas las acciones del Plan Builder
   const planBuilderActions = useMemo(
@@ -1405,6 +1437,113 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
               toolName: toolCall.tool,
               result: { success: result.success, message: result.message },
             });
+          }
+
+          // 🔧 PLAN BUILDER CONTINUATION LOOP
+          // Si se llamó PLAN_BUILDER_START y el Plan Builder está activo pero vacío,
+          // pedimos a Gemini que continúe agregando comidas/suplementos
+          const wasStartCalled = toolResults.some((t) => t.toolName === 'PLAN_BUILDER_START');
+          const currentPBState = planBuilderStateRef.current;
+          let continuationIterations = 0;
+          const MAX_CONTINUATIONS = 15; // Máximo 15 iteraciones (5 comidas + 10 suplementos)
+
+          while (
+            wasStartCalled &&
+            currentPBState.isActive &&
+            continuationIterations < MAX_CONTINUATIONS
+          ) {
+            console.warn(
+              `🔄 Plan Builder Continuation Loop: iteración ${continuationIterations + 1}`
+            );
+
+            // Construir un resumen del estado actual y lo que falta
+            const currentMeals = planBuilderStateRef.current.meals;
+            const currentSupplements = planBuilderStateRef.current.supplements;
+            const mealsAdded = currentMeals.map((m) => `${m.time} ${m.name}`).join(', ');
+            const suppsAdded = currentSupplements.map((s) => `${s.name} ${s.dose}`).join(', ');
+
+            // Pedirle a Gemini que continúe con más herramientas
+            const moreToolsResponse = await continueWithMoreTools(
+              userText,
+              toolResults,
+              geminiContext,
+              GEMINI_API_KEY,
+              `ESTADO ACTUAL DEL PLAN BUILDER:
+- Comidas agregadas (${currentMeals.length}): ${mealsAdded || 'ninguna'}
+- Suplementos agregados (${currentSupplements.length}): ${suppsAdded || 'ninguno'}
+
+HISTORIAL DE HERRAMIENTAS EJECUTADAS: ${toolResults.map((t) => t.toolName).join(' → ')}
+
+INSTRUCCIONES:
+1. Si el usuario mencionó un NÚMERO específico de comidas (ej: "5 comidas") y aún no has agregado ese número, agrega las que faltan con PLAN_BUILDER_ADD_MEAL
+2. Si el usuario mencionó suplementos (creatina, proteína, omega3, pre-entreno, etc.) y no los has agregado, usa PLAN_BUILDER_ADD_SUPPLEMENT para CADA UNO
+3. Si ya agregaste TODAS las comidas y suplementos mencionados, usa PLAN_BUILDER_EXECUTE
+4. IMPORTANTE: Distribuye las comidas uniformemente entre la primera y última hora que mencionó el usuario
+5. Para pre-entreno usa isPreWorkout=true, para post-entreno usa isPostWorkout=true
+
+¿Qué herramienta debes llamar ahora?`,
+              recentHistory // Pasar historial de conversación
+            );
+
+            if (moreToolsResponse.toolCalls.length === 0) {
+              console.warn('🔄 Plan Builder Continuation: Sin más herramientas');
+              break;
+            }
+
+            // Ejecutar las nuevas herramientas
+            for (const toolCall of moreToolsResponse.toolCalls) {
+              console.warn(`🔧 Continuation - Ejecutando: ${toolCall.tool}`);
+
+              let result: HankToolResult;
+              const p = toolCall.parameters;
+
+              // Solo procesar herramientas del Plan Builder
+              if (toolCall.tool.startsWith('PLAN_BUILDER_')) {
+                switch (toolCall.tool) {
+                  case 'PLAN_BUILDER_ADD_MEAL': {
+                    let ingredients: PlanBuilderIngredient[] = [];
+                    try {
+                      if (typeof p.ingredients === 'string') {
+                        ingredients = JSON.parse(p.ingredients);
+                      } else if (Array.isArray(p.ingredients)) {
+                        ingredients = p.ingredients as PlanBuilderIngredient[];
+                      }
+                    } catch (e) {
+                      console.warn('Error parseando ingredientes:', e);
+                    }
+                    result = planBuilderActionsAddMeal(
+                      p.time as string,
+                      ingredients,
+                      p.name as string | undefined
+                    );
+                    break;
+                  }
+                  case 'PLAN_BUILDER_ADD_SUPPLEMENT':
+                    result = planBuilderActionsAddSupplement(p.name as string, p.dose as string, {
+                      type: p.type as 'pill' | 'powder' | 'liquid' | 'syringe' | undefined,
+                      time: p.time as string | undefined,
+                      isPreWorkout: p.isPreWorkout as boolean | undefined,
+                      isPostWorkout: p.isPostWorkout as boolean | undefined,
+                    });
+                    break;
+                  case 'PLAN_BUILDER_EXECUTE':
+                    result = await planBuilderActionsExecute();
+                    // Si se ejecutó, salir del loop
+                    continuationIterations = MAX_CONTINUATIONS;
+                    break;
+                  default:
+                    result = { success: true, message: 'OK' };
+                }
+
+                results.push(result);
+                toolResults.push({
+                  toolName: toolCall.tool,
+                  result: { success: result.success, message: result.message },
+                });
+              }
+            }
+
+            continuationIterations++;
           }
 
           // 5. Obtener respuesta final de Gemini después de ejecutar herramientas

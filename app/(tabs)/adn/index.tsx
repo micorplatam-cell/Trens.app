@@ -30,6 +30,7 @@ import {
   Volume2,
   LogOut,
   Trophy,
+  Shield,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { VideoView, useVideoPlayer } from 'expo-video';
@@ -42,7 +43,7 @@ import spotify from '../../../services/spotify/spotify';
 import TrensID from '../../../components/adn/TrensID';
 import RecordCard from '../../../components/adn/RecordCard';
 import SelectRecordVideoModal from '../../../components/adn/SelectRecordVideoModal';
-import { SportSwitcher } from '../../../components/adn/SportSwitcher';
+import { SportBadges } from '../../../components/adn/SportBadges';
 import { TodayCards } from '../../../components/adn/TodayCards';
 import { ProUpgradeModal } from '../../../components/pro/ProUpgradeModal';
 import { ShareModal } from '../../../components/share/ShareModal';
@@ -146,6 +147,10 @@ export default function AdnScreen() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
+  // Admin access state
+  const [isAdmin, setIsAdmin] = useState(false);
+  const CEO_EMAIL = 'micorp.latam@gmail.com';
+
   // Video viewer state
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
   const [videoViewerVisible, setVideoViewerVisible] = useState(false);
@@ -165,6 +170,29 @@ export default function AdnScreen() {
   const [selectedRecord, setSelectedRecord] = useState<PersonalRecord | null>(null);
   const [selectedRecordVideo, setSelectedRecordVideo] = useState<Video | null>(null);
   const [isRecordVideoManuallyPaused, setIsRecordVideoManuallyPaused] = useState(false);
+
+  // Check admin access
+  useEffect(() => {
+    const checkAdmin = async () => {
+      if (!user) {
+        setIsAdmin(false);
+        return;
+      }
+      // Check CEO email first
+      if (user.email === CEO_EMAIL) {
+        setIsAdmin(true);
+        return;
+      }
+      // Check admin_users table
+      const { data } = await supabase
+        .from('admin_users')
+        .select('id')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      setIsAdmin(!!data);
+    };
+    checkAdmin();
+  }, [user]);
 
   // Sincronizar contexto con HANK
   useFocusEffect(
@@ -782,11 +810,10 @@ export default function AdnScreen() {
             {profile?.display_name || 'ATLETA'}
           </Text>
 
-          {/* Seguidores */}
-          <Text className="text-xs font-bold text-zinc-500 uppercase tracking-widest">
-            SEGUIDORES:{' '}
-            <Text className="text-fire-orange font-mono">{formatFollowers(followersCount)}</Text>
-          </Text>
+          {/* Sport Badges - Insignias de deportes */}
+          <View className="mt-2">
+            <SportBadges />
+          </View>
 
           {/* Badge PRO/FREE con Fire Style */}
           <View
@@ -808,11 +835,6 @@ export default function AdnScreen() {
             <Text className={`text-xs font-bold ${isPro ? 'text-fire-orange' : 'text-zinc-500'}`}>
               {isPro ? '🔥 PRO' : '🔒 FREE'}
             </Text>
-          </View>
-
-          {/* Sport Switcher */}
-          <View className="mt-4">
-            <SportSwitcher />
           </View>
         </View>
 
@@ -1243,6 +1265,20 @@ export default function AdnScreen() {
             )}
           </View>
         </View>
+
+        {/* Botón Admin Panel - Solo visible para admins */}
+        {isAdmin && (
+          <TouchableOpacity
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              router.push('/(admin)/rutinas');
+            }}
+            className="flex-row items-center justify-center gap-2 py-3 mt-6 mx-4 bg-blue-600/20 rounded-lg border border-blue-600/40"
+          >
+            <Shield size={18} color="#3B82F6" />
+            <Text className="text-blue-400 font-bold">ADMIN PANEL</Text>
+          </TouchableOpacity>
+        )}
 
         {/* Botón discreto de cerrar sesión */}
         {user && (
