@@ -8,9 +8,8 @@ import {
   Image,
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X, Camera, Image as ImageIcon, Upload } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
@@ -29,6 +28,7 @@ export default function AddProgressPhotoModal({
   onClose,
   onSuccess,
 }: AddProgressPhotoModalProps) {
+  const insets = useSafeAreaInsets();
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
   const [isUploading, setIsUploading] = useState(false);
@@ -116,10 +116,7 @@ export default function AddProgressPhotoModal({
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
-      <KeyboardAvoidingView 
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        className="flex-1 bg-black/90 justify-end"
-      >
+      <View className="flex-1 bg-black/90 justify-end">
         <View className="bg-[#0a0a0a] rounded-t-3xl border-t border-zinc-800">
           {/* Header */}
           <View className="flex-row items-center justify-between p-4 border-b border-zinc-800">
@@ -199,6 +196,7 @@ export default function AddProgressPhotoModal({
               className={`py-4 rounded-lg flex-row items-center justify-center gap-2 ${
                 selectedImage && !isUploading ? 'bg-savage-red' : 'bg-zinc-800'
               }`}
+              style={{ marginBottom: Math.max(insets.bottom, 16) }}
             >
               {isUploading ? (
                 <ActivityIndicator size="small" color="#fff" />
@@ -211,7 +209,7 @@ export default function AddProgressPhotoModal({
             </TouchableOpacity>
           </View>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }

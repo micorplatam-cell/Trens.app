@@ -15,6 +15,7 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { X, Plus, Zap, Trash2, AlertTriangle, CheckCircle } from 'lucide-react-native';
 import {
@@ -54,6 +55,7 @@ export const AddMealModal: React.FC<AddMealModalProps> = ({
   onClose,
   onSave,
 }) => {
+  const insets = useSafeAreaInsets();
   const [hankAI, setHankAI] = useState(true);
   const [hour, setHour] = useState('12');
   const [minute, setMinute] = useState('00');
@@ -411,7 +413,8 @@ export const AddMealModal: React.FC<AddMealModalProps> = ({
 
               <Pressable
                 onPress={handleSave}
-                className="w-full bg-white py-4 rounded-xl mb-8 active:bg-zinc-200"
+                className="w-full bg-white py-4 rounded-xl active:bg-zinc-200"
+                style={{ marginBottom: Math.max(insets.bottom, 16) + 8 }}
               >
                 <Text className="text-black font-bold text-center text-lg">GUARDAR COMIDA</Text>
               </Pressable>

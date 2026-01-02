@@ -14,6 +14,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import {
   X,
@@ -91,6 +92,7 @@ export const StackManagerModal: React.FC<StackManagerModalProps> = ({
   onAddItem,
   onRemoveItem,
 }) => {
+  const insets = useSafeAreaInsets();
   const [showAddForm, setShowAddForm] = useState(false);
 
   // Form state
@@ -397,7 +399,7 @@ export const StackManagerModal: React.FC<StackManagerModalProps> = ({
                   />
 
                   {/* Action Buttons */}
-                  <View className="flex-row gap-3">
+                  <View className="flex-row gap-3" style={{ marginBottom: Math.max(insets.bottom, 16) + 8 }}>
                     <Pressable
                       onPress={resetForm}
                       className="flex-1 py-3 rounded-xl border border-zinc-700"

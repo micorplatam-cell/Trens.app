@@ -15,6 +15,7 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { X, Plus, Trash2, Zap, AlertTriangle, CheckCircle } from 'lucide-react-native';
 import {
@@ -60,6 +61,7 @@ export const AddOptionModal: React.FC<AddOptionModalProps> = ({
   onSave,
   onCalculateMacros,
 }) => {
+  const insets = useSafeAreaInsets();
   const [ingredients, setIngredients] = useState<Ingredient[]>([
     { id: `new-${Date.now()}`, name: '', quantity: '', portion: '' },
   ]);
@@ -400,9 +402,10 @@ export const AddOptionModal: React.FC<AddOptionModalProps> = ({
               <Pressable
                 onPress={handleSave}
                 disabled={isSaving}
-                className={`w-full py-4 rounded-xl mb-8 ${
+                className={`w-full py-4 rounded-xl ${
                   isSaving ? 'bg-zinc-600' : 'bg-savage-red active:bg-red-700'
                 }`}
+                style={{ marginBottom: Math.max(insets.bottom, 16) + 8 }}
               >
                 {isSaving ? (
                   <ActivityIndicator size="small" color="#FFF" />

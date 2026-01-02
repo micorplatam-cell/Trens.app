@@ -8,9 +8,8 @@ import {
   ScrollView,
   NativeSyntheticEvent,
   NativeScrollEvent,
-  KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X, Link as LinkIcon, CheckCircle } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 
@@ -117,6 +116,7 @@ export default function AddRecordModal({
   onSave,
   videos: _videos = [],
 }: AddRecordModalProps) {
+  const insets = useSafeAreaInsets();
   const [exercise, setExercise] = useState<(typeof EXERCISES)[0] | null>(null);
   const [weight, setWeight] = useState('');
   const [reps, setReps] = useState(10);
@@ -156,10 +156,7 @@ export default function AddRecordModal({
       presentationStyle="pageSheet"
       onRequestClose={handleClose}
     >
-      <KeyboardAvoidingView 
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        className="flex-1 bg-[#0F0F0F]"
-      >
+      <View className="flex-1 bg-[#0F0F0F]">
         {/* Header */}
         <View className="flex-row justify-between items-center p-4 border-b border-zinc-800">
           <Text className="text-white font-bold uppercase tracking-widest text-sm">
@@ -264,7 +261,7 @@ export default function AddRecordModal({
         </ScrollView>
 
         {/* Footer con botón */}
-        <View className="p-4 border-t border-zinc-800">
+        <View className="p-4 border-t border-zinc-800" style={{ paddingBottom: Math.max(insets.bottom, 16) }}>
           <TouchableOpacity
             disabled={!canSave}
             onPress={handleSave}
@@ -279,7 +276,7 @@ export default function AddRecordModal({
             </Text>
           </TouchableOpacity>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }
