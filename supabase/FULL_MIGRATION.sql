@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   avatar_url TEXT,
   training_last_access TIMESTAMPTZ,
   training_current_day INTEGER DEFAULT 0,
-  training_frequency INTEGER DEFAULT 3,
+  training_frequency INTEGER DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );

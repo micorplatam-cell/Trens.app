@@ -75,6 +75,7 @@ const isWriteTool = (toolName: string): boolean => {
     'PLAN_GET_STACK',
     'PLAN_GET_MEAL_DETAILS',
     'PLAN_BUILDER_SHOW',
+    'TRAINING_DESIGN_PLAN',
     'TRAINING_LIST_TEMPLATES',
     'TRAINING_GET_CURRENT_PLAN',
     'PROGRESS_GET_PHOTOS',
@@ -123,6 +124,7 @@ const defaultPlanBuilderState: PlanBuilderState = {
   isActive: false,
   meals: [],
   supplements: [],
+  training: null,
   startedAt: null,
   clearExistingOnExecute: false,
 };
@@ -1093,6 +1095,23 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
     []
   );
 
+  const planBuilderActionsSetTraining = useCallback(
+    (goal: string, level: string, frequency: number): HankToolResult => {
+      const training = { goal, level, frequency };
+      const newState = { ...planBuilderStateRef.current, training };
+      setPlanBuilderState(newState);
+      planBuilderStateRef.current = newState;
+      console.warn(
+        `🏋️ Plan Builder: Training configurado - ${goal}, ${level}, ${frequency} días/semana`
+      );
+      return {
+        success: true,
+        message: `🏋️ Entrenamiento configurado:\n• Objetivo: ${goal}\n• Nivel: ${level}\n• Frecuencia: ${frequency} días/semana\n\nSe asignará automáticamente al ejecutar el plan.`,
+      };
+    },
+    []
+  );
+
   const planBuilderActionsShow = useCallback((): HankToolResult => {
     return planBuilderShow(planBuilderStateRef.current);
   }, []);
@@ -1133,6 +1152,7 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
       removeMeal: planBuilderActionsRemoveMeal,
       addSupplement: planBuilderActionsAddSupplement,
       removeSupplement: planBuilderActionsRemoveSupplement,
+      setTraining: planBuilderActionsSetTraining,
       show: planBuilderActionsShow,
       clear: planBuilderActionsClear,
       execute: planBuilderActionsExecute,
@@ -1144,6 +1164,7 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
       planBuilderActionsRemoveMeal,
       planBuilderActionsAddSupplement,
       planBuilderActionsRemoveSupplement,
+      planBuilderActionsSetTraining,
       planBuilderActionsShow,
       planBuilderActionsClear,
       planBuilderActionsExecute,
@@ -1407,6 +1428,14 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
                   result = planBuilderActionsRemoveSupplement(p.nameOrIndex as string | number);
                   break;
 
+                case 'PLAN_BUILDER_SET_TRAINING':
+                  result = planBuilderActionsSetTraining(
+                    p.goal as string,
+                    p.level as string,
+                    p.frequency as number
+                  );
+                  break;
+
                 case 'PLAN_BUILDER_SHOW':
                   result = planBuilderActionsShow();
                   break;
@@ -1525,6 +1554,13 @@ INSTRUCCIONES:
                       isPreWorkout: p.isPreWorkout as boolean | undefined,
                       isPostWorkout: p.isPostWorkout as boolean | undefined,
                     });
+                    break;
+                  case 'PLAN_BUILDER_SET_TRAINING':
+                    result = planBuilderActionsSetTraining(
+                      p.goal as string,
+                      p.level as string,
+                      p.frequency as number
+                    );
                     break;
                   case 'PLAN_BUILDER_EXECUTE':
                     result = await planBuilderActionsExecute();
@@ -2062,14 +2098,17 @@ PERSONALIDAD:
 ${planBuilderState.isActive ? '8. EL PLAN BUILDER ESTÁ ACTIVO - Usa las herramientas PLAN_BUILDER_* para manejar el plan en construcción.' : ''}
 
 PLANES DE ENTRENAMIENTO:
-- Usa TRAINING_LIST_TEMPLATES para mostrar planes disponibles (puedes filtrar por nivel, objetivo, frecuencia)
-- Usa TRAINING_ASSIGN_PLAN para asignar un plan completo al usuario
+- Usa TRAINING_DESIGN_PLAN para diseñar un plan personalizado. ESTA ES LA HERRAMIENTA PRINCIPAL.
+  * Primero pregunta al usuario: 1) ¿Cuál es tu objetivo? 2) ¿Cuántos días puedes entrenar? 3) ¿Cuál es tu experiencia?
+  * Luego llama TRAINING_DESIGN_PLAN con goal, level y frequency.
+  * El plan se asigna automáticamente con todos los ejercicios y series.
+  * El usuario NUNCA debe saber que hay planes predefinidos - siempre presenta el plan como 100% personalizado.
 - Usa TRAINING_GET_CURRENT_PLAN para ver qué plan tiene actualmente
 - Usa TRAINING_RESTRUCTURE para cambiar completamente la estructura de días
 - Usa TRAINING_RENAME_DAY para renombrar un día específico
 - Usa TRAINING_ADD_DAY para agregar un nuevo día
 - Usa TRAINING_REMOVE_DAY para eliminar un día
-- Cuando un usuario nuevo pregunte por entrenar, primero pregunta: ¿cuántos días puede entrenar? ¿cuál es su objetivo? ¿nivel de experiencia?
+- NO uses TRAINING_LIST_TEMPLATES ni TRAINING_ASSIGN_PLAN con usuarios normales (son herramientas internas)
 
 CONTROL DE EJERCICIOS Y SERIES:
 - Usa GYM_GET_EXERCISE_DETAILS para ver la configuración completa de un ejercicio (series, reps, peso, RIR, tempo, descanso)

@@ -1,4 +1,4 @@
-import { View, Text, ScrollView } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
 import {
   BarChart3,
   TrendingUp,
@@ -7,7 +7,9 @@ import {
   Users,
   Clock,
   Target,
+  LogOut,
 } from 'lucide-react-native';
+import { router } from 'expo-router';
 
 // ============================================================================
 // COLORS
@@ -150,7 +152,7 @@ export default function AdminFinanzasScreen() {
       </View>
 
       {/* Coming Soon Notice */}
-      <View className="mx-4 mt-6 mb-8 bg-blue-600/10 p-4 rounded-xl border border-blue-600/30">
+      <View className="mx-4 mt-6 bg-blue-600/10 p-4 rounded-xl border border-blue-600/30">
         <View className="flex-row items-center gap-2 mb-2">
           <Clock size={16} color={COLORS.blue} />
           <Text className="text-blue-400 font-bold">Próximamente</Text>
@@ -160,6 +162,15 @@ export default function AdminFinanzasScreen() {
           • Reportes exportables{'\n'}• Integración con Openpay
         </Text>
       </View>
+
+      {/* Exit Admin Button */}
+      <TouchableOpacity
+        className="mx-4 mt-6 mb-8 bg-red-600/20 p-4 rounded-xl border border-red-600/50 flex-row items-center justify-center"
+        onPress={() => router.replace('/(tabs)/adn')}
+      >
+        <LogOut size={20} color={COLORS.red} />
+        <Text className="text-red-500 font-bold ml-2">SALIR DE MODO ADMIN</Text>
+      </TouchableOpacity>
     </ScrollView>
   );
 }

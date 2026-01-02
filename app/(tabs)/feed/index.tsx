@@ -110,14 +110,13 @@ const FeedVideoItem = memo(
     // Estado 3: Sin Spotify → Video con AUDIO AMBIENTE
     // =====================================================================
 
-    // ¿Puede sincronizar canción? (tiene track + conectado + premium + pro + sync ON + contexto listo)
+    // ¿Puede sincronizar canción? (tiene track + conectado + premium + sync ON + contexto listo)
     const canSyncTrack = !!(
       contextReady &&
       item.spotify?.enabled &&
       item.spotify.trackUri &&
       spotifyConnected &&
       spotifyPremium &&
-      isPro &&
       spotifySyncEnabled
     );
 
@@ -385,13 +384,13 @@ const FeedVideoItem = memo(
           {item.spotify?.enabled && (
             <TouchableOpacity
               onPress={async () => {
-                // PRO + Premium: Puede reproducir desde posición exacta
-                if (isPro && spotifyPremium && item.spotify?.trackUri) {
+                // Premium: Puede reproducir desde posición exacta
+                if (spotifyPremium && item.spotify?.trackUri) {
                   const positionMs = item.spotify.positionMs || 0;
                   await spotify.syncWithVideo(item.spotify.trackUri, positionMs);
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                } else {
-                  // FREE: Mostrar mensaje de upgrade
+                } else if (!spotifyConnected) {
+                  // No conectado: Mostrar modal de conexión
                   onSpotifyUpgrade();
                 }
               }}
@@ -406,8 +405,6 @@ const FeedVideoItem = memo(
               <Text className="text-white text-xs ml-2" numberOfLines={1}>
                 {item.spotify.trackName} – {item.spotify.artist}
               </Text>
-              {/* Indicador de lock para FREE */}
-              {!isPro && <Lock size={12} color="#F97316" className="ml-2" />}
             </TouchableOpacity>
           )}
         </View>

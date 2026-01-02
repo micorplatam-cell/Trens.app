@@ -110,7 +110,7 @@ export default function ProScreen() {
   // Capturar metadata de Spotify al montar y actualizar periódicamente
   useEffect(() => {
     const captureSpotifyMetadata = async () => {
-      if (isPro && spotifyConnected && spotifyPremium) {
+      if (spotifyConnected && spotifyPremium) {
         try {
           const playbackState = await spotify.getPlaybackState();
           // Solo capturar si está REPRODUCIENDO activamente
@@ -144,11 +144,11 @@ export default function ProScreen() {
     // Capturar inmediatamente
     captureSpotifyMetadata();
 
-    // Actualizar cada 2 segundos mientras está en PRO (para detectar cambios de canción)
+    // Actualizar cada 2 segundos (para detectar cambios de canción)
     const interval = setInterval(captureSpotifyMetadata, 2000);
 
     return () => clearInterval(interval);
-  }, [isPro, spotifyConnected, spotifyPremium]);
+  }, [spotifyConnected, spotifyPremium]);
 
   // Animation - Breathing effect para el shutter
   const shutterScale = useSharedValue(1);
@@ -249,9 +249,9 @@ export default function ProScreen() {
     setIsRecording(true);
     setRecordingTime(0);
 
-    // 🎵 PRO: Capturar metadata de Spotify JUSTO ANTES de grabar
+    // 🎵 Capturar metadata de Spotify JUSTO ANTES de grabar
     // SOLO si está REPRODUCIENDO activamente (no en pausa)
-    if (isPro && spotifyConnected && spotifyPremium) {
+    if (spotifyConnected && spotifyPremium) {
       try {
         const playbackState = await spotify.getPlaybackState();
         // Solo capturar si está REPRODUCIENDO activamente

@@ -11,7 +11,12 @@ import { ProRecordingProvider } from '../context/ProRecordingContext';
 import { UserRoleProvider, useUserRoleContext } from '../context/UserRoleContext';
 import { SaveGuardProvider } from '../context/SaveGuardContext';
 import { useDeepLinkHandler } from '../services/share/deepLinkHandler';
+import * as WebBrowser from 'expo-web-browser';
 import '../global.css';
+
+// IMPORTANTE: Completar OAuth sessions pendientes (Spotify, etc.)
+// Debe ejecutarse antes de que Expo Router intercepte los deep links
+WebBrowser.maybeCompleteAuthSession();
 
 // ============================================================================
 // 1. AUTH PROVIDER (LEGACY - Mantener para compatibilidad)

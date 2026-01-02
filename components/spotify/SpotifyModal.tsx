@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,8 @@ import {
   Dimensions,
   Alert,
   PanResponder,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
 } from 'react-native';
 import { Image } from 'expo-image';
 import Slider from '@react-native-community/slider';
@@ -40,6 +42,8 @@ import Animated, {
   withSequence,
   withTiming,
   Easing,
+  interpolate,
+  Extrapolation,
 } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
 import spotify, {
@@ -301,7 +305,7 @@ const AnimatedAlbumBackground = ({
     ],
   }));
 
-  if (!albumArt) return null;
+  if (!albumArt || albumArt.length === 0) return null;
 
   return (
     <View
@@ -390,6 +394,417 @@ const AnimatedAlbumBackground = ({
 };
 
 // ============================================================================
+// ALBUM CAROUSEL - Carrusel de carátulas estilo Spotify
+// ============================================================================
+const ALBUM_CAROUSEL_SIZE = 280;
+const ALBUM_CAROUSEL_GAP = 16;
+
+interface TrackInfo {
+  name: string;
+  artist: string;
+  album: string;
+}
+
+interface AlbumCarouselItem {
+  id: string;
+  albumArt: string | null;
+  trackInfo: TrackInfo | null;
+  type: 'prev' | 'current' | 'next';
+}
+
+interface AlbumCarouselProps {
+  currentAlbumArt: string | null;
+  prevAlbumArt: string | null;
+  nextAlbumArt: string | null;
+  currentTrackInfo: TrackInfo | null;
+  prevTrackInfo: TrackInfo | null;
+  nextTrackInfo: TrackInfo | null;
+  currentTrackUri: string | null;
+  onNext: () => void;
+  onPrevious: () => void;
+  hasPrev: boolean;
+  hasNext: boolean;
+  // Like button props
+  isTrackLiked: boolean;
+  checkingLikeStatus: boolean;
+  togglingLike: boolean;
+  onToggleLike: () => void;
+}
+
+const AlbumCarousel = React.memo(
+  ({
+    currentAlbumArt,
+    prevAlbumArt,
+    nextAlbumArt,
+    currentTrackInfo,
+    prevTrackInfo,
+    nextTrackInfo,
+    currentTrackUri,
+    onNext,
+    onPrevious,
+    hasPrev,
+    hasNext,
+    isTrackLiked,
+    checkingLikeStatus,
+    togglingLike,
+    onToggleLike,
+  }: AlbumCarouselProps) => {
+    const scrollX = useSharedValue(SCREEN_WIDTH);
+    const flatListRef = useRef<FlatList>(null);
+    const isScrolling = useRef(false);
+    const lastIndex = useRef(1);
+
+    // Estado local para mostrar la info de la canción instantáneamente
+    const [displayedTrackInfo, setDisplayedTrackInfo] = useState<TrackInfo | null>(
+      currentTrackInfo
+    );
+    const [displayedIndex, setDisplayedIndex] = useState(1); // 0=prev, 1=current, 2=next
+
+    // Ref para guardar la info del track al que el usuario hizo swipe
+    const swipeTargetInfo = useRef<TrackInfo | null>(null);
+    // Ref para saber el URI de la canción original cuando se hizo el swipe
+    const swipeOriginalUri = useRef<string | null>(null);
+
+    // Array de infos para acceso por índice
+    const trackInfos = useMemo(
+      () => [prevTrackInfo, currentTrackInfo, nextTrackInfo],
+      [prevTrackInfo, currentTrackInfo, nextTrackInfo]
+    );
+
+    // Construir los items del carrusel (siempre 3 items para el loop visual)
+    const carouselItems = useMemo<AlbumCarouselItem[]>(() => {
+      return [
+        { id: 'prev', albumArt: prevAlbumArt, trackInfo: prevTrackInfo, type: 'prev' as const },
+        {
+          id: 'current',
+          albumArt: currentAlbumArt,
+          trackInfo: currentTrackInfo,
+          type: 'current' as const,
+        },
+        { id: 'next', albumArt: nextAlbumArt, trackInfo: nextTrackInfo, type: 'next' as const },
+      ];
+    }, [
+      currentAlbumArt,
+      prevAlbumArt,
+      nextAlbumArt,
+      currentTrackInfo,
+      prevTrackInfo,
+      nextTrackInfo,
+    ]);
+
+    // Actualizar info cuando cambia la canción actual (cuando el URI cambia)
+    useEffect(() => {
+      // Si hay un swipe pendiente y el URI cambió, significa que la canción nueva llegó
+      if (swipeOriginalUri.current && currentTrackUri !== swipeOriginalUri.current) {
+        // La canción cambió - limpiar el swipe pendiente
+        swipeOriginalUri.current = null;
+        swipeTargetInfo.current = null;
+      }
+
+      // Solo actualizar displayedTrackInfo si NO hay un swipe pendiente
+      if (!swipeTargetInfo.current) {
+        setDisplayedTrackInfo(currentTrackInfo);
+        setDisplayedIndex(1);
+      }
+    }, [currentTrackUri, currentTrackInfo]);
+
+    // Resetear al centro cuando cambia la canción
+    useEffect(() => {
+      if (!isScrolling.current) {
+        flatListRef.current?.scrollToOffset({
+          offset: SCREEN_WIDTH,
+          animated: false,
+        });
+        scrollX.value = SCREEN_WIDTH;
+        lastIndex.current = 1;
+      }
+    }, [currentAlbumArt, scrollX]);
+
+    // Actualizar info instantáneamente basado en el scroll
+    const handleScroll = useCallback(
+      (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+        const offsetX = event.nativeEvent.contentOffset.x;
+        scrollX.value = offsetX;
+
+        // Si hay un swipe pendiente (esperando que Spotify cambie la canción), NO actualizar la info
+        if (swipeTargetInfo.current) {
+          return;
+        }
+
+        // Calcular qué índice está más cerca del centro
+        const currentIndex = Math.round(offsetX / SCREEN_WIDTH);
+
+        // Actualizar info instantáneamente si cambió el índice visible
+        if (currentIndex !== displayedIndex && currentIndex >= 0 && currentIndex <= 2) {
+          const newInfo = trackInfos[currentIndex];
+          if (newInfo) {
+            setDisplayedTrackInfo(newInfo);
+            setDisplayedIndex(currentIndex);
+          }
+        }
+      },
+      [scrollX, displayedIndex, trackInfos]
+    );
+
+    const handleScrollEnd = useCallback(
+      (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+        const offsetX = event.nativeEvent.contentOffset.x;
+        const newIndex = Math.round(offsetX / SCREEN_WIDTH);
+
+        if (newIndex === lastIndex.current) {
+          isScrolling.current = false;
+          return;
+        }
+
+        if (newIndex === 0 && hasPrev) {
+          // Swipe derecha → Anterior
+          isScrolling.current = true;
+          // Guardar la info del track destino y el URI original
+          swipeTargetInfo.current = prevTrackInfo;
+          swipeOriginalUri.current = currentTrackUri;
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          onPrevious();
+        } else if (newIndex === 2 && hasNext) {
+          // Swipe izquierda → Siguiente
+          isScrolling.current = true;
+          // Guardar la info del track destino y el URI original
+          swipeTargetInfo.current = nextTrackInfo;
+          swipeOriginalUri.current = currentTrackUri;
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          onNext();
+        } else {
+          // Volver al centro si no hay canción disponible
+          flatListRef.current?.scrollToOffset({
+            offset: SCREEN_WIDTH,
+            animated: true,
+          });
+          // Restaurar info de canción actual
+          swipeTargetInfo.current = null;
+          swipeOriginalUri.current = null;
+          setDisplayedTrackInfo(currentTrackInfo);
+          setDisplayedIndex(1);
+        }
+
+        // Reset después de un breve delay para permitir la actualización
+        setTimeout(() => {
+          isScrolling.current = false;
+        }, 300);
+      },
+      [
+        hasPrev,
+        hasNext,
+        onNext,
+        onPrevious,
+        currentTrackInfo,
+        prevTrackInfo,
+        nextTrackInfo,
+        currentTrackUri,
+      ]
+    );
+
+    const renderAlbumItem = useCallback(
+      ({ item, index }: { item: AlbumCarouselItem; index: number }) => {
+        const inputRange = [
+          (index - 1) * SCREEN_WIDTH,
+          index * SCREEN_WIDTH,
+          (index + 1) * SCREEN_WIDTH,
+        ];
+
+        return (
+          <AlbumCarouselItemComponent
+            item={item}
+            scrollX={scrollX}
+            inputRange={inputRange}
+            index={index}
+          />
+        );
+      },
+      [scrollX]
+    );
+
+    const getItemLayout = useCallback(
+      (_: any, index: number) => ({
+        length: SCREEN_WIDTH,
+        offset: SCREEN_WIDTH * index,
+        index,
+      }),
+      []
+    );
+
+    return (
+      <View>
+        {/* Carrusel de carátulas */}
+        <View style={{ height: ALBUM_CAROUSEL_SIZE, marginBottom: 16 }}>
+          <FlatList
+            ref={flatListRef}
+            data={carouselItems}
+            keyExtractor={(item) => `album-${item.id}`}
+            renderItem={renderAlbumItem}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            bounces={false}
+            decelerationRate="fast"
+            snapToInterval={SCREEN_WIDTH}
+            snapToAlignment="center"
+            contentContainerStyle={{ alignItems: 'center' }}
+            initialScrollIndex={1}
+            getItemLayout={getItemLayout}
+            onScroll={handleScroll}
+            onMomentumScrollEnd={handleScrollEnd}
+            scrollEventThrottle={16}
+            removeClippedSubviews={false}
+          />
+        </View>
+
+        {/* Info de canción - actualización instantánea */}
+        <View style={{ paddingHorizontal: 24, marginBottom: 8 }}>
+          {displayedTrackInfo ? (
+            <View style={{ alignItems: 'center' }}>
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: '100%',
+                }}
+              >
+                <Text
+                  style={{
+                    color: '#fff',
+                    fontWeight: 'bold',
+                    fontSize: 22,
+                    textAlign: 'center',
+                    flex: 1,
+                  }}
+                  numberOfLines={2}
+                >
+                  {displayedTrackInfo.name}
+                </Text>
+                {/* Like button solo cuando es la canción actual */}
+                {displayedIndex === 1 && (
+                  <TouchableOpacity
+                    onPress={onToggleLike}
+                    disabled={checkingLikeStatus || togglingLike}
+                    style={{ marginLeft: 12 }}
+                  >
+                    {checkingLikeStatus || togglingLike ? (
+                      <ActivityIndicator size="small" color="#1DB954" />
+                    ) : isTrackLiked ? (
+                      <CheckCircle size={28} color="#1DB954" fill="#1DB954" />
+                    ) : (
+                      <PlusCircle size={28} color="#71717A" />
+                    )}
+                  </TouchableOpacity>
+                )}
+              </View>
+              <Text
+                style={{
+                  color: '#a1a1aa',
+                  fontSize: 16,
+                  marginTop: 8,
+                  textAlign: 'center',
+                }}
+                numberOfLines={1}
+              >
+                {displayedTrackInfo.artist}
+              </Text>
+              <Text
+                style={{
+                  color: '#52525b',
+                  fontSize: 13,
+                  marginTop: 4,
+                  textAlign: 'center',
+                }}
+                numberOfLines={1}
+              >
+                {displayedTrackInfo.album}
+              </Text>
+            </View>
+          ) : (
+            <View style={{ height: 80 }} />
+          )}
+        </View>
+      </View>
+    );
+  }
+);
+
+// Componente individual del álbum con animación
+interface AlbumCarouselItemComponentProps {
+  item: AlbumCarouselItem;
+  scrollX: Animated.SharedValue<number>;
+  inputRange: number[];
+  index: number;
+}
+
+const AlbumCarouselItemComponent = React.memo(
+  ({ item, scrollX, inputRange, index }: AlbumCarouselItemComponentProps) => {
+    const animatedStyle = useAnimatedStyle(() => {
+      const scale = interpolate(scrollX.value, inputRange, [0.75, 1, 0.75], Extrapolation.CLAMP);
+
+      const opacity = interpolate(scrollX.value, inputRange, [0.5, 1, 0.5], Extrapolation.CLAMP);
+
+      return {
+        transform: [{ scale }],
+        opacity,
+      };
+    });
+
+    return (
+      <View
+        style={{
+          width: SCREEN_WIDTH,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Animated.View
+          style={[
+            {
+              width: ALBUM_CAROUSEL_SIZE,
+              height: ALBUM_CAROUSEL_SIZE,
+              borderRadius: 16,
+              overflow: 'hidden',
+              backgroundColor: '#18181b',
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 10 },
+              shadowOpacity: 0.5,
+              shadowRadius: 20,
+              elevation: 15,
+            },
+            animatedStyle,
+          ]}
+        >
+          {item.albumArt ? (
+            <Image
+              source={{ uri: item.albumArt }}
+              style={{ width: '100%', height: '100%' }}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+              recyclingKey={`album-${item.id}-${item.albumArt}`}
+              transition={0}
+            />
+          ) : (
+            <View
+              style={{
+                width: '100%',
+                height: '100%',
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: '#27272a',
+              }}
+            >
+              <Disc3 size={80} color="#1DB954" />
+            </View>
+          )}
+        </Animated.View>
+      </View>
+    );
+  }
+);
+
+// ============================================================================
 // ESTADO PERSISTENTE A NIVEL DE MÓDULO (sobrevive desmontajes del Modal)
 // ============================================================================
 let persistedTab: TabType = 'now-playing';
@@ -459,6 +874,86 @@ export default function SpotifyModal({
   const [isTrackLiked, setIsTrackLiked] = useState(false);
   const [checkingLikeStatus, setCheckingLikeStatus] = useState(false);
   const [togglingLike, setTogglingLike] = useState(false);
+
+  // Estado para almacenar álbumes adyacentes (carrusel estilo Spotify)
+  const [adjacentAlbums, setAdjacentAlbums] = useState<{
+    prev: string | null;
+    next: string | null;
+  }>({ prev: null, next: null });
+
+  // Estado para almacenar info completa de canciones adyacentes
+  const [adjacentTracks, setAdjacentTracks] = useState<{
+    prev: { name: string; artist: string; album: string } | null;
+    next: { name: string; artist: string; album: string } | null;
+  }>({ prev: null, next: null });
+
+  // Cargar info completa de canciones adyacentes desde la API de Spotify
+  const loadAdjacentTracksInfo = useCallback(async () => {
+    if (!spotifyConnected) return;
+
+    try {
+      const tracksInfo = await spotify.getAdjacentTracksInfo();
+      setAdjacentAlbums({
+        prev: tracksInfo.prev?.albumArt || null,
+        next: tracksInfo.next?.albumArt || null,
+      });
+      setAdjacentTracks({
+        prev: tracksInfo.prev
+          ? {
+              name: tracksInfo.prev.name,
+              artist: tracksInfo.prev.artist,
+              album: tracksInfo.prev.album,
+            }
+          : null,
+        next: tracksInfo.next
+          ? {
+              name: tracksInfo.next.name,
+              artist: tracksInfo.next.artist,
+              album: tracksInfo.next.album,
+            }
+          : null,
+      });
+    } catch (error) {
+      console.warn('Error cargando info de canciones adyacentes:', error);
+    }
+  }, [spotifyConnected]);
+
+  // Cargar info cuando cambia la canción actual o el contexto
+  useEffect(() => {
+    if (currentPlaylistTracks.length > 0 && currentTrackIndex >= 0) {
+      // Tenemos contexto de playlist, usar las canciones de la lista
+      const prevIndex =
+        currentTrackIndex > 0 ? currentTrackIndex - 1 : currentPlaylistTracks.length - 1;
+      const nextIndex =
+        currentTrackIndex < currentPlaylistTracks.length - 1 ? currentTrackIndex + 1 : 0;
+
+      const prevTrack = currentPlaylistTracks[prevIndex];
+      const nextTrack = currentPlaylistTracks[nextIndex];
+
+      setAdjacentAlbums({
+        prev: prevTrack?.albumArt || null,
+        next: nextTrack?.albumArt || null,
+      });
+
+      setAdjacentTracks({
+        prev: prevTrack
+          ? { name: prevTrack.name, artist: prevTrack.artist, album: prevTrack.album }
+          : null,
+        next: nextTrack
+          ? { name: nextTrack.name, artist: nextTrack.artist, album: nextTrack.album }
+          : null,
+      });
+    } else if (spotifyConnected && currentTrack) {
+      // Sin contexto de playlist, obtener info completa de la API de Spotify
+      loadAdjacentTracksInfo();
+    }
+  }, [
+    currentTrackIndex,
+    currentPlaylistTracks,
+    currentTrack?.uri,
+    spotifyConnected,
+    loadAdjacentTracksInfo,
+  ]);
 
   // -------------------------------------------------------------------------
   // PAN RESPONDER - Cerrar deslizando hacia abajo desde el header
@@ -1073,378 +1568,360 @@ export default function SpotifyModal({
   // -------------------------------------------------------------------------
   // RENDER CONNECTED VIEW
   // -------------------------------------------------------------------------
-  const renderConnectedView = () => (
-    <View className="flex-1">
-      {/* NOW PLAYING TAB */}
-      {activeTab === 'now-playing' && (
-        <Animated.View entering={FadeIn.duration(200)} className="flex-1">
-          {/* Fondo animado con carátula */}
-          <AnimatedAlbumBackground
-            albumArt={currentTrack?.albumArt}
-            isPlaying={playbackState?.isPlaying ?? false}
-          />
+  const renderConnectedView = () => {
+    return (
+      <View className="flex-1">
+        {/* NOW PLAYING TAB */}
+        {activeTab === 'now-playing' && (
+          <Animated.View entering={FadeIn.duration(200)} className="flex-1">
+            {/* Fondo animado con carátula */}
+            <AnimatedAlbumBackground
+              albumArt={currentTrack?.albumArt}
+              isPlaying={playbackState?.isPlaying ?? false}
+            />
 
-          <View className="flex-1 px-6 pt-4">
-            {currentTrack ? (
-              <View className="flex-1 items-center justify-center">
-                {/* Large Album Art */}
-                <View className="w-72 h-72 rounded-2xl overflow-hidden shadow-2xl mb-8">
-                  {currentTrack.albumArt ? (
-                    <Image
-                      source={{ uri: currentTrack.albumArt }}
-                      style={{ width: '100%', height: '100%' }}
-                      contentFit="cover"
+            <View className="flex-1 px-0 pt-4">
+              {currentTrack ? (
+                <View className="flex-1 items-center justify-center">
+                  {/* Album Carousel - Swipe para cambiar canción con info sincronizada */}
+                  <AlbumCarousel
+                    currentAlbumArt={currentTrack.albumArt}
+                    prevAlbumArt={adjacentAlbums.prev}
+                    nextAlbumArt={adjacentAlbums.next}
+                    currentTrackInfo={{
+                      name: currentTrack.name,
+                      artist: currentTrack.artist,
+                      album: currentTrack.album,
+                    }}
+                    prevTrackInfo={adjacentTracks.prev}
+                    nextTrackInfo={adjacentTracks.next}
+                    currentTrackUri={currentTrack.uri}
+                    onNext={handleNextInPlaylist}
+                    onPrevious={handlePrevInPlaylist}
+                    hasPrev={!!adjacentAlbums.prev}
+                    hasNext={!!adjacentAlbums.next}
+                    isTrackLiked={isTrackLiked}
+                    checkingLikeStatus={checkingLikeStatus}
+                    togglingLike={togglingLike}
+                    onToggleLike={handleToggleLike}
+                  />
+
+                  {/* Progress Bar Slider */}
+                  <View className="w-full mb-6 px-6">
+                    <Slider
+                      style={{ width: '100%', height: 40 }}
+                      minimumValue={0}
+                      maximumValue={currentTrack.durationMs || 1}
+                      value={isSeeking ? currentPosition : currentPosition}
+                      onSlidingStart={handleSeekStart}
+                      onSlidingComplete={handleSeekComplete}
+                      minimumTrackTintColor="#1DB954"
+                      maximumTrackTintColor="#27272A"
+                      thumbTintColor="#1DB954"
+                      disabled={false}
                     />
-                  ) : (
-                    <View className="w-full h-full bg-zinc-800 items-center justify-center">
-                      <Disc3 size={80} color="#1DB954" />
-                    </View>
-                  )}
-                </View>
-
-                {/* Track Info with Like Button */}
-                <View className="w-full items-center mb-4">
-                  <View className="flex-row items-center justify-center w-full px-4">
-                    <Text
-                      className="text-white font-bold text-2xl text-center flex-1"
-                      numberOfLines={2}
-                    >
-                      {currentTrack.name}
-                    </Text>
-                    {/* Like/Unlike Button */}
-                    <TouchableOpacity
-                      onPress={handleToggleLike}
-                      disabled={checkingLikeStatus || togglingLike}
-                      className="ml-3"
-                    >
-                      {checkingLikeStatus || togglingLike ? (
-                        <ActivityIndicator size="small" color="#1DB954" />
-                      ) : isTrackLiked ? (
-                        <CheckCircle size={28} color="#1DB954" fill="#1DB954" />
-                      ) : (
-                        <PlusCircle size={28} color="#71717A" />
-                      )}
-                    </TouchableOpacity>
-                  </View>
-                  <Text className="text-zinc-400 text-lg mt-2">{currentTrack.artist}</Text>
-                  <Text className="text-zinc-600 text-sm mt-1">{currentTrack.album}</Text>
-                </View>
-
-                {/* Progress Bar Slider */}
-                <View className="w-full mb-6">
-                  <Slider
-                    style={{ width: '100%', height: 40 }}
-                    minimumValue={0}
-                    maximumValue={currentTrack.durationMs || 1}
-                    value={isSeeking ? currentPosition : currentPosition}
-                    onSlidingStart={handleSeekStart}
-                    onSlidingComplete={handleSeekComplete}
-                    minimumTrackTintColor="#1DB954"
-                    maximumTrackTintColor="#27272A"
-                    thumbTintColor="#1DB954"
-                    disabled={false}
-                  />
-                  <View className="flex-row justify-between px-1 -mt-1">
-                    <Text className="text-zinc-500 text-xs font-mono">
-                      {formatDuration(currentPosition)}
-                    </Text>
-                    <Text className="text-zinc-500 text-xs font-mono">
-                      {formatDuration(currentTrack.durationMs || 0)}
-                    </Text>
-                  </View>
-                </View>
-
-                {/* Controls - Disponibles para todos */}
-                <View className="flex-row items-center justify-center gap-8">
-                  <TouchableOpacity
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                      handlePrevInPlaylist();
-                    }}
-                    className="w-14 h-14 bg-zinc-800 rounded-full items-center justify-center"
-                  >
-                    <SkipBack size={24} color="#fff" />
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                      onPlayPause();
-                    }}
-                    className="w-20 h-20 bg-[#1DB954] rounded-full items-center justify-center"
-                  >
-                    {playbackState?.isPlaying ? (
-                      <Pause size={36} color="#000" fill="#000" />
-                    ) : (
-                      <Play size={36} color="#000" fill="#000" style={{ marginLeft: 4 }} />
-                    )}
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                      handleNextInPlaylist();
-                    }}
-                    className="w-14 h-14 bg-zinc-800 rounded-full items-center justify-center"
-                  >
-                    <SkipForward size={24} color="#fff" />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ) : (
-              <View className="flex-1 items-center justify-center">
-                <View className="w-32 h-32 bg-zinc-900 rounded-full items-center justify-center mb-6">
-                  <Music size={48} color="#71717A" />
-                </View>
-                <Text className="text-white font-bold text-xl mb-2">Sin reproducción</Text>
-                <Text className="text-zinc-500 text-center">
-                  Abre Spotify y reproduce algo,{'\n'}o busca una canción aquí
-                </Text>
-                <TouchableOpacity
-                  onPress={() => setActiveTab('search')}
-                  className="mt-6 bg-[#1DB954] px-6 py-3 rounded-full"
-                >
-                  <Text className="text-black font-bold">Buscar música</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-          </View>
-        </Animated.View>
-      )}
-
-      {/* PLAYLISTS TAB */}
-      {activeTab === 'playlists' && (
-        <Animated.View entering={FadeIn.duration(200)} className="flex-1">
-          {showPlaylistTracks && selectedPlaylist ? (
-            // Tracks de playlist seleccionada
-            <View className="flex-1">
-              {/* Header de playlist */}
-              <View className="flex-row items-center px-4 py-4 border-b border-zinc-800">
-                <TouchableOpacity
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    setShowPlaylistTracks(false);
-                    setSelectedPlaylist(null);
-                  }}
-                  className="w-10 h-10 bg-zinc-800 rounded-full items-center justify-center mr-3"
-                >
-                  <ChevronLeft size={20} color="#fff" />
-                </TouchableOpacity>
-                {selectedPlaylist.imageUrl && (
-                  <Image
-                    source={{ uri: selectedPlaylist.imageUrl }}
-                    style={{ width: 40, height: 40, borderRadius: 6 }}
-                    contentFit="cover"
-                  />
-                )}
-                <View className="flex-1 ml-3">
-                  <Text className="text-white font-bold text-base" numberOfLines={1}>
-                    {selectedPlaylist.name}
-                  </Text>
-                  <Text className="text-zinc-500 text-xs">
-                    {tracks.length}
-                    {hasMoreTracks ? '+' : ''} / {selectedPlaylist.trackCount} canciones
-                  </Text>
-                </View>
-              </View>
-
-              {/* Lista de tracks */}
-              {loading ? (
-                <View className="flex-1 items-center justify-center">
-                  <ActivityIndicator size="large" color="#1DB954" />
-                </View>
-              ) : (
-                <FlatList
-                  data={tracks}
-                  keyExtractor={(item) => item.id}
-                  renderItem={({ item, index }) =>
-                    renderTrackItemWithContext(item, index, tracks, 'playlist')
-                  }
-                  showsVerticalScrollIndicator={false}
-                  contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
-                  onEndReached={loadMorePlaylistTracks}
-                  onEndReachedThreshold={0.3}
-                  initialNumToRender={10}
-                  maxToRenderPerBatch={8}
-                  windowSize={3}
-                  removeClippedSubviews={true}
-                  getItemLayout={(_, index) => ({
-                    length: 60,
-                    offset: 60 * index,
-                    index,
-                  })}
-                  updateCellsBatchingPeriod={100}
-                  ListFooterComponent={
-                    loadingMore ? (
-                      <View className="py-4 items-center">
-                        <ActivityIndicator size="small" color="#1DB954" />
-                        <Text className="text-zinc-500 text-xs mt-2">
-                          Cargando más canciones...
-                        </Text>
-                      </View>
-                    ) : null
-                  }
-                />
-              )}
-            </View>
-          ) : (
-            // Lista de playlists
-            <View className="flex-1">
-              {loading ? (
-                <View className="flex-1 items-center justify-center">
-                  <ActivityIndicator size="large" color="#1DB954" />
-                </View>
-              ) : (
-                <FlatList
-                  data={playlists}
-                  keyExtractor={(item, index) => `${item.id}_${index}`}
-                  renderItem={renderPlaylistItem}
-                  showsVerticalScrollIndicator={false}
-                  contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
-                  ListEmptyComponent={
-                    <View className="items-center justify-center py-20">
-                      <Library size={48} color="#71717A" />
-                      <Text className="text-zinc-400 mt-4 text-center">
-                        No se encontraron playlists.{'\n'}
-                        Reconecta Spotify si es necesario.
+                    <View className="flex-row justify-between px-1 -mt-1">
+                      <Text className="text-zinc-500 text-xs font-mono">
+                        {formatDuration(currentPosition)}
+                      </Text>
+                      <Text className="text-zinc-500 text-xs font-mono">
+                        {formatDuration(currentTrack.durationMs || 0)}
                       </Text>
                     </View>
-                  }
-                />
+                  </View>
+
+                  {/* Controls - Disponibles para todos */}
+                  <View className="flex-row items-center justify-center gap-8">
+                    <TouchableOpacity
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        handlePrevInPlaylist();
+                      }}
+                      className="w-14 h-14 bg-zinc-800 rounded-full items-center justify-center"
+                    >
+                      <SkipBack size={24} color="#fff" />
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                        onPlayPause();
+                      }}
+                      className="w-20 h-20 bg-[#1DB954] rounded-full items-center justify-center"
+                    >
+                      {playbackState?.isPlaying ? (
+                        <Pause size={36} color="#000" fill="#000" />
+                      ) : (
+                        <Play size={36} color="#000" fill="#000" style={{ marginLeft: 4 }} />
+                      )}
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        handleNextInPlaylist();
+                      }}
+                      className="w-14 h-14 bg-zinc-800 rounded-full items-center justify-center"
+                    >
+                      <SkipForward size={24} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                <View className="flex-1 items-center justify-center">
+                  <View className="w-32 h-32 bg-zinc-900 rounded-full items-center justify-center mb-6">
+                    <Music size={48} color="#71717A" />
+                  </View>
+                  <Text className="text-white font-bold text-xl mb-2">Sin reproducción</Text>
+                  <Text className="text-zinc-500 text-center">
+                    Abre Spotify y reproduce algo,{'\n'}o busca una canción aquí
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => setActiveTab('search')}
+                    className="mt-6 bg-[#1DB954] px-6 py-3 rounded-full"
+                  >
+                    <Text className="text-black font-bold">Buscar música</Text>
+                  </TouchableOpacity>
+                </View>
               )}
             </View>
-          )}
-        </Animated.View>
-      )}
+          </Animated.View>
+        )}
 
-      {/* LIKED SONGS TAB */}
-      {activeTab === 'liked' && (
-        <Animated.View entering={FadeIn.duration(200)} className="flex-1">
-          {/* Header Liked Songs */}
-          <LinearGradient colors={['#5B21B6', '#1E1B4B', '#000']} className="px-4 pt-4 pb-6">
-            <View className="flex-row items-center">
-              <View
-                className="w-16 h-16 bg-gradient-to-br from-purple-500 to-blue-500 rounded-lg items-center justify-center mr-4"
-                style={{ backgroundColor: '#8B5CF6' }}
-              >
-                <Heart size={28} color="#fff" fill="#fff" />
-              </View>
+        {/* PLAYLISTS TAB */}
+        {activeTab === 'playlists' && (
+          <Animated.View entering={FadeIn.duration(200)} className="flex-1">
+            {showPlaylistTracks && selectedPlaylist ? (
+              // Tracks de playlist seleccionada
               <View className="flex-1">
-                <Text className="text-white font-bold text-xl">Liked Songs</Text>
-                <Text className="text-zinc-300 text-sm mt-1">
-                  {likedSongs.length}
-                  {hasMoreLiked ? '+' : ''} canciones guardadas
+                {/* Header de playlist */}
+                <View className="flex-row items-center px-4 py-4 border-b border-zinc-800">
+                  <TouchableOpacity
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      setShowPlaylistTracks(false);
+                      setSelectedPlaylist(null);
+                    }}
+                    className="w-10 h-10 bg-zinc-800 rounded-full items-center justify-center mr-3"
+                  >
+                    <ChevronLeft size={20} color="#fff" />
+                  </TouchableOpacity>
+                  {selectedPlaylist.imageUrl && (
+                    <Image
+                      source={{ uri: selectedPlaylist.imageUrl }}
+                      style={{ width: 40, height: 40, borderRadius: 6 }}
+                      contentFit="cover"
+                    />
+                  )}
+                  <View className="flex-1 ml-3">
+                    <Text className="text-white font-bold text-base" numberOfLines={1}>
+                      {selectedPlaylist.name}
+                    </Text>
+                    <Text className="text-zinc-500 text-xs">
+                      {tracks.length}
+                      {hasMoreTracks ? '+' : ''} / {selectedPlaylist.trackCount} canciones
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Lista de tracks */}
+                {loading ? (
+                  <View className="flex-1 items-center justify-center">
+                    <ActivityIndicator size="large" color="#1DB954" />
+                  </View>
+                ) : (
+                  <FlatList
+                    data={tracks}
+                    keyExtractor={(item) => item.id}
+                    renderItem={({ item, index }) =>
+                      renderTrackItemWithContext(item, index, tracks, 'playlist')
+                    }
+                    showsVerticalScrollIndicator={false}
+                    contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
+                    onEndReached={loadMorePlaylistTracks}
+                    onEndReachedThreshold={0.3}
+                    initialNumToRender={10}
+                    maxToRenderPerBatch={8}
+                    windowSize={3}
+                    removeClippedSubviews={true}
+                    getItemLayout={(_, index) => ({
+                      length: 60,
+                      offset: 60 * index,
+                      index,
+                    })}
+                    updateCellsBatchingPeriod={100}
+                    ListFooterComponent={
+                      loadingMore ? (
+                        <View className="py-4 items-center">
+                          <ActivityIndicator size="small" color="#1DB954" />
+                          <Text className="text-zinc-500 text-xs mt-2">
+                            Cargando más canciones...
+                          </Text>
+                        </View>
+                      ) : null
+                    }
+                  />
+                )}
+              </View>
+            ) : (
+              // Lista de playlists
+              <View className="flex-1">
+                {loading ? (
+                  <View className="flex-1 items-center justify-center">
+                    <ActivityIndicator size="large" color="#1DB954" />
+                  </View>
+                ) : (
+                  <FlatList
+                    data={playlists}
+                    keyExtractor={(item, index) => `${item.id}_${index}`}
+                    renderItem={renderPlaylistItem}
+                    showsVerticalScrollIndicator={false}
+                    contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
+                    ListEmptyComponent={
+                      <View className="items-center justify-center py-20">
+                        <Library size={48} color="#71717A" />
+                        <Text className="text-zinc-400 mt-4 text-center">
+                          No se encontraron playlists.{'\n'}
+                          Reconecta Spotify si es necesario.
+                        </Text>
+                      </View>
+                    }
+                  />
+                )}
+              </View>
+            )}
+          </Animated.View>
+        )}
+
+        {/* LIKED SONGS TAB */}
+        {activeTab === 'liked' && (
+          <Animated.View entering={FadeIn.duration(200)} className="flex-1">
+            {/* Header Liked Songs */}
+            <LinearGradient colors={['#5B21B6', '#1E1B4B', '#000']} className="px-4 pt-4 pb-6">
+              <View className="flex-row items-center">
+                <View
+                  className="w-16 h-16 bg-gradient-to-br from-purple-500 to-blue-500 rounded-lg items-center justify-center mr-4"
+                  style={{ backgroundColor: '#8B5CF6' }}
+                >
+                  <Heart size={28} color="#fff" fill="#fff" />
+                </View>
+                <View className="flex-1">
+                  <Text className="text-white font-bold text-xl">Liked Songs</Text>
+                  <Text className="text-zinc-300 text-sm mt-1">
+                    {likedSongs.length}
+                    {hasMoreLiked ? '+' : ''} canciones guardadas
+                  </Text>
+                </View>
+              </View>
+            </LinearGradient>
+
+            {loading ? (
+              <View className="flex-1 items-center justify-center">
+                <ActivityIndicator size="large" color="#1DB954" />
+              </View>
+            ) : (
+              <FlatList
+                data={likedSongs}
+                keyExtractor={(item) => item.id}
+                renderItem={({ item, index }) =>
+                  renderTrackItemWithContext(item, index, likedSongs, 'liked')
+                }
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
+                onEndReached={loadMoreLikedSongs}
+                onEndReachedThreshold={0.3}
+                initialNumToRender={10}
+                maxToRenderPerBatch={8}
+                windowSize={3}
+                removeClippedSubviews={true}
+                getItemLayout={(_, index) => ({
+                  length: 60,
+                  offset: 60 * index,
+                  index,
+                })}
+                updateCellsBatchingPeriod={100}
+                ListFooterComponent={
+                  loadingMore ? (
+                    <View className="py-4 items-center">
+                      <ActivityIndicator size="small" color="#1DB954" />
+                      <Text className="text-zinc-500 text-xs mt-2">Cargando más canciones...</Text>
+                    </View>
+                  ) : null
+                }
+                ListEmptyComponent={
+                  <View className="items-center justify-center py-20">
+                    <Heart size={48} color="#71717A" />
+                    <Text className="text-zinc-400 mt-4">No tienes canciones guardadas</Text>
+                  </View>
+                }
+              />
+            )}
+          </Animated.View>
+        )}
+
+        {/* SEARCH TAB */}
+        {activeTab === 'search' && (
+          <Animated.View entering={FadeIn.duration(200)} className="flex-1">
+            {/* Search Bar - Búsqueda en tiempo real */}
+            <View className="px-4 pt-4 pb-2">
+              <View className="flex-row items-center bg-zinc-900 rounded-xl px-4 py-3 border border-zinc-800">
+                <Search size={20} color="#71717A" />
+                <TextInput
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                  placeholder="¿Qué quieres escuchar?"
+                  placeholderTextColor="#71717A"
+                  className="flex-1 ml-3 text-white text-base"
+                  returnKeyType="search"
+                  autoFocus
+                  autoCorrect={false}
+                  autoCapitalize="none"
+                />
+                {loading && (
+                  <ActivityIndicator size="small" color="#1DB954" style={{ marginRight: 8 }} />
+                )}
+                {searchQuery.length > 0 && !loading && (
+                  <TouchableOpacity onPress={() => setSearchQuery('')}>
+                    <X size={18} color="#71717A" />
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+
+            {searchResults.length > 0 ? (
+              <FlatList
+                data={searchResults}
+                keyExtractor={(item, index) => `${item.id}_${index}`}
+                renderItem={({ item, index }) =>
+                  renderTrackItemWithContext(item, index, searchResults, 'search')
+                }
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
+              />
+            ) : (
+              <View className="flex-1 items-center justify-center px-8">
+                <Search size={48} color="#71717A" />
+                <Text className="text-zinc-400 mt-4 text-center">
+                  Busca por nombre de canción, artista o álbum
                 </Text>
               </View>
-            </View>
-          </LinearGradient>
+            )}
+          </Animated.View>
+        )}
 
-          {loading ? (
-            <View className="flex-1 items-center justify-center">
-              <ActivityIndicator size="large" color="#1DB954" />
-            </View>
-          ) : (
-            <FlatList
-              data={likedSongs}
-              keyExtractor={(item) => item.id}
-              renderItem={({ item, index }) =>
-                renderTrackItemWithContext(item, index, likedSongs, 'liked')
-              }
-              showsVerticalScrollIndicator={false}
-              contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
-              onEndReached={loadMoreLikedSongs}
-              onEndReachedThreshold={0.3}
-              initialNumToRender={10}
-              maxToRenderPerBatch={8}
-              windowSize={3}
-              removeClippedSubviews={true}
-              getItemLayout={(_, index) => ({
-                length: 60,
-                offset: 60 * index,
-                index,
-              })}
-              updateCellsBatchingPeriod={100}
-              ListFooterComponent={
-                loadingMore ? (
-                  <View className="py-4 items-center">
-                    <ActivityIndicator size="small" color="#1DB954" />
-                    <Text className="text-zinc-500 text-xs mt-2">Cargando más canciones...</Text>
-                  </View>
-                ) : null
-              }
-              ListEmptyComponent={
-                <View className="items-center justify-center py-20">
-                  <Heart size={48} color="#71717A" />
-                  <Text className="text-zinc-400 mt-4">No tienes canciones guardadas</Text>
-                </View>
-              }
-            />
-          )}
-        </Animated.View>
-      )}
-
-      {/* SEARCH TAB */}
-      {activeTab === 'search' && (
-        <Animated.View entering={FadeIn.duration(200)} className="flex-1">
-          {/* Search Bar - Búsqueda en tiempo real */}
-          <View className="px-4 pt-4 pb-2">
-            <View className="flex-row items-center bg-zinc-900 rounded-xl px-4 py-3 border border-zinc-800">
-              <Search size={20} color="#71717A" />
-              <TextInput
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-                placeholder="¿Qué quieres escuchar?"
-                placeholderTextColor="#71717A"
-                className="flex-1 ml-3 text-white text-base"
-                returnKeyType="search"
-                autoFocus
-                autoCorrect={false}
-                autoCapitalize="none"
-              />
-              {loading && (
-                <ActivityIndicator size="small" color="#1DB954" style={{ marginRight: 8 }} />
-              )}
-              {searchQuery.length > 0 && !loading && (
-                <TouchableOpacity onPress={() => setSearchQuery('')}>
-                  <X size={18} color="#71717A" />
-                </TouchableOpacity>
-              )}
-            </View>
-          </View>
-
-          {searchResults.length > 0 ? (
-            <FlatList
-              data={searchResults}
-              keyExtractor={(item, index) => `${item.id}_${index}`}
-              renderItem={({ item, index }) =>
-                renderTrackItemWithContext(item, index, searchResults, 'search')
-              }
-              showsVerticalScrollIndicator={false}
-              contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
-            />
-          ) : (
-            <View className="flex-1 items-center justify-center px-8">
-              <Search size={48} color="#71717A" />
-              <Text className="text-zinc-400 mt-4 text-center">
-                Busca por nombre de canción, artista o álbum
-              </Text>
-            </View>
-          )}
-        </Animated.View>
-      )}
-
-      {/* Mini Player (si hay track y no está en Now Playing) */}
-      {currentTrack && activeTab !== 'now-playing' && (
-        <MiniPlayer
-          currentTrack={currentTrack}
-          isPlaying={playbackState?.isPlaying || false}
-          onPlayPause={onPlayPause}
-          onExpand={() => setActiveTab('now-playing')}
-          isPro={isPro}
-        />
-      )}
-    </View>
-  );
+        {/* Mini Player (si hay track y no está en Now Playing) */}
+        {currentTrack && activeTab !== 'now-playing' && (
+          <MiniPlayer
+            currentTrack={currentTrack}
+            isPlaying={playbackState?.isPlaying || false}
+            onPlayPause={onPlayPause}
+            onExpand={() => setActiveTab('now-playing')}
+            isPro={isPro}
+          />
+        )}
+      </View>
+    );
+  };
 
   // -------------------------------------------------------------------------
   // RENDER NOT CONNECTED VIEW

@@ -286,6 +286,37 @@ class CloudflareR2Service {
   }
 
   // --------------------------------------------------------------------------
+  // SUBIR THUMBNAIL DE EJERCICIO (ADMIN)
+  // --------------------------------------------------------------------------
+  async uploadExerciseThumbnail(base64Data: string, exerciseId: string): Promise<R2UploadResult> {
+    const timestamp = Date.now();
+    const key = `exercise-thumbnails/${exerciseId}/${timestamp}.jpg`;
+
+    return this.uploadFromBase64(base64Data, key, 'image/jpeg');
+  }
+
+  // --------------------------------------------------------------------------
+  // SUBIR VIDEO DE EJERCICIO (ADMIN)
+  // --------------------------------------------------------------------------
+  async uploadExerciseVideo(fileUri: string, exerciseId: string): Promise<R2UploadResult> {
+    const timestamp = Date.now();
+    const key = `exercise-videos/${exerciseId}/${timestamp}.mp4`;
+
+    return this.uploadFile(fileUri, key, 'video/mp4');
+  }
+
+  // --------------------------------------------------------------------------
+  // ELIMINAR THUMBNAIL DE EJERCICIO
+  // --------------------------------------------------------------------------
+  async deleteExerciseThumbnail(thumbnailUrl: string): Promise<R2DeleteResult> {
+    const key = this.getKeyFromUrl(thumbnailUrl);
+    if (!key) {
+      return { success: false, error: 'URL inválida' };
+    }
+    return this.deleteFile(key);
+  }
+
+  // --------------------------------------------------------------------------
   // ELIMINAR FOTO DE PROGRESO
   // --------------------------------------------------------------------------
   async deleteProgressPhoto(photoUrl: string): Promise<R2DeleteResult> {

@@ -8,6 +8,8 @@ import {
   Alert,
   RefreshControl,
   Modal,
+  Image,
+  ActivityIndicator,
 } from 'react-native';
 import {
   Search,
@@ -20,6 +22,9 @@ import {
   Target,
   Users,
   Copy,
+  Dumbbell,
+  Clock,
+  Minus,
 } from 'lucide-react-native';
 import { supabase } from '../../../lib/supabase';
 
@@ -47,11 +52,32 @@ interface TemplateDay {
   exercises: TemplateDayExercise[];
 }
 
+// Tipo de serie para configuración detallada
+type SeriesType = 'CALENTAMIENTO' | 'APROXIMACION' | 'EFECTIVA' | 'FALLO';
+
+interface TemplateSeriesConfig {
+  id: string;
+  type: SeriesType;
+  reps: number;
+  note: string;
+}
+
 interface TemplateDayExercise {
+  exercise_id: string; // UUID del ejercicio en tabla exercises
   name: string;
-  sets: number;
-  reps: string;
+  thumbnail_url?: string;
   rest: string;
+  series: TemplateSeriesConfig[]; // Series detalladas
+}
+
+// Ejercicio de la DB
+interface DBExercise {
+  id: string;
+  name: string;
+  muscle_group: string;
+  secondary_muscles: string[];
+  thumbnail_url?: string;
+  description?: string;
 }
 
 // ============================================================================
@@ -75,6 +101,30 @@ const COLORS = {
 const LEVELS = ['PRINCIPIANTE', 'INTERMEDIO', 'AVANZADO'];
 const GOALS = ['HIPERTROFIA', 'FUERZA', 'DEFINICION', 'RECOMPOSICION', 'GENERAL'];
 const EQUIPMENT = ['gym-completo', 'mancuernas', 'casa', 'calistenia', 'bandas'];
+
+// Grupos musculares para selección de días
+const MUSCLE_GROUPS = [
+  // Superior - Pecho y Espalda
+  { id: 'pecho', name: 'PECHO', color: '#ef4444', category: 'superior' },
+  { id: 'espalda', name: 'ESPALDA', color: '#3b82f6', category: 'superior' },
+  // Hombros divididos
+  { id: 'hombro-frontal', name: 'HOMBRO FRONTAL', color: '#f59e0b', category: 'hombros' },
+  { id: 'hombro-lateral', name: 'HOMBRO LATERAL', color: '#fbbf24', category: 'hombros' },
+  { id: 'hombro-posterior', name: 'HOMBRO POSTERIOR', color: '#d97706', category: 'hombros' },
+  // Brazos
+  { id: 'biceps', name: 'BÍCEPS', color: '#10b981', category: 'brazos' },
+  { id: 'triceps', name: 'TRÍCEPS', color: '#8b5cf6', category: 'brazos' },
+  { id: 'antebrazos', name: 'ANTEBRAZOS', color: '#6366f1', category: 'brazos' },
+  // Inferior
+  { id: 'cuadriceps', name: 'CUÁDRICEPS', color: '#ec4899', category: 'piernas' },
+  { id: 'femorales', name: 'FEMORALES', color: '#be185d', category: 'piernas' },
+  { id: 'gluteos', name: 'GLÚTEOS', color: '#f97316', category: 'piernas' },
+  { id: 'pantorrillas', name: 'PANTORRILLAS', color: '#84cc16', category: 'piernas' },
+  // Core y especiales
+  { id: 'core', name: 'CORE', color: '#06b6d4', category: 'core' },
+  { id: 'cardio', name: 'CARDIO', color: '#ef4444', category: 'especial' },
+  { id: 'fullbody', name: 'FULL BODY', color: '#a855f7', category: 'especial' },
+];
 
 // ============================================================================
 // MAIN COMPONENT
@@ -107,16 +157,49 @@ export default function AdminRutinasScreen() {
     focus: '',
     exercises: [] as TemplateDayExercise[],
   });
+  const [selectedMuscleGroups, setSelectedMuscleGroups] = useState<string[]>([]);
 
-  // Exercise in day modal
-  const [exerciseModalVisible, setExerciseModalVisible] = useState(false);
+  // Exercise selector modal
+  const [exerciseSelectorVisible, setExerciseSelectorVisible] = useState(false);
+  const [dbExercises, setDbExercises] = useState<DBExercise[]>([]);
+  const [exerciseSearchQuery, setExerciseSearchQuery] = useState('');
+  const [loadingExercises, setLoadingExercises] = useState(false);
+  const [selectedExerciseMuscleFilter, setSelectedExerciseMuscleFilter] = useState<string | null>(
+    null
+  );
+
+  // Exercise series editor modal
+  const [seriesEditorVisible, setSeriesEditorVisible] = useState(false);
   const [editingExerciseIndex, setEditingExerciseIndex] = useState<number | null>(null);
-  const [exerciseFormData, setExerciseFormData] = useState({
-    name: '',
-    sets: 4,
-    reps: '8-12',
-    rest: '90s',
-  });
+  const [currentExercise, setCurrentExercise] = useState<TemplateDayExercise | null>(null);
+
+  // Series types config
+  const SERIES_TYPES: { type: SeriesType; label: string; color: string; defaultReps: number }[] = [
+    { type: 'CALENTAMIENTO', label: '🔥 CALENT.', color: '#f59e0b', defaultReps: 15 },
+    { type: 'APROXIMACION', label: '📈 APROX.', color: '#3b82f6', defaultReps: 8 },
+    { type: 'EFECTIVA', label: '💪 EFECTIVA', color: '#22c55e', defaultReps: 10 },
+    { type: 'FALLO', label: '💀 FALLO', color: '#ef4444', defaultReps: 8 },
+  ];
+
+  // -------------------------------------------------------------------------
+  // FETCH EXERCISES FROM DB
+  // -------------------------------------------------------------------------
+  const fetchExercisesFromDB = useCallback(async () => {
+    setLoadingExercises(true);
+    try {
+      const { data, error } = await supabase
+        .from('exercises')
+        .select('id, name, muscle_group, secondary_muscles, thumbnail_url, description')
+        .order('name', { ascending: true });
+
+      if (error) throw error;
+      setDbExercises(data || []);
+    } catch (error) {
+      console.error('Error fetching exercises:', error);
+    } finally {
+      setLoadingExercises(false);
+    }
+  }, []);
 
   // -------------------------------------------------------------------------
   // FETCH TEMPLATES
@@ -147,7 +230,8 @@ export default function AdminRutinasScreen() {
 
   useEffect(() => {
     fetchTemplates();
-  }, [fetchTemplates]);
+    fetchExercisesFromDB();
+  }, [fetchTemplates, fetchExercisesFromDB]);
 
   // -------------------------------------------------------------------------
   // SEARCH FILTER
@@ -275,26 +359,32 @@ export default function AdminRutinasScreen() {
   // DELETE TEMPLATE
   // -------------------------------------------------------------------------
   const deleteTemplate = (template: TrainingTemplate) => {
-    Alert.alert('Eliminar Rutina', `¿Seguro que quieres eliminar "${template.name}"?`, [
-      { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Eliminar',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            const { error } = await supabase
-              .from('training_plan_templates')
-              .update({ is_active: false })
-              .eq('id', template.id);
+    Alert.alert(
+      'Eliminar Rutina',
+      `¿Seguro que quieres eliminar "${template.name}"?\n\nEsta acción es permanente.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { error } = await supabase
+                .from('training_plan_templates')
+                .delete()
+                .eq('id', template.id);
 
-            if (error) throw error;
-            fetchTemplates();
-          } catch (error) {
-            console.error('Error deleting template:', error);
-          }
+              if (error) throw error;
+              Alert.alert('✅ Eliminado', 'Rutina eliminada permanentemente');
+              fetchTemplates();
+            } catch (error) {
+              console.error('Error deleting template:', error);
+              Alert.alert('Error', 'No se pudo eliminar la rutina');
+            }
+          },
         },
-      },
-    ]);
+      ]
+    );
   };
 
   // -------------------------------------------------------------------------
@@ -329,6 +419,9 @@ export default function AdminRutinasScreen() {
   const openDayModal = (dayIndex?: number) => {
     if (dayIndex !== undefined && formData.days[dayIndex]) {
       setEditingDayIndex(dayIndex);
+      // Extraer grupos musculares del nombre (separados por " + ")
+      const muscleNames = formData.days[dayIndex].name.split(' + ').map((m) => m.trim());
+      setSelectedMuscleGroups(muscleNames);
       setDayFormData({
         name: formData.days[dayIndex].name,
         focus: formData.days[dayIndex].focus || '',
@@ -336,6 +429,7 @@ export default function AdminRutinasScreen() {
       });
     } else {
       setEditingDayIndex(null);
+      setSelectedMuscleGroups([]);
       setDayFormData({
         name: '',
         focus: '',
@@ -346,24 +440,28 @@ export default function AdminRutinasScreen() {
   };
 
   const saveDay = () => {
-    if (!dayFormData.name.trim()) {
-      Alert.alert('Error', 'El nombre del día es requerido');
+    if (selectedMuscleGroups.length === 0) {
+      Alert.alert('Error', 'Selecciona al menos un grupo muscular');
       return;
     }
 
+    // Generar nombre automáticamente de los grupos seleccionados
+    const generatedName = selectedMuscleGroups.join(' + ');
+
     const newDay: TemplateDay = {
       dayIndex: editingDayIndex ?? formData.days.length,
-      name: dayFormData.name.trim(),
-      focus: dayFormData.focus.trim() || undefined,
+      name: generatedName,
+      focus: undefined, // Ya no usamos focus
       exercises: dayFormData.exercises,
     };
 
     if (editingDayIndex !== null) {
       const updatedDays = [...formData.days];
       updatedDays[editingDayIndex] = newDay;
-      setFormData((prev) => ({ ...prev, days: updatedDays }));
+      setFormData((prev) => ({ ...prev, days: updatedDays, frequency: updatedDays.length }));
     } else {
-      setFormData((prev) => ({ ...prev, days: [...prev.days, newDay] }));
+      const updatedDays = [...formData.days, newDay];
+      setFormData((prev) => ({ ...prev, days: updatedDays, frequency: updatedDays.length }));
     }
 
     setDayModalVisible(false);
@@ -377,55 +475,174 @@ export default function AdminRutinasScreen() {
   };
 
   // -------------------------------------------------------------------------
-  // EXERCISE IN DAY MANAGEMENT
+  // EXERCISE IN DAY MANAGEMENT - NUEVA IMPLEMENTACIÓN
   // -------------------------------------------------------------------------
-  const openExerciseModal = (exerciseIndex?: number) => {
-    if (exerciseIndex !== undefined && dayFormData.exercises[exerciseIndex]) {
-      setEditingExerciseIndex(exerciseIndex);
-      setExerciseFormData(dayFormData.exercises[exerciseIndex]);
-    } else {
-      setEditingExerciseIndex(null);
-      setExerciseFormData({
-        name: '',
-        sets: 4,
-        reps: '8-12',
-        rest: '90s',
-      });
-    }
-    setExerciseModalVisible(true);
+
+  // Abrir selector de ejercicios (conectado a DB)
+  const openExerciseSelector = () => {
+    setExerciseSearchQuery('');
+    setExerciseSelectorVisible(true);
   };
 
-  const saveExercise = () => {
-    if (!exerciseFormData.name.trim()) {
-      Alert.alert('Error', 'El nombre del ejercicio es requerido');
-      return;
-    }
+  // Seleccionar ejercicio de la DB y agregarlo
+  const selectExercise = (dbExercise: DBExercise) => {
+    // Crear ejercicio con series por defecto (4 efectivas)
+    const defaultSeries: TemplateSeriesConfig[] = [
+      { id: '1', type: 'CALENTAMIENTO', reps: 15, note: '' },
+      { id: '2', type: 'EFECTIVA', reps: 10, note: '' },
+      { id: '3', type: 'EFECTIVA', reps: 10, note: '' },
+      { id: '4', type: 'EFECTIVA', reps: 10, note: '' },
+      { id: '5', type: 'FALLO', reps: 8, note: '' },
+    ];
 
     const newExercise: TemplateDayExercise = {
-      name: exerciseFormData.name.trim(),
-      sets: exerciseFormData.sets,
-      reps: exerciseFormData.reps,
-      rest: exerciseFormData.rest,
+      exercise_id: dbExercise.id,
+      name: dbExercise.name,
+      thumbnail_url: dbExercise.thumbnail_url,
+      rest: '90s',
+      series: defaultSeries,
     };
 
-    if (editingExerciseIndex !== null) {
-      const updatedExercises = [...dayFormData.exercises];
-      updatedExercises[editingExerciseIndex] = newExercise;
-      setDayFormData((prev) => ({ ...prev, exercises: updatedExercises }));
-    } else {
-      setDayFormData((prev) => ({
-        ...prev,
-        exercises: [...prev.exercises, newExercise],
-      }));
+    setDayFormData((prev) => ({
+      ...prev,
+      exercises: [...prev.exercises, newExercise],
+    }));
+
+    setExerciseSelectorVisible(false);
+  };
+
+  // Abrir editor de series para un ejercicio
+  const openSeriesEditor = (exerciseIndex: number) => {
+    setEditingExerciseIndex(exerciseIndex);
+    setCurrentExercise({ ...dayFormData.exercises[exerciseIndex] });
+    setSeriesEditorVisible(true);
+  };
+
+  // Agregar serie
+  const addSeries = (type: SeriesType) => {
+    if (!currentExercise) return;
+    const config = SERIES_TYPES.find((s) => s.type === type);
+    const newSeries: TemplateSeriesConfig = {
+      id: String(Date.now()),
+      type,
+      reps: config?.defaultReps || 10,
+      note: '',
+    };
+    setCurrentExercise({
+      ...currentExercise,
+      series: [...currentExercise.series, newSeries],
+    });
+  };
+
+  // Eliminar serie
+  const removeSeries = (seriesIndex: number) => {
+    if (!currentExercise) return;
+    setCurrentExercise({
+      ...currentExercise,
+      series: currentExercise.series.filter((_, i) => i !== seriesIndex),
+    });
+  };
+
+  // Actualizar reps de una serie
+  const updateSeriesReps = (seriesIndex: number, reps: number) => {
+    if (!currentExercise) return;
+    const updated = [...currentExercise.series];
+    updated[seriesIndex] = { ...updated[seriesIndex], reps };
+    setCurrentExercise({ ...currentExercise, series: updated });
+  };
+
+  // Actualizar nota de una serie
+  const updateSeriesNote = (seriesIndex: number, note: string) => {
+    if (!currentExercise) return;
+    const updated = [...currentExercise.series];
+    updated[seriesIndex] = { ...updated[seriesIndex], note };
+    setCurrentExercise({ ...currentExercise, series: updated });
+  };
+
+  // Actualizar descanso
+  const updateRest = (rest: string) => {
+    if (!currentExercise) return;
+    setCurrentExercise({ ...currentExercise, rest });
+  };
+
+  // Guardar configuración de series
+  const saveSeriesConfig = () => {
+    if (editingExerciseIndex === null || !currentExercise) return;
+
+    const updatedExercises = [...dayFormData.exercises];
+    updatedExercises[editingExerciseIndex] = currentExercise;
+    setDayFormData((prev) => ({ ...prev, exercises: updatedExercises }));
+
+    setSeriesEditorVisible(false);
+    setCurrentExercise(null);
+    setEditingExerciseIndex(null);
+  };
+
+  // Eliminar ejercicio del día
+  const deleteExercise = (exerciseIndex: number) => {
+    Alert.alert('Eliminar Ejercicio', '¿Estás seguro?', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Eliminar',
+        style: 'destructive',
+        onPress: () => {
+          const updatedExercises = dayFormData.exercises.filter((_, i) => i !== exerciseIndex);
+          setDayFormData((prev) => ({ ...prev, exercises: updatedExercises }));
+        },
+      },
+    ]);
+  };
+
+  // Filtrar y ordenar ejercicios para el selector
+  // Prioriza los que coinciden con los músculos seleccionados para el día
+  const filteredDbExercises = (() => {
+    let exercises = [...dbExercises];
+
+    // Helper para verificar si un ejercicio es recomendado (match con músculos del día)
+    const isExerciseRecommended = (ex: DBExercise) => {
+      const exMuscle = ex.muscle_group?.toUpperCase() || '';
+      const exSecondary = ex.secondary_muscles?.map((m) => m.toUpperCase()) || [];
+      return selectedMuscleGroups.some(
+        (dayMuscle) => exMuscle === dayMuscle || exSecondary.includes(dayMuscle)
+      );
+    };
+
+    // Filtro especial "RECOMMENDED" - solo ejercicios que coinciden con músculos del día
+    if (selectedExerciseMuscleFilter === 'RECOMMENDED') {
+      exercises = exercises.filter(isExerciseRecommended);
+    }
+    // Filtro por grupo muscular específico
+    else if (selectedExerciseMuscleFilter) {
+      exercises = exercises.filter(
+        (ex) =>
+          ex.muscle_group?.toUpperCase() === selectedExerciseMuscleFilter ||
+          ex.secondary_muscles?.some((mg) => mg.toUpperCase() === selectedExerciseMuscleFilter)
+      );
     }
 
-    setExerciseModalVisible(false);
-  };
+    // Luego aplicar búsqueda de texto
+    if (exerciseSearchQuery) {
+      const q = exerciseSearchQuery.toLowerCase();
+      exercises = exercises.filter(
+        (ex) => ex.name.toLowerCase().includes(q) || ex.muscle_group?.toLowerCase().includes(q)
+      );
+    }
 
-  const deleteExercise = (exerciseIndex: number) => {
-    const updatedExercises = dayFormData.exercises.filter((_, i) => i !== exerciseIndex);
-    setDayFormData((prev) => ({ ...prev, exercises: updatedExercises }));
-  };
+    // Separar en recomendados (match con músculos del día) y otros
+    const recommended: DBExercise[] = [];
+    const others: DBExercise[] = [];
+
+    exercises.forEach((ex) => {
+      if (isExerciseRecommended(ex)) {
+        recommended.push(ex);
+      } else {
+        others.push(ex);
+      }
+    });
+
+    // Retornar recomendados primero, luego los demás
+    return [...recommended, ...others];
+  })();
 
   // -------------------------------------------------------------------------
   // TOGGLE ARRAY VALUE
@@ -729,34 +946,202 @@ export default function AdminRutinasScreen() {
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false}>
-              {/* Day Name */}
-              <Text className="text-zinc-400 text-xs font-mono mb-1">NOMBRE DEL DÍA</Text>
-              <TextInput
-                className="bg-zinc-800 text-white p-3 rounded-lg mb-3 font-mono"
-                placeholder="Ej: Push, Piernas, Upper A..."
-                placeholderTextColor={COLORS.zinc400}
-                value={dayFormData.name}
-                onChangeText={(text) => setDayFormData((prev) => ({ ...prev, name: text }))}
-              />
+              {/* Muscle Groups Selection */}
+              <Text className="text-zinc-400 text-xs font-mono mb-2">GRUPOS MUSCULARES</Text>
 
-              {/* Focus */}
-              <Text className="text-zinc-400 text-xs font-mono mb-1">ENFOQUE (opcional)</Text>
-              <TextInput
-                className="bg-zinc-800 text-white p-3 rounded-lg mb-4 font-mono"
-                placeholder="Ej: Pecho/Hombros/Tríceps"
-                placeholderTextColor={COLORS.zinc400}
-                value={dayFormData.focus}
-                onChangeText={(text) => setDayFormData((prev) => ({ ...prev, focus: text }))}
-              />
+              {/* Preview del nombre generado */}
+              {selectedMuscleGroups.length > 0 && (
+                <View className="bg-zinc-800 p-3 rounded-lg mb-3 border border-blue-500/50">
+                  <Text className="text-blue-400 text-xs font-mono mb-1">NOMBRE GENERADO:</Text>
+                  <Text className="text-white font-bold">{selectedMuscleGroups.join(' + ')}</Text>
+                </View>
+              )}
+
+              {/* Superior - Pecho y Espalda */}
+              <View className="mb-3">
+                <Text className="text-red-500 text-xs font-mono mb-2">TORSO</Text>
+                <View className="flex-row flex-wrap gap-2">
+                  {MUSCLE_GROUPS.filter((g) => g.category === 'superior').map((group) => {
+                    const isSelected = selectedMuscleGroups.includes(group.name);
+                    return (
+                      <TouchableOpacity
+                        key={group.id}
+                        className="px-3 py-2 rounded-lg"
+                        style={{
+                          backgroundColor: isSelected ? group.color : '#27272a',
+                          borderWidth: 1,
+                          borderColor: isSelected ? group.color : '#3f3f46',
+                        }}
+                        onPress={() => {
+                          if (isSelected) {
+                            setSelectedMuscleGroups((prev) => prev.filter((g) => g !== group.name));
+                          } else {
+                            setSelectedMuscleGroups((prev) => [...prev, group.name]);
+                          }
+                        }}
+                      >
+                        <Text
+                          className="text-xs font-bold"
+                          style={{ color: isSelected ? '#000' : '#a1a1aa' }}
+                        >
+                          {group.name}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+
+              {/* Hombros */}
+              <View className="mb-3">
+                <Text className="text-amber-500 text-xs font-mono mb-2">HOMBROS</Text>
+                <View className="flex-row flex-wrap gap-2">
+                  {MUSCLE_GROUPS.filter((g) => g.category === 'hombros').map((group) => {
+                    const isSelected = selectedMuscleGroups.includes(group.name);
+                    return (
+                      <TouchableOpacity
+                        key={group.id}
+                        className="px-3 py-2 rounded-lg"
+                        style={{
+                          backgroundColor: isSelected ? group.color : '#27272a',
+                          borderWidth: 1,
+                          borderColor: isSelected ? group.color : '#3f3f46',
+                        }}
+                        onPress={() => {
+                          if (isSelected) {
+                            setSelectedMuscleGroups((prev) => prev.filter((g) => g !== group.name));
+                          } else {
+                            setSelectedMuscleGroups((prev) => [...prev, group.name]);
+                          }
+                        }}
+                      >
+                        <Text
+                          className="text-xs font-bold"
+                          style={{ color: isSelected ? '#000' : '#a1a1aa' }}
+                        >
+                          {group.name}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+
+              {/* Brazos */}
+              <View className="mb-3">
+                <Text className="text-green-500 text-xs font-mono mb-2">BRAZOS</Text>
+                <View className="flex-row flex-wrap gap-2">
+                  {MUSCLE_GROUPS.filter((g) => g.category === 'brazos').map((group) => {
+                    const isSelected = selectedMuscleGroups.includes(group.name);
+                    return (
+                      <TouchableOpacity
+                        key={group.id}
+                        className="px-3 py-2 rounded-lg"
+                        style={{
+                          backgroundColor: isSelected ? group.color : '#27272a',
+                          borderWidth: 1,
+                          borderColor: isSelected ? group.color : '#3f3f46',
+                        }}
+                        onPress={() => {
+                          if (isSelected) {
+                            setSelectedMuscleGroups((prev) => prev.filter((g) => g !== group.name));
+                          } else {
+                            setSelectedMuscleGroups((prev) => [...prev, group.name]);
+                          }
+                        }}
+                      >
+                        <Text
+                          className="text-xs font-bold"
+                          style={{ color: isSelected ? '#000' : '#a1a1aa' }}
+                        >
+                          {group.name}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+
+              {/* Inferior */}
+              <View className="mb-3">
+                <Text className="text-pink-500 text-xs font-mono mb-2">PARTE INFERIOR</Text>
+                <View className="flex-row flex-wrap gap-2">
+                  {MUSCLE_GROUPS.filter((g) => g.category === 'piernas').map((group) => {
+                    const isSelected = selectedMuscleGroups.includes(group.name);
+                    return (
+                      <TouchableOpacity
+                        key={group.id}
+                        className="px-3 py-2 rounded-lg"
+                        style={{
+                          backgroundColor: isSelected ? group.color : '#27272a',
+                          borderWidth: 1,
+                          borderColor: isSelected ? group.color : '#3f3f46',
+                        }}
+                        onPress={() => {
+                          if (isSelected) {
+                            setSelectedMuscleGroups((prev) => prev.filter((g) => g !== group.name));
+                          } else {
+                            setSelectedMuscleGroups((prev) => [...prev, group.name]);
+                          }
+                        }}
+                      >
+                        <Text
+                          className="text-xs font-bold"
+                          style={{ color: isSelected ? '#000' : '#a1a1aa' }}
+                        >
+                          {group.name}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+
+              {/* Core y Especiales */}
+              <View className="mb-4">
+                <Text className="text-cyan-500 text-xs font-mono mb-2">CORE / ESPECIALES</Text>
+                <View className="flex-row flex-wrap gap-2">
+                  {MUSCLE_GROUPS.filter(
+                    (g) => g.category === 'core' || g.category === 'especial'
+                  ).map((group) => {
+                    const isSelected = selectedMuscleGroups.includes(group.name);
+                    return (
+                      <TouchableOpacity
+                        key={group.id}
+                        className="px-3 py-2 rounded-lg"
+                        style={{
+                          backgroundColor: isSelected ? group.color : '#27272a',
+                          borderWidth: 1,
+                          borderColor: isSelected ? group.color : '#3f3f46',
+                        }}
+                        onPress={() => {
+                          if (isSelected) {
+                            setSelectedMuscleGroups((prev) => prev.filter((g) => g !== group.name));
+                          } else {
+                            setSelectedMuscleGroups((prev) => [...prev, group.name]);
+                          }
+                        }}
+                      >
+                        <Text
+                          className="text-xs font-bold"
+                          style={{ color: isSelected ? '#000' : '#a1a1aa' }}
+                        >
+                          {group.name}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
 
               {/* Exercises */}
-              <View className="flex-row items-center justify-between mb-2">
+              <View className="flex-row items-center justify-between mb-2 mt-2">
                 <Text className="text-zinc-400 text-xs font-mono">
                   EJERCICIOS ({dayFormData.exercises.length})
                 </Text>
                 <TouchableOpacity
                   className="flex-row items-center bg-green-600 px-2 py-1 rounded"
-                  onPress={() => openExerciseModal()}
+                  onPress={openExerciseSelector}
                 >
                   <Plus size={14} color={COLORS.white} />
                   <Text className="text-white text-xs font-bold ml-1">AGREGAR</Text>
@@ -767,18 +1152,56 @@ export default function AdminRutinasScreen() {
                 <TouchableOpacity
                   key={i}
                   className="bg-zinc-800 p-3 rounded-lg mb-2 border border-zinc-700"
-                  onPress={() => openExerciseModal(i)}
+                  onPress={() => openSeriesEditor(i)}
                 >
-                  <View className="flex-row items-center justify-between">
-                    <View>
-                      <Text className="text-white font-bold">{ex.name}</Text>
-                      <Text className="text-zinc-400 text-xs font-mono">
-                        {ex.sets} series × {ex.reps} reps • {ex.rest} descanso
-                      </Text>
+                  <View className="flex-row items-center">
+                    {/* Thumbnail */}
+                    <View className="w-12 h-12 bg-zinc-700 rounded-lg overflow-hidden mr-3">
+                      {ex.thumbnail_url ? (
+                        <Image
+                          source={{ uri: ex.thumbnail_url }}
+                          className="w-full h-full"
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <View className="w-full h-full items-center justify-center">
+                          <Text className="text-zinc-500 text-lg">💪</Text>
+                        </View>
+                      )}
                     </View>
+
+                    {/* Info */}
+                    <View className="flex-1">
+                      <Text className="text-white font-bold text-sm" numberOfLines={1}>
+                        {ex.name}
+                      </Text>
+                      <Text className="text-zinc-400 text-xs font-mono">
+                        {ex.series?.length || 0} series • {ex.rest} descanso
+                      </Text>
+                      {/* Mini preview de series */}
+                      <View className="flex-row mt-1 gap-1">
+                        {ex.series?.slice(0, 6).map((s, si) => {
+                          const config = SERIES_TYPES.find((t) => t.type === s.type);
+                          return (
+                            <View
+                              key={si}
+                              className="px-1.5 py-0.5 rounded"
+                              style={{ backgroundColor: config?.color || '#3f3f46' }}
+                            >
+                              <Text className="text-white text-[8px] font-bold">{s.reps}</Text>
+                            </View>
+                          );
+                        })}
+                        {(ex.series?.length || 0) > 6 && (
+                          <Text className="text-zinc-500 text-[8px]">+{ex.series!.length - 6}</Text>
+                        )}
+                      </View>
+                    </View>
+
+                    {/* Delete */}
                     <TouchableOpacity
                       onPress={() => deleteExercise(i)}
-                      className="p-2 bg-zinc-700 rounded"
+                      className="p-2 bg-zinc-700 rounded ml-2"
                     >
                       <Trash2 size={14} color={COLORS.red} />
                     </TouchableOpacity>
@@ -800,74 +1223,354 @@ export default function AdminRutinasScreen() {
         </View>
       </Modal>
 
-      {/* Exercise Editor Modal */}
-      <Modal visible={exerciseModalVisible} animationType="slide" transparent>
-        <View className="flex-1 bg-black/90 justify-center px-4">
-          <View className="bg-zinc-900 rounded-2xl p-4">
+      {/* ===== EXERCISE SELECTOR MODAL ===== */}
+      <Modal visible={exerciseSelectorVisible} animationType="slide" transparent>
+        <View className="flex-1 bg-black/95 pt-12">
+          <View className="flex-1 px-4">
+            {/* Header */}
             <View className="flex-row items-center justify-between mb-4">
-              <Text className="text-white font-bold text-lg">
-                {editingExerciseIndex !== null ? 'Editar Ejercicio' : 'Agregar Ejercicio'}
-              </Text>
-              <TouchableOpacity onPress={() => setExerciseModalVisible(false)}>
+              <View>
+                <Text className="text-white font-bold text-xl">Seleccionar Ejercicio</Text>
+                {selectedMuscleGroups.length > 0 && (
+                  <Text className="text-green-400 text-xs">
+                    🎯 Músculos del día: {selectedMuscleGroups.join(', ')}
+                  </Text>
+                )}
+              </View>
+              <TouchableOpacity
+                onPress={() => {
+                  setExerciseSelectorVisible(false);
+                  setSelectedExerciseMuscleFilter(null);
+                  setExerciseSearchQuery('');
+                }}
+              >
                 <X size={24} color={COLORS.zinc400} />
               </TouchableOpacity>
             </View>
 
-            <Text className="text-zinc-400 text-xs font-mono mb-1">NOMBRE</Text>
-            <TextInput
-              className="bg-zinc-800 text-white p-3 rounded-lg mb-3 font-mono"
-              placeholder="Nombre del ejercicio"
-              placeholderTextColor={COLORS.zinc400}
-              value={exerciseFormData.name}
-              onChangeText={(text) => setExerciseFormData((prev) => ({ ...prev, name: text }))}
-            />
+            {/* Muscle Group Filter Pills */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              className="mb-2"
+              style={{ maxHeight: 32 }}
+              contentContainerStyle={{ gap: 6, paddingRight: 16, alignItems: 'center' }}
+            >
+              {/* All pill */}
+              <TouchableOpacity
+                className="px-2.5 py-1 rounded-full"
+                style={{
+                  backgroundColor: !selectedExerciseMuscleFilter ? COLORS.blue : '#27272a',
+                  borderWidth: 1,
+                  borderColor: !selectedExerciseMuscleFilter ? COLORS.blue : '#3f3f46',
+                }}
+                onPress={() => setSelectedExerciseMuscleFilter(null)}
+              >
+                <Text
+                  className="text-[10px] font-bold"
+                  style={{ color: !selectedExerciseMuscleFilter ? '#000' : '#a1a1aa' }}
+                >
+                  TODOS
+                </Text>
+              </TouchableOpacity>
 
-            <View className="flex-row gap-2 mb-3">
-              <View className="flex-1">
-                <Text className="text-zinc-400 text-xs font-mono mb-1">SERIES</Text>
-                <TextInput
-                  className="bg-zinc-800 text-white p-3 rounded-lg font-mono"
-                  placeholder="4"
-                  placeholderTextColor={COLORS.zinc400}
-                  value={String(exerciseFormData.sets)}
-                  onChangeText={(text) =>
-                    setExerciseFormData((prev) => ({
-                      ...prev,
-                      sets: parseInt(text) || 0,
-                    }))
+              {/* Show recommended pill if there are muscle groups selected */}
+              {selectedMuscleGroups.length > 0 && (
+                <TouchableOpacity
+                  className="px-2.5 py-1 rounded-full flex-row items-center"
+                  style={{
+                    backgroundColor:
+                      selectedExerciseMuscleFilter === 'RECOMMENDED' ? COLORS.green : '#27272a',
+                    borderWidth: 1,
+                    borderColor:
+                      selectedExerciseMuscleFilter === 'RECOMMENDED' ? COLORS.green : '#22c55e50',
+                  }}
+                  onPress={() =>
+                    setSelectedExerciseMuscleFilter(
+                      selectedExerciseMuscleFilter === 'RECOMMENDED' ? null : 'RECOMMENDED'
+                    )
                   }
-                  keyboardType="numeric"
-                />
-              </View>
-              <View className="flex-1">
-                <Text className="text-zinc-400 text-xs font-mono mb-1">REPS</Text>
-                <TextInput
-                  className="bg-zinc-800 text-white p-3 rounded-lg font-mono"
-                  placeholder="8-12"
-                  placeholderTextColor={COLORS.zinc400}
-                  value={exerciseFormData.reps}
-                  onChangeText={(text) => setExerciseFormData((prev) => ({ ...prev, reps: text }))}
-                />
-              </View>
-              <View className="flex-1">
-                <Text className="text-zinc-400 text-xs font-mono mb-1">DESCANSO</Text>
-                <TextInput
-                  className="bg-zinc-800 text-white p-3 rounded-lg font-mono"
-                  placeholder="90s"
-                  placeholderTextColor={COLORS.zinc400}
-                  value={exerciseFormData.rest}
-                  onChangeText={(text) => setExerciseFormData((prev) => ({ ...prev, rest: text }))}
-                />
-              </View>
+                >
+                  <Text
+                    className="text-[10px] font-bold"
+                    style={{
+                      color: selectedExerciseMuscleFilter === 'RECOMMENDED' ? '#000' : '#22c55e',
+                    }}
+                  >
+                    🎯 REC
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              {MUSCLE_GROUPS.map((group) => {
+                const isSelected = selectedExerciseMuscleFilter === group.name;
+                const isDayMuscle = selectedMuscleGroups.includes(group.name);
+                return (
+                  <TouchableOpacity
+                    key={group.id}
+                    className="px-2.5 py-1 rounded-full"
+                    style={{
+                      backgroundColor: isSelected ? group.color : '#27272a',
+                      borderWidth: 1,
+                      borderColor: isSelected
+                        ? group.color
+                        : isDayMuscle
+                          ? group.color + '80'
+                          : '#3f3f46',
+                    }}
+                    onPress={() => setSelectedExerciseMuscleFilter(isSelected ? null : group.name)}
+                  >
+                    <Text
+                      className="text-[10px] font-bold"
+                      style={{ color: isSelected ? '#000' : isDayMuscle ? group.color : '#a1a1aa' }}
+                    >
+                      {group.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+
+            {/* Search */}
+            <View className="flex-row items-center bg-zinc-800 rounded-lg px-3 py-2 mb-3">
+              <Search size={18} color={COLORS.zinc400} />
+              <TextInput
+                className="flex-1 text-white ml-2 font-mono"
+                placeholder="Buscar ejercicio..."
+                placeholderTextColor={COLORS.zinc400}
+                value={exerciseSearchQuery}
+                onChangeText={setExerciseSearchQuery}
+              />
+              {exerciseSearchQuery && (
+                <TouchableOpacity onPress={() => setExerciseSearchQuery('')}>
+                  <X size={16} color={COLORS.zinc400} />
+                </TouchableOpacity>
+              )}
             </View>
 
-            <TouchableOpacity
-              className="bg-green-600 py-4 rounded-lg flex-row items-center justify-center"
-              onPress={saveExercise}
-            >
-              <Check size={20} color={COLORS.white} />
-              <Text className="text-white font-bold ml-2">GUARDAR</Text>
-            </TouchableOpacity>
+            {/* Results count */}
+            <Text className="text-zinc-400 text-xs font-mono mb-2">
+              {filteredDbExercises.length} ejercicios disponibles
+            </Text>
+
+            {/* Exercise List */}
+            {loadingExercises ? (
+              <View className="flex-1 items-center justify-center">
+                <ActivityIndicator size="large" color={COLORS.blue} />
+              </View>
+            ) : (
+              <ScrollView showsVerticalScrollIndicator={false} className="flex-1">
+                {filteredDbExercises.map((ex) => {
+                  // Verificar si es recomendado para el día
+                  const exMuscle = ex.muscle_group?.toUpperCase() || '';
+                  const exSecondary = ex.secondary_muscles?.map((m) => m.toUpperCase()) || [];
+                  const isRecommended = selectedMuscleGroups.some(
+                    (dayMuscle) => exMuscle === dayMuscle || exSecondary.includes(dayMuscle)
+                  );
+
+                  return (
+                    <TouchableOpacity
+                      key={ex.id}
+                      className="flex-row items-center p-3 rounded-lg mb-2"
+                      style={{
+                        backgroundColor: isRecommended ? '#22c55e15' : '#27272a',
+                        borderWidth: isRecommended ? 1 : 0,
+                        borderColor: isRecommended ? '#22c55e50' : 'transparent',
+                      }}
+                      onPress={() => selectExercise(ex)}
+                    >
+                      {/* Thumbnail */}
+                      <View className="w-14 h-14 bg-zinc-700 rounded-lg overflow-hidden mr-3 relative">
+                        {ex.thumbnail_url ? (
+                          <Image
+                            source={{ uri: ex.thumbnail_url }}
+                            className="w-full h-full"
+                            resizeMode="cover"
+                          />
+                        ) : (
+                          <View className="w-full h-full items-center justify-center">
+                            <Dumbbell size={20} color={COLORS.zinc400} />
+                          </View>
+                        )}
+                        {isRecommended && (
+                          <View className="absolute top-0 right-0 bg-green-500 px-1 py-0.5 rounded-bl">
+                            <Text className="text-[8px] font-bold text-black">🎯</Text>
+                          </View>
+                        )}
+                      </View>
+
+                      {/* Info */}
+                      <View className="flex-1">
+                        <View className="flex-row items-center">
+                          <Text
+                            className="font-bold"
+                            style={{ color: isRecommended ? '#22c55e' : '#fff' }}
+                            numberOfLines={1}
+                          >
+                            {ex.name}
+                          </Text>
+                          {isRecommended && (
+                            <View className="ml-2 bg-green-500/20 px-1.5 py-0.5 rounded">
+                              <Text className="text-green-400 text-[10px] font-bold">REC</Text>
+                            </View>
+                          )}
+                        </View>
+                        <Text className="text-zinc-400 text-xs font-mono">{ex.muscle_group}</Text>
+                        {ex.secondary_muscles?.length > 0 && (
+                          <Text className="text-zinc-500 text-[10px]">
+                            + {ex.secondary_muscles.join(', ')}
+                          </Text>
+                        )}
+                      </View>
+
+                      <Plus size={20} color={isRecommended ? COLORS.green : COLORS.zinc400} />
+                    </TouchableOpacity>
+                  );
+                })}
+                <View style={{ height: 100 }} />
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* ===== SERIES EDITOR MODAL ===== */}
+      <Modal visible={seriesEditorVisible} animationType="slide" transparent>
+        <View className="flex-1 bg-black/95 pt-12">
+          <View className="flex-1 px-4">
+            {/* Header */}
+            <View className="flex-row items-center justify-between mb-4">
+              <View className="flex-1">
+                <Text className="text-white font-bold text-lg" numberOfLines={1}>
+                  {currentExercise?.name}
+                </Text>
+                <Text className="text-zinc-400 text-xs">Configurar series y repeticiones</Text>
+              </View>
+              <TouchableOpacity onPress={() => setSeriesEditorVisible(false)}>
+                <X size={24} color={COLORS.zinc400} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} className="flex-1">
+              {/* Rest time */}
+              <View className="bg-zinc-800 p-3 rounded-lg mb-4">
+                <View className="flex-row items-center mb-2">
+                  <Clock size={16} color={COLORS.blue} />
+                  <Text className="text-white font-bold ml-2">TIEMPO DE DESCANSO</Text>
+                </View>
+                <View className="flex-row gap-2">
+                  {['60s', '90s', '120s', '180s'].map((time) => (
+                    <TouchableOpacity
+                      key={time}
+                      className="flex-1 py-2 rounded-lg items-center"
+                      style={{
+                        backgroundColor: currentExercise?.rest === time ? COLORS.blue : '#3f3f46',
+                      }}
+                      onPress={() => updateRest(time)}
+                    >
+                      <Text
+                        className="font-bold"
+                        style={{
+                          color: currentExercise?.rest === time ? '#000' : '#a1a1aa',
+                        }}
+                      >
+                        {time}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Series List */}
+              <Text className="text-zinc-400 text-xs font-mono mb-2">
+                SERIES ({currentExercise?.series?.length || 0})
+              </Text>
+
+              {currentExercise?.series?.map((series, i) => {
+                const config = SERIES_TYPES.find((t) => t.type === series.type);
+                return (
+                  <View
+                    key={series.id}
+                    className="bg-zinc-800 p-3 rounded-lg mb-2 border-l-4"
+                    style={{ borderLeftColor: config?.color || '#3f3f46' }}
+                  >
+                    <View className="flex-row items-center justify-between mb-2">
+                      <View className="flex-row items-center">
+                        <View
+                          className="px-2 py-1 rounded mr-2"
+                          style={{ backgroundColor: config?.color }}
+                        >
+                          <Text className="text-black text-xs font-bold">{i + 1}</Text>
+                        </View>
+                        <Text className="text-white font-bold text-sm">{config?.label}</Text>
+                      </View>
+                      <TouchableOpacity onPress={() => removeSeries(i)} className="p-1">
+                        <Trash2 size={16} color={COLORS.red} />
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Reps control */}
+                    <View className="flex-row items-center justify-between">
+                      <Text className="text-zinc-400 text-xs">REPETICIONES:</Text>
+                      <View className="flex-row items-center bg-zinc-700 rounded-lg">
+                        <TouchableOpacity
+                          className="px-3 py-2"
+                          onPress={() => updateSeriesReps(i, Math.max(1, series.reps - 1))}
+                        >
+                          <Minus size={16} color={COLORS.white} />
+                        </TouchableOpacity>
+                        <Text className="text-white font-bold text-lg px-3">{series.reps}</Text>
+                        <TouchableOpacity
+                          className="px-3 py-2"
+                          onPress={() => updateSeriesReps(i, series.reps + 1)}
+                        >
+                          <Plus size={16} color={COLORS.white} />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+
+                    {/* Note */}
+                    <TextInput
+                      className="bg-zinc-700 text-white p-2 rounded mt-2 text-xs font-mono"
+                      placeholder="Nota (opcional)..."
+                      placeholderTextColor={COLORS.zinc400}
+                      value={series.note}
+                      onChangeText={(text) => updateSeriesNote(i, text)}
+                    />
+                  </View>
+                );
+              })}
+
+              {/* Add Series Buttons */}
+              <View className="mt-4">
+                <Text className="text-zinc-400 text-xs font-mono mb-2">AGREGAR SERIE:</Text>
+                <View className="flex-row flex-wrap gap-2">
+                  {SERIES_TYPES.map((type) => (
+                    <TouchableOpacity
+                      key={type.type}
+                      className="px-3 py-2 rounded-lg"
+                      style={{ backgroundColor: type.color }}
+                      onPress={() => addSeries(type.type)}
+                    >
+                      <Text className="text-black text-xs font-bold">{type.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <View style={{ height: 120 }} />
+            </ScrollView>
+
+            {/* Save Button */}
+            <View className="absolute bottom-0 left-0 right-0 p-4 bg-zinc-900 border-t border-zinc-800">
+              <TouchableOpacity
+                className="bg-green-600 py-4 rounded-lg flex-row items-center justify-center"
+                onPress={saveSeriesConfig}
+              >
+                <Check size={20} color={COLORS.white} />
+                <Text className="text-white font-bold ml-2">GUARDAR CONFIGURACIÓN</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>

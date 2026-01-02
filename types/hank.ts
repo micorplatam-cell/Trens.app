@@ -58,10 +58,12 @@ export type HankToolName =
   | 'PLAN_BUILDER_REMOVE_MEAL'
   | 'PLAN_BUILDER_ADD_SUPPLEMENT'
   | 'PLAN_BUILDER_REMOVE_SUPPLEMENT'
+  | 'PLAN_BUILDER_SET_TRAINING'
   | 'PLAN_BUILDER_SHOW'
   | 'PLAN_BUILDER_CLEAR'
   | 'PLAN_BUILDER_EXECUTE'
   // TRAINING PLAN Tools (Asignación de planes de entrenamiento)
+  | 'TRAINING_DESIGN_PLAN'
   | 'TRAINING_LIST_TEMPLATES'
   | 'TRAINING_ASSIGN_PLAN'
   | 'TRAINING_GET_CURRENT_PLAN'
@@ -366,12 +368,22 @@ export interface PlanBuilderSupplement {
 }
 
 /**
+ * Configuración de entrenamiento en el plan builder
+ */
+export interface PlanBuilderTraining {
+  goal: string; // HIPERTROFIA, FUERZA, DEFINICION, RECOMPOSICION, GENERAL
+  level: string; // PRINCIPIANTE, INTERMEDIO, AVANZADO
+  frequency: number; // 3, 4, 5, 6 días por semana
+}
+
+/**
  * El estado completo del plan builder
  */
 export interface PlanBuilderState {
   isActive: boolean;
   meals: PlanBuilderMeal[];
   supplements: PlanBuilderSupplement[];
+  training: PlanBuilderTraining | null; // Configuración de entrenamiento
   startedAt: Date | null;
   clearExistingOnExecute: boolean; // Si true, borra el plan actual antes de insertar
 }
@@ -382,6 +394,8 @@ export interface PlanBuilderState {
 export interface PlanBuilderExecuteResult {
   mealsCreated: number;
   supplementsCreated: number;
+  trainingAssigned: boolean;
+  trainingExercises: number;
   errors: string[];
 }
 

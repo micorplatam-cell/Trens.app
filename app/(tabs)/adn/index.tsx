@@ -220,7 +220,7 @@ export default function AdnScreen() {
   useEffect(() => {
     if (videoViewerVisible && videoPlayer) {
       // Determinar si hay Spotify para este video
-      const hasSpotify = !!(selectedVideo?.spotify?.enabled && isPro && spotifyPremium);
+      const hasSpotify = !!(selectedVideo?.spotify?.enabled && spotifyPremium);
       const trackUri = hasSpotify ? (selectedVideo?.spotify as any)?.trackUri : null;
 
       // MUTEAR el video si hay Spotify - solo se escuchará Spotify
@@ -245,11 +245,11 @@ export default function AdnScreen() {
       setIsVideoManuallyPaused(false); // Reset al cerrar
       spotifySyncedRef.current = false; // Reset para próxima apertura
       // Pausar Spotify al cerrar el viewer
-      if (selectedVideo?.spotify?.enabled && isPro && spotifyPremium) {
+      if (selectedVideo?.spotify?.enabled && spotifyPremium) {
         spotify.pauseForSwipe().catch(console.warn);
       }
     }
-  }, [videoViewerVisible, videoPlayer, selectedVideo, isPro, spotifyPremium]);
+  }, [videoViewerVisible, videoPlayer, selectedVideo, spotifyPremium]);
 
   // Handler para tap en el video (pausar/reanudar solo video, NO Spotify)
   const handleVideoTap = useCallback(() => {
@@ -277,7 +277,7 @@ export default function AdnScreen() {
   // Control de reproducción de récords + Spotify sync
   useEffect(() => {
     if (recordViewerVisible && recordVideoPlayer) {
-      const hasSpotify = !!(selectedRecordVideo?.spotify?.enabled && isPro && spotifyPremium);
+      const hasSpotify = !!(selectedRecordVideo?.spotify?.enabled && spotifyPremium);
       const trackUri = hasSpotify ? (selectedRecordVideo?.spotify as any)?.trackUri : null;
 
       recordVideoPlayer.volume = hasSpotify && trackUri ? 0 : 1;
@@ -295,11 +295,11 @@ export default function AdnScreen() {
       recordVideoPlayer.pause();
       setIsRecordVideoManuallyPaused(false);
       recordSpotifySyncedRef.current = false;
-      if (selectedRecordVideo?.spotify?.enabled && isPro && spotifyPremium) {
+      if (selectedRecordVideo?.spotify?.enabled && spotifyPremium) {
         spotify.pauseForSwipe().catch(console.warn);
       }
     }
-  }, [recordViewerVisible, recordVideoPlayer, selectedRecordVideo, isPro, spotifyPremium]);
+  }, [recordViewerVisible, recordVideoPlayer, selectedRecordVideo, spotifyPremium]);
 
   // Handler para tap en video de récord
   const handleRecordVideoTap = useCallback(() => {
@@ -1396,8 +1396,8 @@ export default function AdnScreen() {
             <View className="absolute bottom-0 left-0 right-0 pb-10 px-4 pt-4 bg-gradient-to-t from-black/80 to-transparent">
               <TouchableOpacity
                 onPress={async () => {
-                  // PRO + Premium: Puede reproducir desde posición exacta
-                  if (isPro && spotifyPremium) {
+                  // Premium: Puede reproducir desde posición exacta
+                  if (spotifyPremium) {
                     const trackUri = (selectedVideo.spotify as any).trackUri;
                     const positionMs = (selectedVideo.spotify as any).positionMs || 0;
                     if (trackUri) {
@@ -1405,10 +1405,10 @@ export default function AdnScreen() {
                       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                     }
                   } else {
-                    // FREE: Mostrar mensaje de upgrade
+                    // Sin Spotify Premium
                     Alert.alert(
-                      '⭐ TRENS PRO',
-                      'Desbloquea TRENS PRO para escuchar la música con la que se grabó este levantamiento.\n\nCon PRO puedes:\n• Auto-reproducir la canción exacta\n• Controlar Spotify\n• Grabar tus propios videos',
+                      '🎵 Spotify',
+                      'Conecta Spotify Premium para escuchar la música con la que se grabó este levantamiento.',
                       [{ text: 'ENTENDIDO', style: 'default' }]
                     );
                   }
@@ -1425,7 +1425,7 @@ export default function AdnScreen() {
                   </Text>
                 </View>
                 {/* Indicador de play o lock */}
-                {isPro && spotifyPremium ? (
+                {spotifyPremium ? (
                   <Volume2 size={16} color="#1DB954" />
                 ) : (
                   <Lock size={14} color="#71717a" />
@@ -1600,7 +1600,7 @@ export default function AdnScreen() {
             {selectedRecordVideo?.spotify?.enabled && (
               <TouchableOpacity
                 onPress={async () => {
-                  if (isPro && spotifyPremium) {
+                  if (spotifyPremium) {
                     const trackUri = (selectedRecordVideo.spotify as any).trackUri;
                     const positionMs = (selectedRecordVideo.spotify as any).positionMs || 0;
                     if (trackUri) {
@@ -1609,8 +1609,8 @@ export default function AdnScreen() {
                     }
                   } else {
                     Alert.alert(
-                      '⭐ TRENS PRO',
-                      'Desbloquea TRENS PRO para escuchar la música con la que se grabó este levantamiento.',
+                      '🎵 Spotify',
+                      'Conecta Spotify Premium para escuchar la música con la que se grabó este levantamiento.',
                       [{ text: 'ENTENDIDO', style: 'default' }]
                     );
                   }
@@ -1626,7 +1626,7 @@ export default function AdnScreen() {
                     {selectedRecordVideo.spotify.artist}
                   </Text>
                 </View>
-                {isPro && spotifyPremium ? (
+                {spotifyPremium ? (
                   <Volume2 size={16} color="#1DB954" />
                 ) : (
                   <Lock size={14} color="#71717a" />

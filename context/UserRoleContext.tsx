@@ -151,7 +151,16 @@ export function UserRoleProvider({ children }: { children: ReactNode }) {
   // -------------------------------------------------------------------------
   const updateSpotifyStatus = useCallback(
     async (connected: boolean, premium: boolean) => {
-      if (!user) return;
+      // Siempre actualizar estado local (para que funcione inmediatamente)
+      setSpotifyConnected(connected);
+      setSpotifyPremium(premium);
+      spotifyLogger.debug('Status local actualizado:', { connected, premium });
+
+      // Solo guardar en DB si hay usuario autenticado
+      if (!user) {
+        spotifyLogger.debug('Usuario no autenticado, no se guarda en DB');
+        return;
+      }
 
       try {
         const { error: updateError } = await supabase
@@ -166,9 +175,7 @@ export function UserRoleProvider({ children }: { children: ReactNode }) {
         if (updateError) {
           spotifyLogger.error('Error updating status:', updateError);
         } else {
-          setSpotifyConnected(connected);
-          setSpotifyPremium(premium);
-          spotifyLogger.debug('Status actualizado en DB:', { connected, premium });
+          spotifyLogger.debug('Status guardado en DB:', { connected, premium });
         }
       } catch (err) {
         spotifyLogger.error('Error updating status:', err);
@@ -233,7 +240,9 @@ export function UserRoleProvider({ children }: { children: ReactNode }) {
     canPublish: isPro,
     canSaveToVault: isPro,
     hasHistory: isPro,
-    canControlSpotify: isPro,
+
+    // Spotify - disponible para todos los usuarios
+    canControlSpotify: true,
 
     // Todos los usuarios
     canViewFeed: true,

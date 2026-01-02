@@ -121,7 +121,7 @@ export default function PublicProfileScreen() {
   // Control de reproducción
   useEffect(() => {
     if (videoViewerVisible && videoPlayer) {
-      const hasSpotify = !!(selectedVideo?.spotify?.enabled && isPro && spotifyPremium);
+      const hasSpotify = !!(selectedVideo?.spotify?.enabled && spotifyPremium);
       videoPlayer.volume = hasSpotify ? 0 : 1;
 
       if (!isVideoManuallyPaused) {
@@ -139,7 +139,7 @@ export default function PublicProfileScreen() {
         spotify.pauseForSwipe().catch(console.warn);
       }
     }
-  }, [videoViewerVisible, videoPlayer, selectedVideo, isPro, spotifyPremium]);
+  }, [videoViewerVisible, videoPlayer, selectedVideo, spotifyPremium]);
 
   const handleVideoTap = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -721,7 +721,7 @@ export default function PublicProfileScreen() {
                     {selectedVideo.spotify.artist}
                   </Text>
                 </View>
-                {isPro && spotifyPremium ? (
+                {spotifyPremium ? (
                   <Volume2 size={18} color="#1DB954" />
                 ) : (
                   <Lock size={16} color="#71717a" />

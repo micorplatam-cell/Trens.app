@@ -845,7 +845,7 @@ export async function gymGetTodayRoutine(
     const todayISO = today.toISOString();
 
     let trainingDay = profile?.training_current_day ?? 0;
-    const frequency = profile?.training_frequency ?? 3;
+    const frequency = profile?.training_frequency ?? 0;
 
     if (profile?.training_last_access) {
       const lastAccess = new Date(profile.training_last_access);
@@ -3084,20 +3084,14 @@ export async function getFullUserContext(userId: string): Promise<HankToolResult
       .eq('user_id', userId)
       .single();
 
-    // 2. Todas las comidas con todas sus opciones
+    // 2. Todas las comidas (nuevo formato con scheduled_time e ingredients)
     const { data: meals } = await supabase
       .from('meals')
       .select(
-        `
-        id, time, selected_option,
-        meal_options (
-          id, name, option_index,
-          meal_ingredients (id, name, quantity, portion)
-        )
-      `
+        'id, name, scheduled_time, ingredients, calories, protein_g, carbs_g, fat_g, is_completed'
       )
       .eq('user_id', userId)
-      .order('time', { ascending: true });
+      .order('scheduled_time', { ascending: true });
 
     // 3. Stack de suplementos
     const { data: stack } = await supabase
@@ -3138,28 +3132,30 @@ export async function getFullUserContext(userId: string): Promise<HankToolResult
 
     // Formatear resumen
     const formatTime = (t: string) => {
+      if (!t) return 'Sin hora';
       const [h, m] = t.split(':').map(Number);
       const period = h >= 12 ? 'PM' : 'AM';
       const h12 = h % 12 || 12;
       return `${h12}:${m.toString().padStart(2, '0')} ${period}`;
     };
 
-    // Comidas con todas sus opciones
+    // Comidas (nuevo formato con ingredients JSONB)
     const mealsContext =
       meals
-        ?.map((meal, idx) => {
-          const options = (meal.meal_options as any[]) || [];
-          const optionsText = options
-            .map((opt, optIdx) => {
-              const ings =
-                opt.meal_ingredients?.map((i: any) => `${i.name} (${i.quantity})`).join(', ') ||
-                'Sin ingredientes';
-              return `  Opción ${optIdx + 1}: ${ings}`;
-            })
-            .join('\n');
-          return `COMIDA ${idx + 1} (${formatTime(meal.time)}):\n${optionsText || '  Sin opciones'}`;
+        ?.map((meal: any, idx: number) => {
+          const time = meal.scheduled_time || 'Sin hora';
+          const name = meal.name || `Comida ${idx + 1}`;
+          const ingredients = meal.ingredients || [];
+          const ings =
+            ingredients
+              .map((i: any) => `${i.name}${i.quantity ? ` (${i.quantity})` : ''}`)
+              .join(', ') || 'Sin ingredientes';
+          const macros = meal.calories
+            ? `${meal.calories}kcal | P:${meal.protein_g}g C:${meal.carbs_g}g F:${meal.fat_g}g`
+            : '';
+          return `${idx + 1}. ${name} (${formatTime(time)}): ${ings}${macros ? `\n   📊 ${macros}` : ''}`;
         })
-        .join('\n\n') || 'Sin comidas';
+        .join('\n') || 'Sin comidas';
 
     // Ejercicios por día
     const exercisesByDay: Record<number, string[]> = {};
@@ -3222,9 +3218,21 @@ ${progressPhotos
 ${personalRecords.map((pr) => `- ${pr.exercise_name}: ${pr.weight_kg}kg x ${pr.reps}`).join('\n')}`
         : '';
 
+    // Indicadores claros de estado del plan
+    const hasMeals = meals && meals.length > 0;
+    const hasSupplements = stack && stack.length > 0;
+    const hasTraining = frequency > 0 && exercises && exercises.length > 0;
+
+    const planStatusSummary = `
+🎯 ESTADO DEL PLAN:
+${hasMeals ? `✅ NUTRICIÓN: ${meals.length} comidas configuradas` : '❌ NUTRICIÓN: Sin plan de comidas'}
+${hasSupplements ? `✅ SUPLEMENTACIÓN: ${stack.length} suplementos activos` : '❌ SUPLEMENTACIÓN: Sin stack configurado'}
+${hasTraining ? `✅ ENTRENAMIENTO: ${frequency} días/semana, ${exercises.length} ejercicios` : '❌ ENTRENAMIENTO: Sin rutina configurada'}`;
+
     const fullContext = `
 📊 CONTEXTO COMPLETO DEL USUARIO:
 ${bodyData}
+${planStatusSummary}
 ${progressContext}
 ${prContext}
 
@@ -3254,6 +3262,10 @@ ${stackContext}
         currentDay,
         progressPhotos,
         personalRecords,
+        // Indicadores de estado
+        hasMeals,
+        hasSupplements,
+        hasTraining,
       },
     };
   } catch (error) {
@@ -4270,7 +4282,11 @@ export function planBuilderShow(currentState: PlanBuilderState): HankToolResult 
     };
   }
 
-  if (currentState.meals.length === 0 && currentState.supplements.length === 0) {
+  if (
+    currentState.meals.length === 0 &&
+    currentState.supplements.length === 0 &&
+    !currentState.training
+  ) {
     return {
       success: true,
       message: `📋 PLAN EN CONSTRUCCIÓN (vacío)
@@ -4278,8 +4294,9 @@ export function planBuilderShow(currentState: PlanBuilderState): HankToolResult 
 Aún no has agregado nada. Dime:
 • Las comidas que quieres
 • Los suplementos del stack
+• Tu objetivo de entrenamiento
 
-Ejemplo: "Desayuno a las 7 con huevos y avena, creatina 5g"`,
+Ejemplo: "Desayuno a las 7 con huevos y avena, creatina 5g, quiero ganar músculo 5 días"`,
       data: currentState,
     };
   }
@@ -4315,10 +4332,19 @@ Ejemplo: "Desayuno a las 7 con huevos y avena, creatina 5g"`,
         .join('\n');
   }
 
+  // Construir resumen de entrenamiento
+  let trainingSection = '';
+  if (currentState.training) {
+    trainingSection = `\n\n🏋️ ENTRENAMIENTO:
+• Objetivo: ${currentState.training.goal}
+• Nivel: ${currentState.training.level}
+• Frecuencia: ${currentState.training.frequency} días/semana`;
+  }
+
   return {
     success: true,
     message: `📋 TU PLAN EN CONSTRUCCIÓN:
-${mealsSection}${suppsSection}
+${mealsSection}${suppsSection}${trainingSection}
 
 ${currentState.clearExistingOnExecute ? '⚠️ REEMPLAZARÁ tu plan actual.' : '📝 Se AGREGARÁ a tu plan existente.'}
 
@@ -4355,10 +4381,11 @@ export async function planBuilderExecute(
     };
   }
 
-  if (planState.meals.length === 0 && planState.supplements.length === 0) {
+  if (planState.meals.length === 0 && planState.supplements.length === 0 && !planState.training) {
     return {
       success: false,
-      message: '⚠️ El plan está vacío. Agrega comidas o suplementos primero.',
+      message:
+        '⚠️ El plan está vacío. Agrega comidas, suplementos o configura el entrenamiento primero.',
     };
   }
 
@@ -4493,6 +4520,35 @@ export async function planBuilderExecute(
       }
     }
 
+    // 3. Asignar entrenamiento si está configurado
+    let trainingResult: { assigned: boolean; exercises: number; planName?: string } = {
+      assigned: false,
+      exercises: 0,
+    };
+
+    if (planState.training) {
+      console.warn('🏋️ Plan Builder: Asignando entrenamiento...', planState.training);
+      try {
+        const designResult = await trainingDesignPlan(userId, {
+          goal: planState.training.goal,
+          level: planState.training.level,
+          frequency: planState.training.frequency,
+        });
+
+        if (designResult.success && designResult.data?.planName) {
+          trainingResult = {
+            assigned: true,
+            exercises: designResult.data.exercisesCreated || 0,
+            planName: designResult.data.planName,
+          };
+        } else {
+          result.errors.push(`Error asignando entrenamiento: ${designResult.message}`);
+        }
+      } catch (error) {
+        result.errors.push(`Error procesando entrenamiento: ${error}`);
+      }
+    }
+
     // Construir mensaje de resultado
     const hasErrors = result.errors.length > 0;
     const successIcon = hasErrors ? '⚠️' : '🎉';
@@ -4502,17 +4558,30 @@ export async function planBuilderExecute(
 ✅ ${result.mealsCreated} comida(s) creada(s)
 ✅ ${result.supplementsCreated} suplemento(s) agregado(s)`;
 
+    if (trainingResult.assigned) {
+      message += `\n✅ Entrenamiento asignado: ${trainingResult.planName} (${trainingResult.exercises} ejercicios)`;
+    }
+
     if (hasErrors) {
       message += `\n\n⚠️ ERRORES:\n${result.errors.map((e) => `• ${e}`).join('\n')}`;
     }
 
-    message += `\n\n🏃 Ve al módulo PLAN para ver tu nuevo plan.`;
+    message += `\n\n🏃 Ve al módulo PLAN para ver tu nutrición y suplementos.`;
+    if (trainingResult.assigned) {
+      message += `\n🏋️ Ve al módulo GYM para ver tu rutina de entrenamiento.`;
+    }
 
     return {
-      success: !hasErrors || result.mealsCreated > 0 || result.supplementsCreated > 0,
+      success:
+        !hasErrors ||
+        result.mealsCreated > 0 ||
+        result.supplementsCreated > 0 ||
+        trainingResult.assigned,
       message,
       data: {
         ...result,
+        trainingAssigned: trainingResult.assigned,
+        trainingExercises: trainingResult.exercises,
         clearPlanBuilder: true, // Flag para que HankContext limpie el estado
       },
     };
@@ -4834,7 +4903,370 @@ export const TRAINING_PLAN_LIBRARY: TrainingPlanTemplate[] = [
 ];
 
 // ============================================================================
-// TRAINING TOOLS: Listar Plantillas de Entrenamiento
+// TRAINING TOOLS: Diseñar Plan Personalizado (Auto-selección inteligente)
+// Hank "diseña" el plan usando TODA la información del usuario
+// El usuario percibe que es 100% personalizado a medida
+// ============================================================================
+export async function trainingDesignPlan(
+  userId: string,
+  params: {
+    goal?: string; // HIPERTROFIA, FUERZA, DEFINICION, RECOMPOSICION, GENERAL
+    level?: string; // PRINCIPIANTE, INTERMEDIO, AVANZADO
+    frequency?: number; // 3, 4, 5, 6 días por semana
+  }
+): Promise<HankToolResult> {
+  try {
+    // =========================================================================
+    // 1. RECOPILAR TODA LA INFORMACIÓN DEL USUARIO
+    // =========================================================================
+
+    // Obtener TRENS ID (user_profiles)
+    const { data: userProfile } = await supabase
+      .from('user_profiles')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
+
+    // Obtener fotos de progreso (para evaluar experiencia real)
+    const { data: progressPhotos } = await supabase
+      .from('progress_photos')
+      .select('id, snapshot, created_at')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(5);
+
+    // Obtener historial de ejercicios previos
+    const { data: exerciseHistory } = await supabase
+      .from('user_exercise_config')
+      .select('id, exercise_id, config')
+      .eq('user_id', userId)
+      .limit(20);
+
+    // =========================================================================
+    // 2. DETERMINAR PARÁMETROS FINALES (prioridad: params > userProfile > default)
+    // =========================================================================
+
+    // Objetivo
+    let finalGoal = params.goal?.toUpperCase();
+    if (!finalGoal && userProfile?.goal) {
+      finalGoal = userProfile.goal.toUpperCase();
+    }
+    if (!finalGoal) finalGoal = 'HIPERTROFIA';
+
+    // Nivel - considerar experiencia real
+    let finalLevel = params.level?.toUpperCase();
+    if (!finalLevel) {
+      // Usar training_experience o level del perfil
+      if (userProfile?.training_experience) {
+        finalLevel = userProfile.training_experience.toUpperCase();
+      } else if (userProfile?.level) {
+        finalLevel = userProfile.level.toUpperCase();
+      }
+    }
+    // Ajustar nivel basado en evidencia (fotos y ejercicios previos)
+    if (!finalLevel) {
+      if (progressPhotos && progressPhotos.length >= 3) {
+        // Tiene historial de fotos → al menos intermedio
+        finalLevel = 'INTERMEDIO';
+      } else if (exerciseHistory && exerciseHistory.length >= 10) {
+        // Tiene ejercicios configurados → al menos intermedio
+        finalLevel = 'INTERMEDIO';
+      } else {
+        finalLevel = 'PRINCIPIANTE';
+      }
+    }
+
+    // Frecuencia
+    let finalFrequency = params.frequency;
+    if (!finalFrequency && userProfile?.training_days_per_week) {
+      finalFrequency = userProfile.training_days_per_week;
+    }
+    if (!finalFrequency) finalFrequency = 4; // Default
+
+    // =========================================================================
+    // 3. OBTENER TEMPLATES Y HACER MATCHING INTELIGENTE
+    // =========================================================================
+
+    const { data: templates, error } = await supabase
+      .from('training_plan_templates')
+      .select('*')
+      .eq('is_active', true)
+      .order('sort_order', { ascending: true });
+
+    if (error || !templates || templates.length === 0) {
+      return {
+        success: false,
+        message:
+          'Aún no tengo planes configurados para ti. Dame unos días para preparar algo épico. 🔥',
+      };
+    }
+
+    // =========================================================================
+    // 4. ALGORITMO DE SCORING AVANZADO
+    // =========================================================================
+
+    let bestMatch: any = null;
+    let bestScore = -1;
+
+    // Información adicional del usuario para scoring
+    const userAge = userProfile?.age || 30;
+    const userSex = userProfile?.sex || 'M';
+    const userWeight = parseFloat(userProfile?.weight) || 75;
+    const userActivityLevel = userProfile?.activity_level || 'ACTIVO';
+    const hasProgressPhotos = (progressPhotos?.length || 0) > 0;
+    const hasExerciseHistory = (exerciseHistory?.length || 0) > 0;
+
+    for (const t of templates) {
+      let score = 0;
+
+      // === FRECUENCIA (peso: 30%) ===
+      if (t.frequency === finalFrequency) {
+        score += 30; // Match exacto
+      } else if (Math.abs(t.frequency - finalFrequency) === 1) {
+        score += 20; // ±1 día
+      } else if (Math.abs(t.frequency - finalFrequency) === 2) {
+        score += 10; // ±2 días
+      }
+
+      // === NIVEL (peso: 25%) ===
+      const templateLevels = (t.target_levels || []).map((l: string) => l.toUpperCase());
+      if (templateLevels.includes(finalLevel)) {
+        score += 25; // Match exacto
+      } else {
+        // Match parcial por proximidad
+        const levelOrder = ['PRINCIPIANTE', 'INTERMEDIO', 'AVANZADO'];
+        const userLevelIdx = levelOrder.indexOf(finalLevel);
+        const hasAdjacentLevel = templateLevels.some((tl: string) => {
+          const tlIdx = levelOrder.indexOf(tl);
+          return Math.abs(tlIdx - userLevelIdx) === 1;
+        });
+        if (hasAdjacentLevel) score += 15;
+      }
+
+      // === OBJETIVO (peso: 25%) ===
+      const templateGoals = (t.target_goals || []).map((g: string) => g.toUpperCase());
+      if (templateGoals.includes(finalGoal)) {
+        score += 25; // Match exacto
+      } else {
+        // Match parcial por objetivos relacionados
+        const relatedGoals: Record<string, string[]> = {
+          HIPERTROFIA: ['RECOMPOSICION', 'GENERAL'],
+          FUERZA: ['RECOMPOSICION', 'GENERAL'],
+          DEFINICION: ['RECOMPOSICION', 'GENERAL'],
+          RECOMPOSICION: ['HIPERTROFIA', 'DEFINICION', 'GENERAL'],
+          GENERAL: ['HIPERTROFIA', 'FUERZA', 'DEFINICION', 'RECOMPOSICION'],
+        };
+        const related = relatedGoals[finalGoal] || [];
+        if (templateGoals.some((tg: string) => related.includes(tg))) {
+          score += 15;
+        }
+      }
+
+      // === COMPLETITUD DEL TEMPLATE (peso: 10%) ===
+      const totalExercises = (t.days || []).reduce(
+        (sum: number, d: any) => sum + (d.exercises?.length || 0),
+        0
+      );
+      const avgExercisesPerDay = t.days?.length > 0 ? totalExercises / t.days.length : 0;
+
+      if (totalExercises >= 15) {
+        score += 10; // Template muy completo
+      } else if (totalExercises >= 8) {
+        score += 7;
+      } else if (totalExercises > 0) {
+        score += 4;
+      }
+
+      // === BONUS: Template tiene descripción detallada ===
+      if (t.description && t.description.length > 50) {
+        score += 2;
+      }
+
+      // === BONUS: Experiencia del usuario vs complejidad del template ===
+      if (hasExerciseHistory && avgExercisesPerDay >= 5) {
+        score += 3; // Usuario con experiencia + template completo
+      }
+      if (hasProgressPhotos && templateGoals.includes('DEFINICION')) {
+        score += 2; // Usuario que trackea progreso + objetivo definición
+      }
+
+      // === AJUSTE POR EDAD (para principiantes mayores, preferir menos volumen) ===
+      if (userAge > 45 && finalLevel === 'PRINCIPIANTE' && t.frequency <= 4) {
+        score += 3;
+      }
+
+      // Guardar mejor match
+      if (score > bestScore) {
+        bestScore = score;
+        bestMatch = t;
+      }
+    }
+
+    // Si no hay match, usar el primero
+    if (!bestMatch) {
+      bestMatch = templates[0];
+    }
+
+    const template = bestMatch;
+
+    // Construir objeto de nombres de rutina
+    const routineNames: Record<string, string> = {};
+    (template.days || []).forEach((day: any) => {
+      routineNames[String(day.dayIndex)] = day.name;
+    });
+
+    // 1. Actualizar perfil con el nuevo plan
+    const { error: profileError } = await supabase
+      .from('profiles')
+      .update({
+        training_frequency: template.frequency,
+        training_current_day: 0,
+        training_routine_names: routineNames,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId);
+
+    if (profileError) {
+      console.error('Error updating profiles:', profileError);
+      return { success: false, message: 'Error al configurar tu plan.' };
+    }
+
+    // 2. Actualizar user_profiles
+    await supabase
+      .from('user_profiles')
+      .update({
+        training_days_per_week: template.frequency,
+        training_experience: finalLevel,
+        goal: finalGoal,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('user_id', userId);
+
+    // 3. Eliminar ejercicios anteriores
+    await supabase.from('user_exercise_config').delete().eq('user_id', userId);
+
+    // 4. Crear los ejercicios del template
+    let exercisesCreated = 0;
+
+    for (const day of template.days || []) {
+      for (const exercise of day.exercises || []) {
+        if (!exercise.exercise_id) continue;
+
+        const config = {
+          rest: exercise.rest || '90s',
+          sets: `${exercise.series?.length || 4}x10`,
+          custom_series: (exercise.series || []).map((s: any, idx: number) => ({
+            id: s.id || String(idx + 1),
+            type: s.type || 'EFECTIVA',
+            reps: s.reps || 10,
+            weight: 0,
+            rir: s.type === 'FALLO' ? 0 : 2,
+            tempo: '2-0-2-0',
+            restSeconds: parseInt(exercise.rest) || 90,
+            note: s.note || '',
+          })),
+          series_by_day: {},
+        };
+
+        const { error: insertError } = await supabase.from('user_exercise_config').insert({
+          user_id: userId,
+          exercise_id: exercise.exercise_id,
+          training_days: [day.dayIndex],
+          config,
+        });
+
+        if (!insertError) exercisesCreated++;
+      }
+    }
+
+    // =========================================================================
+    // 5. CONSTRUIR RESPUESTA PERSONALIZADA
+    // =========================================================================
+
+    // Detalle de cada día
+    const daysDetail = (template.days || [])
+      .map((d: any) => {
+        const exercises = (d.exercises || []).map((e: any) => e.name).join(', ');
+        return `📅 **DÍA ${d.dayIndex + 1}: ${d.name}**\n   ${exercises || 'Por configurar'}`;
+      })
+      .join('\n\n');
+
+    // Textos personalizados
+    const goalText: Record<string, string> = {
+      HIPERTROFIA: 'ganar masa muscular',
+      FUERZA: 'aumentar tu fuerza máxima',
+      DEFINICION: 'definir y quemar grasa',
+      RECOMPOSICION: 'ganar músculo mientras quemas grasa',
+      GENERAL: 'mejorar tu condición física general',
+    };
+
+    const levelText: Record<string, string> = {
+      PRINCIPIANTE: 'perfecto para comenzar',
+      INTERMEDIO: 'ideal para tu experiencia',
+      AVANZADO: 'desafiante para tu nivel',
+    };
+
+    // Personalizaciones extras basadas en datos del usuario
+    let personalTouch = '';
+
+    if (userProfile?.display_name && userProfile.display_name !== 'ATLETA') {
+      personalTouch += `\n\n👤 ${userProfile.display_name}, `;
+    }
+
+    if (hasProgressPhotos) {
+      personalTouch +=
+        'vi que llevas un registro de tu progreso con fotos. ¡Eso es clave para ver resultados! ';
+    }
+
+    if (userWeight && userWeight > 0) {
+      if (finalGoal === 'HIPERTROFIA') {
+        personalTouch += `Con tus ${userWeight}kg, este plan te ayudará a ganar masa limpia. `;
+      } else if (finalGoal === 'DEFINICION') {
+        personalTouch += `A ${userWeight}kg, este plan te ayudará a marcar. `;
+      }
+    }
+
+    if (userAge > 40) {
+      personalTouch += 'Incluí tiempos de descanso adecuados para optimizar tu recuperación. ';
+    }
+
+    return {
+      success: true,
+      message: `🔥 **¡LISTO! He diseñado tu plan de entrenamiento.**
+
+Analicé tu perfil y creé una rutina ${levelText[finalLevel] || ''} de **${template.frequency} días por semana**, enfocada en **${goalText[finalGoal] || finalGoal.toLowerCase()}**.
+
+${daysDetail}
+
+💪 **${exercisesCreated} ejercicios** configurados con:
+• Series de calentamiento
+• Series efectivas  
+• Series al fallo técnico
+• Tiempos de descanso optimizados${personalTouch}
+
+Este plan está optimizado para ti. Si quieres que modifique algo (cambiar un ejercicio, agregar series, ajustar el volumen), solo dime.
+
+¡Vamos a entrenar! 🏋️`,
+      data: {
+        planAssigned: true,
+        templateId: template.id,
+        frequency: template.frequency,
+        days: template.days?.length || 0,
+        exercises: exercisesCreated,
+        goal: finalGoal,
+        level: finalLevel,
+        matchScore: bestScore,
+      },
+    };
+  } catch (error) {
+    console.error('trainingDesignPlan error:', error);
+    return { success: false, message: 'Error al diseñar tu plan.' };
+  }
+}
+
+// ============================================================================
+// TRAINING TOOLS: Listar Plantillas de Entrenamiento (desde Supabase)
+// NOTA: Esta función es para uso interno/admin, no exponer al usuario
 // ============================================================================
 export async function trainingListTemplates(filters?: {
   level?: string;
@@ -4842,16 +5274,34 @@ export async function trainingListTemplates(filters?: {
   frequency?: number;
 }): Promise<HankToolResult> {
   try {
-    let templates = [...TRAINING_PLAN_LIBRARY];
+    // Consultar templates desde Supabase
+    let query = supabase
+      .from('training_plan_templates')
+      .select('id, slug, name, description, target_levels, target_goals, frequency, days')
+      .eq('is_active', true)
+      .order('sort_order', { ascending: true });
+
+    const { data: dbTemplates, error } = await query;
+
+    if (error) {
+      console.error('Error fetching templates:', error);
+      return { success: false, message: 'Error al obtener los planes de entrenamiento.' };
+    }
+
+    let templates = dbTemplates || [];
 
     // Aplicar filtros
     if (filters?.level) {
       const levelFilter = filters.level.toUpperCase();
-      templates = templates.filter((t) => t.level === levelFilter);
+      templates = templates.filter((t) =>
+        t.target_levels?.some((l: string) => l.toUpperCase() === levelFilter)
+      );
     }
     if (filters?.goal) {
       const goalFilter = filters.goal.toUpperCase();
-      templates = templates.filter((t) => t.goal === goalFilter);
+      templates = templates.filter((t) =>
+        t.target_goals?.some((g: string) => g.toUpperCase() === goalFilter)
+      );
     }
     if (filters?.frequency) {
       templates = templates.filter((t) => t.frequency === filters.frequency);
@@ -4869,27 +5319,29 @@ export async function trainingListTemplates(filters?: {
     // Formatear para respuesta legible
     const templateList = templates
       .map((t) => {
-        const daysInfo = t.days
-          .map((d) => `  - ${d.name}: ${d.muscleGroups.join(', ')}`)
+        const daysInfo = (t.days || [])
+          .map(
+            (d: any) =>
+              `  - Día ${d.dayIndex + 1}: ${d.name} (${d.exercises?.length || 0} ejercicios)`
+          )
           .join('\n');
         return `📋 **${t.name}** (${t.frequency} días/semana)
-Nivel: ${t.level} | Objetivo: ${t.goal}
-${t.description}
-Días:
+Nivel: ${t.target_levels?.join(', ') || 'GENERAL'} | Objetivo: ${t.target_goals?.join(', ') || 'GENERAL'}
+${t.description || ''}
 ${daysInfo}`;
       })
       .join('\n\n');
 
     return {
       success: true,
-      message: `🏋️ Planes de entrenamiento disponibles:\n\n${templateList}\n\n¿Cuál quieres que te asigne?`,
+      message: `🏋️ Planes de entrenamiento disponibles:\n\n${templateList}\n\n¿Cuál quieres que te asigne? Dime el nombre.`,
       data: {
         templates: templates.map((t) => ({
           id: t.id,
           name: t.name,
           frequency: t.frequency,
-          level: t.level,
-          goal: t.goal,
+          levels: t.target_levels,
+          goals: t.target_goals,
         })),
       },
     };
@@ -4900,33 +5352,51 @@ ${daysInfo}`;
 }
 
 // ============================================================================
-// TRAINING TOOLS: Asignar Plan de Entrenamiento
+// TRAINING TOOLS: Asignar Plan de Entrenamiento (desde Supabase + crear ejercicios)
 // ============================================================================
 export async function trainingAssignPlan(userId: string, planId: string): Promise<HankToolResult> {
   try {
-    // Buscar la plantilla
-    const template = TRAINING_PLAN_LIBRARY.find((t) => t.id === planId);
-    if (!template) {
-      // Intentar buscar por nombre parcial
-      const byName = TRAINING_PLAN_LIBRARY.find((t) =>
-        t.name.toLowerCase().includes(planId.toLowerCase())
-      );
-      if (!byName) {
-        return {
-          success: false,
-          message: `No encontré el plan "${planId}". Usa TRAINING_LIST_TEMPLATES para ver los disponibles.`,
-        };
+    // Buscar la plantilla en Supabase (por ID o por nombre)
+    let template: any = null;
+
+    // Primero intentar por ID exacto (UUID)
+    const { data: byId } = await supabase
+      .from('training_plan_templates')
+      .select('*')
+      .eq('id', planId)
+      .eq('is_active', true)
+      .single();
+
+    if (byId) {
+      template = byId;
+    } else {
+      // Intentar por nombre parcial (case insensitive)
+      const { data: byName } = await supabase
+        .from('training_plan_templates')
+        .select('*')
+        .eq('is_active', true)
+        .ilike('name', `%${planId}%`)
+        .limit(1);
+
+      if (byName && byName.length > 0) {
+        template = byName[0];
       }
-      return trainingAssignPlan(userId, byName.id);
+    }
+
+    if (!template) {
+      return {
+        success: false,
+        message: `No encontré el plan "${planId}". Usa TRAINING_LIST_TEMPLATES para ver los disponibles.`,
+      };
     }
 
     // Construir objeto de nombres de rutina
     const routineNames: Record<string, string> = {};
-    template.days.forEach((day) => {
+    (template.days || []).forEach((day: any) => {
       routineNames[String(day.dayIndex)] = day.name;
     });
 
-    // Actualizar perfil con el nuevo plan
+    // 1. Actualizar perfil con el nuevo plan
     const { error: profileError } = await supabase
       .from('profiles')
       .update({
@@ -4942,42 +5412,95 @@ export async function trainingAssignPlan(userId: string, planId: string): Promis
       return { success: false, message: 'Error al actualizar tu perfil con el nuevo plan.' };
     }
 
-    // También actualizar user_profiles si existe
+    // 2. Actualizar user_profiles si existe
     await supabase
       .from('user_profiles')
       .update({
         training_days_per_week: template.frequency,
-        training_experience: template.level,
-        goal: template.goal,
+        training_experience: template.target_levels?.[0] || 'INTERMEDIO',
+        goal: template.target_goals?.[0] || 'HIPERTROFIA',
         updated_at: new Date().toISOString(),
       })
       .eq('user_id', userId);
+
+    // 3. Eliminar ejercicios anteriores del usuario
+    await supabase.from('user_exercise_config').delete().eq('user_id', userId);
+
+    // 4. Crear los ejercicios del template para el usuario
+    let exercisesCreated = 0;
+    const exerciseErrors: string[] = [];
+
+    for (const day of template.days || []) {
+      for (const exercise of day.exercises || []) {
+        if (!exercise.exercise_id) continue;
+
+        // Construir config con las series del template
+        const config = {
+          rest: exercise.rest || '90s',
+          sets: `${exercise.series?.length || 4}x10`,
+          custom_series: (exercise.series || []).map((s: any, idx: number) => ({
+            id: s.id || String(idx + 1),
+            type: s.type || 'EFECTIVA',
+            reps: s.reps || 10,
+            weight: 0,
+            rir: s.type === 'FALLO' ? 0 : 2,
+            tempo: '2-0-2-0',
+            restSeconds: parseInt(exercise.rest) || 90,
+            note: s.note || '',
+          })),
+          series_by_day: {},
+        };
+
+        const { error: insertError } = await supabase.from('user_exercise_config').insert({
+          user_id: userId,
+          exercise_id: exercise.exercise_id,
+          training_days: [day.dayIndex],
+          config,
+        });
+
+        if (insertError) {
+          console.error('Error inserting exercise:', exercise.name, insertError);
+          exerciseErrors.push(exercise.name);
+        } else {
+          exercisesCreated++;
+        }
+      }
+    }
 
     const result: TrainingPlanAssignResult = {
       success: true,
       planName: template.name,
       frequency: template.frequency,
-      daysConfigured: template.days.length,
+      daysConfigured: template.days?.length || 0,
       message: `Plan "${template.name}" asignado correctamente.`,
     };
 
-    const daysInfo = template.days
-      .map((d) => `• Día ${d.dayIndex + 1}: ${d.name} (${d.muscleGroups.join(', ')})`)
+    const daysInfo = (template.days || [])
+      .map(
+        (d: any) => `• Día ${d.dayIndex + 1}: ${d.name} (${d.exercises?.length || 0} ejercicios)`
+      )
       .join('\n');
+
+    const errorInfo =
+      exerciseErrors.length > 0
+        ? `\n\n⚠️ No se pudieron agregar: ${exerciseErrors.join(', ')}`
+        : '';
 
     return {
       success: true,
-      message: `✅ ¡Plan asignado!
+      message: `✅ ¡Plan asignado correctamente!
 
 📋 **${template.name}**
 🗓️ ${template.frequency} días por semana
-🎯 Objetivo: ${template.goal}
-📊 Nivel: ${template.level}
+🎯 Objetivo: ${template.target_goals?.join(', ') || 'GENERAL'}
+📊 Nivel: ${template.target_levels?.join(', ') || 'INTERMEDIO'}
 
 Tu estructura:
 ${daysInfo}
 
-Ahora ve al módulo GYM y agrega ejercicios a cada día. ¿Quieres que te sugiera ejercicios para el primer día?`,
+💪 ${exercisesCreated} ejercicios configurados con sus series.${errorInfo}
+
+¡Ya puedes ir al módulo GYM y empezar a entrenar!`,
       data: result,
     };
   } catch (error) {
@@ -6514,6 +7037,29 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     requiredParams: ['nameOrIndex'],
   },
   {
+    name: 'PLAN_BUILDER_SET_TRAINING',
+    description:
+      'Configura el entrenamiento dentro del Plan Builder. Cuando se ejecute el plan, se asignará automáticamente un plan de entrenamiento personalizado basado en estos parámetros. Usa cuando estés construyendo un plan completo (nutrición + suplementos + entrenamiento).',
+    parameters: {
+      goal: {
+        type: 'string',
+        description: 'Objetivo: HIPERTROFIA, FUERZA, DEFINICION, RECOMPOSICION, GENERAL',
+        required: true,
+      },
+      level: {
+        type: 'string',
+        description: 'Nivel: PRINCIPIANTE, INTERMEDIO, AVANZADO',
+        required: true,
+      },
+      frequency: {
+        type: 'number',
+        description: 'Días por semana (3, 4, 5, 6)',
+        required: true,
+      },
+    },
+    requiredParams: ['goal', 'level', 'frequency'],
+  },
+  {
     name: 'PLAN_BUILDER_SHOW',
     description:
       'Muestra el plan actual en construcción con todas las comidas y suplementos agregados. Usa cuando el usuario diga "muéstrame el plan", "qué tengo en el plan", "cómo va mi plan", "resumen del plan".',
@@ -6536,9 +7082,34 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   },
   // ========== TRAINING PLAN TOOLS ==========
   {
+    name: 'TRAINING_DESIGN_PLAN',
+    description:
+      'PRINCIPAL: Diseña y asigna un plan de entrenamiento personalizado para el usuario basándose en su objetivo, nivel y frecuencia. USA ESTA cuando el usuario diga "quiero entrenar", "hazme un plan", "arma mi rutina", "diseña mi entrenamiento", "quiero ganar músculo", "quiero perder grasa". Hank pregunta objetivo, nivel y días disponibles, y luego llama esta herramienta.',
+    parameters: {
+      goal: {
+        type: 'string',
+        description:
+          'Objetivo: HIPERTROFIA (ganar músculo), FUERZA (ser más fuerte), DEFINICION (quemar grasa), RECOMPOSICION (ganar músculo y perder grasa), GENERAL',
+        required: true,
+      },
+      level: {
+        type: 'string',
+        description:
+          'Nivel de experiencia: PRINCIPIANTE (0-1 año), INTERMEDIO (1-3 años), AVANZADO (3+ años)',
+        required: true,
+      },
+      frequency: {
+        type: 'number',
+        description: 'Días por semana que puede entrenar (3, 4, 5, 6)',
+        required: true,
+      },
+    },
+    requiredParams: ['goal', 'level', 'frequency'],
+  },
+  {
     name: 'TRAINING_LIST_TEMPLATES',
     description:
-      'Lista los planes de entrenamiento disponibles. Usa cuando el usuario pregunte "qué planes hay", "muéstrame los planes de entrenamiento", "qué rutinas tienes", "planes para hipertrofia", "planes para principiante".',
+      'USO INTERNO/ADMIN: Lista los planes disponibles. NO usar con usuarios normales - ellos no deben saber que hay planes predefinidos. Usar solo para debug o cuando el admin lo pida explícitamente.',
     parameters: {
       level: {
         type: 'string',
@@ -6562,7 +7133,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: 'TRAINING_ASSIGN_PLAN',
     description:
-      'Asigna un plan de entrenamiento al usuario. Usa cuando el usuario diga "asíname el plan PPL", "quiero el plan Full Body", "ponme el de 4 días", "usa ese plan".',
+      'USO INTERNO: Asigna un plan específico por nombre/ID. Preferir TRAINING_DESIGN_PLAN para usuarios normales.',
     parameters: {
       planId: {
         type: 'string',

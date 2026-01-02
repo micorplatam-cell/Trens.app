@@ -46,6 +46,7 @@ import {
   // System Tools
   hankClearHistory,
   // Training Plan Tools
+  trainingDesignPlan,
   trainingListTemplates,
   trainingAssignPlan,
   trainingGetCurrentPlan,
@@ -731,6 +732,14 @@ Cuando termines, di **"ejecuta el plan"** y lo guardaré todo.`,
           // =========================================================================
           // TRAINING PLAN TOOLS
           // =========================================================================
+          case 'TRAINING_DESIGN_PLAN':
+            result = await trainingDesignPlan(userId, {
+              goal: p.goal as string,
+              level: p.level as string,
+              frequency: p.frequency as number,
+            });
+            break;
+
           case 'TRAINING_LIST_TEMPLATES':
             result = await trainingListTemplates({
               level: p.level as string | undefined,

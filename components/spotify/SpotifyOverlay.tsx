@@ -234,8 +234,6 @@ const HankInsightToast: React.FC<HankInsightToastProps> = ({
                   source={{ uri: artistImage ?? albumArt ?? undefined }}
                   style={{ width: 44, height: 44, backgroundColor: '#27272a' }}
                   contentFit="cover"
-                  cachePolicy="memory-disk"
-                  transition={150}
                 />
               </View>
             )}
@@ -470,6 +468,15 @@ export function SpotifyOverlay() {
   // -------------------------------------------------------------------------
   const handleSpotifyConnect = async () => {
     setSpotifyLoading(true);
+
+    // Guardar la ruta actual para volver después del callback
+    try {
+      const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+      await AsyncStorage.setItem('@spotify_return_path', pathname || '/(tabs)/adn');
+    } catch (e) {
+      console.warn('No se pudo guardar ruta de retorno:', e);
+    }
+
     const success = await spotify.authenticate();
     setSpotifyConnected(success);
     if (success) {
@@ -894,7 +901,6 @@ export function SpotifyOverlay() {
                   source={{ uri: albumArtUrl }}
                   style={{ width: 40, height: 40 }}
                   contentFit="cover"
-                  cachePolicy="memory-disk"
                 />
               </View>
             ) : (

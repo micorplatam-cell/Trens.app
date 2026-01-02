@@ -9,7 +9,8 @@ import * as Crypto from 'expo-crypto';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert } from 'react-native';
 
-// Completar el flujo de autenticación web
+// IMPORTANTE: Debe ejecutarse a nivel global para interceptar el callback de OAuth
+// Esto permite que WebBrowser.openAuthSessionAsync reciba la respuesta
 WebBrowser.maybeCompleteAuthSession();
 
 // ============================================================================
@@ -20,6 +21,7 @@ const SPOTIFY_SCOPES = [
   'user-read-playback-state',
   'user-modify-playback-state',
   'user-read-currently-playing',
+  'user-read-recently-played',
   'streaming',
   'app-remote-control',
   'playlist-read-private',
@@ -165,14 +167,22 @@ class SpotifyService {
 
   /**
    * Obtener la URL de redirección para la autenticación
+   * - En DESARROLLO (Expo Go): Usa URI dinámica del tunnel
+   * - En PRODUCCIÓN (build): Usa custom scheme trensdev://
    */
   getRedirectUri(): string {
-    // Genera la URI del tunnel actual de Expo
+    // En desarrollo con Expo Go, necesitamos la URI del tunnel
+    // En producción, usamos el custom scheme
     const uri = AuthSession.makeRedirectUri({
-      native: 'trensdev://spotify-callback',
+      scheme: 'trensdev',
+      path: 'spotify-callback',
     });
-    console.warn('🎵 Spotify: Generated Redirect URI:', uri);
-    console.warn('🎵 Spotify: Si ves error INVALID_CLIENT, agrega esta URL en Spotify Dashboard');
+
+    if (__DEV__) {
+      console.log('🎵 Spotify Redirect URI:', uri);
+      console.log('🎵 IMPORTANTE: Agrega esta URI en Spotify Dashboard → Settings → Redirect URIs');
+    }
+
     return uri;
   }
 
@@ -182,9 +192,8 @@ class SpotifyService {
    */
   async authenticate(): Promise<boolean> {
     try {
+      // URI estable - siempre la misma
       const redirectUri = this.getRedirectUri();
-
-      console.warn('🎵 Spotify: Usando Redirect URI:', redirectUri);
 
       // Generar code verifier (string aleatorio de 43-128 caracteres)
       const randomBytes = await Crypto.getRandomBytesAsync(32);
@@ -208,14 +217,27 @@ class SpotifyService {
       authUrl.searchParams.set('code_challenge', codeChallenge);
 
       // Usar WebBrowser directamente (no requiere NavigationContext)
+      console.log('🎵 Spotify: Abriendo navegador para auth...');
+      console.log('🎵 Spotify: redirectUri =', redirectUri);
+
       const result = await WebBrowser.openAuthSessionAsync(authUrl.toString(), redirectUri);
 
+      console.log('🎵 Spotify: Resultado de auth:', JSON.stringify(result, null, 2));
+
       if (result.type === 'success' && result.url) {
+        console.log('🎵 Spotify: URL de callback recibida:', result.url);
         // Parsear el código de la URL de respuesta
         const responseUrl = new URL(result.url);
         const code = responseUrl.searchParams.get('code');
+        const error = responseUrl.searchParams.get('error');
+
+        if (error) {
+          console.error('🎵 Spotify: Error en callback:', error);
+          return false;
+        }
 
         if (code) {
+          console.log('🎵 Spotify: Código recibido, intercambiando por tokens...');
           // Intercambiar código por tokens usando fetch (sin AuthSession)
           const tokenResponse = await fetch(discovery.tokenEndpoint, {
             method: 'POST',
@@ -250,9 +272,17 @@ class SpotifyService {
           console.warn('🎵 Spotify: Conectado exitosamente');
           return true;
         }
+      } else if (result.type === 'cancel') {
+        console.warn('🎵 Spotify: Usuario canceló la autenticación');
+        return false;
+      } else if (result.type === 'dismiss') {
+        console.warn('🎵 Spotify: Navegador cerrado sin completar');
+        return false;
+      } else {
+        console.warn('🎵 Spotify: Resultado inesperado:', result.type);
       }
 
-      console.warn('🎵 Spotify: Autenticación cancelada o fallida');
+      console.warn('🎵 Spotify: Autenticación no completada');
       return false;
     } catch (error) {
       console.error('🎵 Spotify: Error de autenticación:', error);
@@ -714,6 +744,95 @@ class SpotifyService {
     } catch (error) {
       console.warn('🎵 Spotify getQueue() error:', error);
       return null;
+    }
+  }
+
+  /**
+   * Obtener canciones reproducidas recientemente
+   * Útil para obtener la canción "anterior" en el carrusel
+   */
+  async getRecentlyPlayed(limit: number = 5): Promise<SpotifyTrack[] | null> {
+    try {
+      const data = await this.apiCall<{ items: any[] }>(
+        `/me/player/recently-played?limit=${limit}`
+      );
+      if (!data?.items) return null;
+
+      return data.items.map((item: any) => ({
+        uri: item.track.uri,
+        name: item.track.name,
+        artist: item.track.artists?.map((a: any) => a.name).join(', ') || '',
+        artistId: item.track.artists?.[0]?.id || '',
+        album: item.track.album?.name || '',
+        albumArt: item.track.album?.images?.[0]?.url || '',
+        durationMs: item.track.duration_ms,
+        positionMs: 0,
+      }));
+    } catch (error) {
+      console.warn('🎵 Spotify getRecentlyPlayed() error:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Obtener álbumes adyacentes para el carrusel (anterior y siguiente)
+   */
+  async getAdjacentAlbums(): Promise<{ prev: string | null; next: string | null }> {
+    try {
+      // Obtener la cola para la siguiente canción
+      const queue = await this.getQueue();
+      const nextAlbum = queue?.[0]?.albumArt || null;
+
+      // Obtener historial para la canción anterior
+      const recent = await this.getRecentlyPlayed(2);
+      // El primer elemento es la canción actual, el segundo es la anterior
+      const prevAlbum = recent?.[1]?.albumArt || recent?.[0]?.albumArt || null;
+
+      return { prev: prevAlbum, next: nextAlbum };
+    } catch (error) {
+      console.warn('🎵 Spotify getAdjacentAlbums() error:', error);
+      return { prev: null, next: null };
+    }
+  }
+
+  /**
+   * Obtener info completa de canciones adyacentes (para mostrar nombre, artista, álbum)
+   */
+  async getAdjacentTracksInfo(): Promise<{
+    prev: { name: string; artist: string; album: string; albumArt: string } | null;
+    next: { name: string; artist: string; album: string; albumArt: string } | null;
+  }> {
+    try {
+      // Obtener la cola para la siguiente canción
+      const queue = await this.getQueue();
+      const nextTrack = queue?.[0] || null;
+
+      // Obtener historial para la canción anterior
+      const recent = await this.getRecentlyPlayed(2);
+      // El primer elemento es la canción actual, el segundo es la anterior
+      const prevTrack = recent?.[1] || recent?.[0] || null;
+
+      return {
+        prev: prevTrack
+          ? {
+              name: prevTrack.name,
+              artist: prevTrack.artist,
+              album: prevTrack.album,
+              albumArt: prevTrack.albumArt,
+            }
+          : null,
+        next: nextTrack
+          ? {
+              name: nextTrack.name,
+              artist: nextTrack.artist,
+              album: nextTrack.album,
+              albumArt: nextTrack.albumArt,
+            }
+          : null,
+      };
+    } catch (error) {
+      console.warn('🎵 Spotify getAdjacentTracksInfo() error:', error);
+      return { prev: null, next: null };
     }
   }
 

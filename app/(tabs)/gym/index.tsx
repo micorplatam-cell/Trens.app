@@ -552,7 +552,6 @@ function GymScreen() {
 
       // Determinar si hay Spotify para este video
       const hasSpotify = !!(
-        isPro &&
         spotifyPremium &&
         selectedVideo?.spotify?.enabled &&
         selectedVideo?.spotify?.trackUri
@@ -569,7 +568,6 @@ function GymScreen() {
       // Solo sincronizar Spotify la PRIMERA vez que se abre el modal
       if (!spotifySyncedRef.current) {
         console.log('🎬 VIDEO VIEWER ABIERTO - Spotify check:', {
-          isPro,
           spotifyPremium,
           hasSpotifyData: !!selectedVideo?.spotify,
           spotifyEnabled: selectedVideo?.spotify?.enabled,
@@ -606,7 +604,7 @@ function GymScreen() {
       }
       spotifySyncedRef.current = false; // Reset para próxima apertura
     }
-  }, [videoViewerVisible, historialPlayer, selectedVideo, isPro, spotifyPremium]);
+  }, [videoViewerVisible, historialPlayer, selectedVideo, spotifyPremium]);
 
   // Handler para tap en el video (pausar/reanudar solo video, NO Spotify)
   const handleHistorialVideoTap = useCallback(() => {
@@ -688,13 +686,30 @@ function GymScreen() {
       bg: '#1e3a5f',
       category: 'superior',
     },
+    // Hombros divididos
     {
-      id: 'hombros',
-      name: 'HOMBROS',
+      id: 'hombro-frontal',
+      name: 'HOMBRO FRONTAL',
       emoji: '🎯',
       color: '#f59e0b',
       bg: '#422006',
-      category: 'superior',
+      category: 'hombros',
+    },
+    {
+      id: 'hombro-lateral',
+      name: 'HOMBRO LATERAL',
+      emoji: '🎯',
+      color: '#fbbf24',
+      bg: '#422006',
+      category: 'hombros',
+    },
+    {
+      id: 'hombro-posterior',
+      name: 'HOMBRO POSTERIOR',
+      emoji: '🎯',
+      color: '#d97706',
+      bg: '#422006',
+      category: 'hombros',
     },
     {
       id: 'biceps',
@@ -1818,7 +1833,7 @@ function GymScreen() {
         .single();
 
       // Cargar frecuencia desde la base de datos (0 significa sin plan)
-      const savedFrequency = profile?.training_frequency ?? 3;
+      const savedFrequency = profile?.training_frequency ?? 0;
 
       // Cargar nombres de rutinas desde la base de datos
       let routineNames = profile?.training_routine_names || {};
@@ -2821,10 +2836,10 @@ function GymScreen() {
       setRecordingTime(0);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
 
-      // 🎵 PRO: Capturar metadata de Spotify ANTES de grabar
+      // 🎵 Capturar metadata de Spotify ANTES de grabar
       // Guarda trackUri + positionMs para sincronizar al reproducir
       // Spotify SIGUE sonando - el usuario escucha con audífonos mientras graba
-      if (isPro && spotifyPremium) {
+      if (spotifyPremium) {
         const metadata = await spotify.captureMetadataForRecording();
         setCapturedSpotifyMetadata(metadata);
         if (metadata?.enabled) {
@@ -4884,13 +4899,13 @@ function GymScreen() {
                   className="flex-1 mb-4"
                   contentContainerStyle={{ paddingBottom: 20 }}
                 >
-                  {/* PARTE SUPERIOR */}
+                  {/* TORSO */}
                   <View
                     className="mb-4 rounded-xl p-3"
                     style={{ backgroundColor: '#0a0a0a', borderWidth: 1, borderColor: '#ef444450' }}
                   >
                     <Text className="text-xs font-bold mb-2" style={{ color: '#ef4444' }}>
-                      💪 PARTE SUPERIOR
+                      💪 TORSO
                     </Text>
                     <View className="flex-row flex-wrap gap-2">
                       {MUSCLE_GROUPS.filter((g) => g.category === 'superior').map((group) => {
@@ -4913,6 +4928,49 @@ function GymScreen() {
                               backgroundColor: isSelected ? '#ef4444' : '#18181b',
                               borderWidth: 1,
                               borderColor: isSelected ? '#ef4444' : '#27272a',
+                            }}
+                          >
+                            <Text
+                              className="font-bold text-xs"
+                              style={{ color: isSelected ? '#000' : '#a1a1aa' }}
+                            >
+                              {group.name}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
+
+                  {/* HOMBROS */}
+                  <View
+                    className="mb-4 rounded-xl p-3"
+                    style={{ backgroundColor: '#0a0a0a', borderWidth: 1, borderColor: '#f59e0b50' }}
+                  >
+                    <Text className="text-xs font-bold mb-2" style={{ color: '#f59e0b' }}>
+                      🎯 HOMBROS
+                    </Text>
+                    <View className="flex-row flex-wrap gap-2">
+                      {MUSCLE_GROUPS.filter((g) => g.category === 'hombros').map((group) => {
+                        const isSelected = selectedMuscleGroups.includes(group.name);
+                        return (
+                          <TouchableOpacity
+                            key={group.id}
+                            onPress={() => {
+                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                              if (isSelected) {
+                                setSelectedMuscleGroups((prev) =>
+                                  prev.filter((g) => g !== group.name)
+                                );
+                              } else {
+                                setSelectedMuscleGroups((prev) => [...prev, group.name]);
+                              }
+                            }}
+                            className="px-3 py-2 rounded-lg"
+                            style={{
+                              backgroundColor: isSelected ? '#f59e0b' : '#18181b',
+                              borderWidth: 1,
+                              borderColor: isSelected ? '#f59e0b' : '#27272a',
                             }}
                           >
                             <Text
@@ -6336,24 +6394,24 @@ function GymScreen() {
                     <TouchableOpacity
                       className="flex-row items-center bg-black/50 rounded-full px-4 py-2 self-start mb-4"
                       onPress={() => {
-                        if (isPro && spotifyPremium && selectedVideo.spotify?.trackUri) {
-                          // PRO: Sincronizar desde posición exacta
+                        if (spotifyPremium && selectedVideo.spotify?.trackUri) {
+                          // Sincronizar desde posición exacta
                           spotify.syncWithVideo(
                             selectedVideo.spotify.trackUri,
                             selectedVideo.spotify.positionMs || 0
                           );
                           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                         } else {
-                          // FREE: Mostrar mensaje de upgrade
+                          // Sin Spotify Premium: Mostrar mensaje
                           Alert.alert(
                             '🎵 Spotify Sync',
-                            'Activa PRO para reproducir la música exacta con la que se grabó este video.',
+                            'Conecta Spotify Premium para reproducir la música exacta con la que se grabó este video.',
                             [{ text: 'ENTENDIDO', style: 'default' }]
                           );
                         }
                       }}
                     >
-                      {isPro && spotifyPremium ? (
+                      {spotifyPremium ? (
                         <Volume2 color="#1DB954" size={16} />
                       ) : (
                         <Lock color="#71717A" size={16} />
