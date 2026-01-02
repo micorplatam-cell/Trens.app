@@ -44,6 +44,7 @@ import Animated, {
   Easing,
   interpolate,
   Extrapolation,
+  SharedValue,
 } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
 import spotify, {
@@ -733,7 +734,7 @@ const AlbumCarousel = React.memo(
 // Componente individual del álbum con animación
 interface AlbumCarouselItemComponentProps {
   item: AlbumCarouselItem;
-  scrollX: Animated.SharedValue<number>;
+  scrollX: SharedValue<number>;
   inputRange: number[];
   index: number;
 }

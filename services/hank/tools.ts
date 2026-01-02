@@ -4392,6 +4392,8 @@ export async function planBuilderExecute(
   const result: PlanBuilderExecuteResult = {
     mealsCreated: 0,
     supplementsCreated: 0,
+    trainingAssigned: false,
+    trainingExercises: 0,
     errors: [],
   };
 
@@ -4535,12 +4537,10 @@ export async function planBuilderExecute(
           frequency: planState.training.frequency,
         });
 
-        if (designResult.success && designResult.data?.planName) {
-          trainingResult = {
-            assigned: true,
-            exercises: designResult.data.exercisesCreated || 0,
-            planName: designResult.data.planName,
-          };
+        if (designResult.success && designResult.data) {
+          const data = designResult.data as { exercises?: number; templateId?: string };
+          result.trainingAssigned = true;
+          result.trainingExercises = data.exercises || 0;
         } else {
           result.errors.push(`Error asignando entrenamiento: ${designResult.message}`);
         }

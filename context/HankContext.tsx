@@ -1018,6 +1018,7 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
       isActive: true,
       meals: [],
       supplements: [],
+      training: null,
       startedAt: new Date(),
       clearExistingOnExecute: clearExisting,
     };
