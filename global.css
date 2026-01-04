@@ -7,3 +7,60 @@
    NativeWind handles all styling via Tailwind.
    CSS custom properties don't work in React Native.
    ============================================ */
+
+/* ============================================
+   WEB PROTECTION LAYER
+   Anti-zoom, Anti-right-click, Anti-long-press
+   ============================================ */
+@layer base {
+  html {
+    touch-action: pan-x pan-y;
+    -webkit-text-size-adjust: 100%;
+    -moz-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    overscroll-behavior: none;
+  }
+
+  body {
+    touch-action: pan-x pan-y;
+    overscroll-behavior: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  * {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Permitir selección en inputs */
+  input,
+  textarea,
+  [contenteditable='true'] {
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
+    touch-action: auto;
+  }
+
+  /* Bloquear arrastrar elementos */
+  img,
+  a,
+  button,
+  video {
+    -webkit-user-drag: none;
+    -webkit-touch-callout: none;
+  }
+
+  /* Prevenir zoom en doble tap en botones */
+  button,
+  a,
+  [role='button'] {
+    touch-action: manipulation;
+  }
+}

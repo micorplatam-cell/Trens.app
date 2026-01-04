@@ -46,7 +46,9 @@
 
   // 🔥 Files
   "files.associations": {
-    "*.css": "tailwindcss"
+    "*.css": "tailwindcss",
+    "_headers": "plaintext",
+    "_redirects": "plaintext"
   },
   "files.exclude": {
     "**/.expo": true,

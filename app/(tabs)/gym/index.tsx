@@ -3707,7 +3707,7 @@ function GymScreen() {
       <View className="flex-1 bg-transparent justify-end">
         <Animated.View
           className="bg-black rounded-t-3xl"
-          style={[{ height: '92%' }, animatedStyleSeriesConfig]}
+          style={[{ height: '92%', backgroundColor: '#000' }, animatedStyleSeriesConfig]}
         >
           {/* HEADER DRAGGABLE */}
           <View
@@ -3963,7 +3963,7 @@ function GymScreen() {
         <View className="flex-1 bg-transparent justify-end">
           <Animated.View
             className="bg-black rounded-t-3xl overflow-hidden"
-            style={[{ height: '92%' }, animatedStyleCatalog]}
+            style={[{ height: '92%', backgroundColor: '#000' }, animatedStyleCatalog]}
           >
             {/* HEADER DRAGGABLE - GRADIENT */}
             <LinearGradient
@@ -4851,7 +4851,7 @@ function GymScreen() {
         >
           <View className="flex-1 bg-transparent justify-end">
             <Animated.View
-              style={[animatedStyleAddDay, { height: '85%' }]}
+              style={[animatedStyleAddDay, { height: '85%', backgroundColor: '#000' }]}
               className="bg-black rounded-t-3xl"
             >
               {/* Header - Draggable para cerrar */}
@@ -5563,7 +5563,7 @@ function GymScreen() {
           <View className="flex-1 bg-transparent justify-end">
             <Animated.View
               className="bg-black rounded-t-3xl"
-              style={[{ height: '85%' }, animatedStyleNotes]}
+              style={[{ height: '85%', backgroundColor: '#000' }, animatedStyleNotes]}
             >
               {/* Drag Handle + Header (Área para arrastrar) */}
               <Animated.View
@@ -6551,7 +6551,7 @@ function GymScreen() {
         <View className="flex-1 bg-transparent justify-end">
           <Animated.View
             className="bg-black rounded-t-3xl"
-            style={[{ height: '85%' }, animatedStyleHistorial]}
+            style={[{ height: '85%', backgroundColor: '#000' }, animatedStyleHistorial]}
           >
             {/* Drag Handle + Header (Área para arrastrar) */}
             <Animated.View
@@ -6800,7 +6800,7 @@ function GymScreen() {
         <View className="flex-1 bg-transparent justify-end">
           <Animated.View
             className="bg-black rounded-t-3xl"
-            style={[{ height: '85%' }, animatedStyleStructure]}
+            style={[{ height: '85%', backgroundColor: '#000' }, animatedStyleStructure]}
           >
             {/* Drag Handle + Header */}
             <Animated.View

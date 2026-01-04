@@ -1,5 +1,5 @@
 import { Tabs, usePathname } from 'expo-router';
-import { View, Text } from 'react-native';
+import { View, Text, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -372,7 +372,9 @@ export default function TabsLayout() {
   };
 
   // Altura dinámica del tab bar basada en safe area
-  const tabBarHeight = 56 + insets.bottom;
+  // En web insets.bottom es 0, necesitamos padding mínimo para que el texto no se corte
+  const webPadding = Platform.OS === 'web' ? 8 : 0;
+  const tabBarHeight = (Platform.OS === 'web' ? 70 : 56) + insets.bottom;
 
   return (
     <>
@@ -384,7 +386,7 @@ export default function TabsLayout() {
             borderTopColor: ED_HARDY.zinc800,
             borderTopWidth: 1,
             height: tabBarHeight,
-            paddingBottom: insets.bottom + 4,
+            paddingBottom: insets.bottom + 4 + webPadding,
             paddingTop: 8,
             overflow: 'visible',
             // ED HARDY: Subtle fire glow from bottom

@@ -1,0 +1,15 @@
+# ============================================================================
+# CLOUDFLARE PAGES - TRENS PWA
+# Configuración para deploy en Cloudflare Pages
+# ============================================================================
+
+name = "trens-app"
+compatibility_date = "2024-01-01"
+
+# Pages configuration
+pages_build_output_dir = "dist"
+
+# Environment variables (set in Cloudflare Dashboard)
+# [vars]
+# EXPO_PUBLIC_SUPABASE_URL = ""
+# EXPO_PUBLIC_SUPABASE_ANON_KEY = ""

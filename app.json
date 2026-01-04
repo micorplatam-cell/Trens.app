@@ -5,6 +5,7 @@
     "version": "1.0.1",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
+    "icon": "./assets/icon.png",
     "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": true,
@@ -38,7 +39,21 @@
         }
       ]
     },
-    "web": {},
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/favicon.png",
+      "name": "TRENS - High Performance Fitness",
+      "shortName": "TRENS",
+      "description": "Entrena como un profesional. Registra tus entrenamientos, mide tu progreso y alcanza tus metas.",
+      "lang": "es",
+      "themeColor": "#000000",
+      "backgroundColor": "#000000",
+      "display": "standalone",
+      "orientation": "portrait",
+      "startUrl": "/",
+      "scope": "/"
+    },
     "plugins": ["expo-router", "expo-web-browser", "expo-asset"],
     "scheme": "trensdev",
     "sdkVersion": "54.0.0",

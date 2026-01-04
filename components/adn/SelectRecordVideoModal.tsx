@@ -107,7 +107,7 @@ export default function SelectRecordVideoModal({
       <View className="flex-1 bg-transparent justify-end">
         <Animated.View
           className="bg-black rounded-t-3xl"
-          style={[{ height: '85%' }, animatedPanelStyle]}
+          style={[{ height: '85%', backgroundColor: '#000' }, animatedPanelStyle]}
         >
           {/* Header con PanResponder para cerrar deslizando */}
           <View

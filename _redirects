@@ -1,0 +1,10 @@
+# Cloudflare Pages Redirects
+# https://developers.cloudflare.com/pages/configuration/redirects/
+
+# Redirect to app stores
+/app https://play.google.com/store/apps/details?id=com.trens.app 302
+/android https://play.google.com/store/apps/details?id=com.trens.app 302
+/ios https://apps.apple.com/app/trens/id123456789 302
+
+# SPA fallback - todas las rutas van a index.html
+/* /index.html 200

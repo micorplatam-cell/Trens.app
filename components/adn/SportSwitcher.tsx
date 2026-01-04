@@ -165,7 +165,7 @@ export function SportSwitcherModal({ visible, onClose }: SportSwitcherModalProps
       <View className="flex-1 bg-transparent justify-end">
         <Animated.View
           className="bg-zinc-900 rounded-t-3xl"
-          style={[{ height: '70%' }, animatedStyle]}
+          style={[{ height: '70%', backgroundColor: '#18181b' }, animatedStyle]}
         >
           {/* Header completo - Draggable para cerrar */}
           <View {...panResponder.panHandlers} className="border-b border-zinc-800">

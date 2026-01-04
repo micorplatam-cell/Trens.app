@@ -2037,7 +2037,7 @@ export const HankOverlay: React.FC = () => {
         <View className="flex-1 bg-transparent justify-end">
           <Animated.View
             className="bg-black rounded-t-3xl"
-            style={[{ height: '92%' }, animatedPanelStyle]}
+            style={[{ height: '92%', backgroundColor: '#000' }, animatedPanelStyle]}
           >
             <KeyboardAvoidingView
               behavior={Platform.OS === 'ios' ? 'padding' : 'height'}

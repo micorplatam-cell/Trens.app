@@ -1991,7 +1991,7 @@ export default function SpotifyModal({
       <View className="flex-1 bg-transparent justify-end">
         <Animated.View
           className="bg-black rounded-t-3xl"
-          style={[{ height: '95%' }, animatedStyle]}
+          style={[{ height: '95%', backgroundColor: '#000' }, animatedStyle]}
         >
           {/* Header - Draggable para cerrar */}
           <View

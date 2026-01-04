@@ -1,0 +1,12 @@
+# https://www.robotstxt.org/robotstxt.html
+User-agent: *
+Allow: /
+
+# Sitemaps
+Sitemap: https://trens.app/sitemap.xml
+
+# Crawl delay
+Crawl-delay: 1
+
+# Disallow admin routes
+Disallow: /(admin)/

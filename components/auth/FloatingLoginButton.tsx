@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -24,9 +24,10 @@ import Animated, {
   SlideOutDown,
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Crown, X, Zap, ChevronRight, Lock, Sparkles } from 'lucide-react-native';
+import { Crown, X, Zap, ChevronRight, Lock, Sparkles, Shield } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { supabase } from '../../lib/supabase';
+import { Link } from 'expo-router';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -40,6 +41,19 @@ export default function FloatingLoginButton({ visible }: FloatingLoginButtonProp
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Refs para mantener focus en inputs
+  const emailRef = useRef<TextInput>(null);
+  const passwordRef = useRef<TextInput>(null);
+
+  // Callbacks estables para evitar re-renders
+  const handleEmailChange = useCallback((text: string) => {
+    setEmail(text);
+  }, []);
+
+  const handlePasswordChange = useCallback((text: string) => {
+    setPassword(text);
+  }, []);
 
   // Animaciones del botón flotante
   const pulseScale = useSharedValue(1);
@@ -308,13 +322,22 @@ export default function FloatingLoginButton({ visible }: FloatingLoginButtonProp
                         EMAIL
                       </Text>
                       <TextInput
+                        ref={emailRef}
                         placeholder="tu@email.com"
                         placeholderTextColor="#52525B"
                         value={email}
-                        onChangeText={setEmail}
+                        onChangeText={handleEmailChange}
                         keyboardType="email-address"
                         autoCapitalize="none"
                         autoComplete="email"
+                        autoCorrect={false}
+                        textContentType="emailAddress"
+                        inputMode="email"
+                        blurOnSubmit={false}
+                        returnKeyType="next"
+                        onSubmitEditing={() => passwordRef.current?.focus()}
+                        // @ts-ignore - Web specific
+                        nativeID="modal-email"
                         className="bg-zinc-900 text-white p-4 rounded-xl border border-zinc-800 text-base"
                       />
                     </View>
@@ -324,11 +347,21 @@ export default function FloatingLoginButton({ visible }: FloatingLoginButtonProp
                         CONTRASEÑA
                       </Text>
                       <TextInput
+                        ref={passwordRef}
                         placeholder="••••••••"
                         placeholderTextColor="#52525B"
                         value={password}
-                        onChangeText={setPassword}
+                        onChangeText={handlePasswordChange}
                         secureTextEntry
+                        autoComplete="current-password"
+                        autoCorrect={false}
+                        textContentType="password"
+                        autoCapitalize="none"
+                        blurOnSubmit={false}
+                        returnKeyType="done"
+                        onSubmitEditing={handleLogin}
+                        // @ts-ignore - Web specific
+                        nativeID="modal-password"
                         className="bg-zinc-900 text-white p-4 rounded-xl border border-zinc-800 text-base"
                       />
                     </View>
@@ -354,10 +387,35 @@ export default function FloatingLoginButton({ visible }: FloatingLoginButtonProp
                   </TouchableOpacity>
 
                   {/* Footer */}
-                  <View className="mt-6 items-center">
+                  <View className="mt-6 items-center gap-3">
                     <Text className="text-zinc-600 text-xs">
                       ¿No tienes cuenta?{' '}
                       <Text className="text-savage-red font-bold">Regístrate en trens.app</Text>
+                    </Text>
+
+                    {/* Links de legitimidad */}
+                    <View className="flex-row items-center gap-3 mt-2">
+                      <Link href="/privacy" asChild>
+                        <TouchableOpacity onPress={() => setModalVisible(false)}>
+                          <Text className="text-zinc-600 text-xs underline">Privacidad</Text>
+                        </TouchableOpacity>
+                      </Link>
+                      <Text className="text-zinc-700 text-xs">•</Text>
+                      <Link href="/terms" asChild>
+                        <TouchableOpacity onPress={() => setModalVisible(false)}>
+                          <Text className="text-zinc-600 text-xs underline">Términos</Text>
+                        </TouchableOpacity>
+                      </Link>
+                    </View>
+
+                    {/* Badge de seguridad */}
+                    <View className="flex-row items-center mt-2 py-2 px-4 bg-green-900/20 rounded-full">
+                      <Shield size={12} color="#22c55e" />
+                      <Text className="text-green-500 text-xs ml-2">Conexión segura SSL</Text>
+                    </View>
+
+                    <Text className="text-zinc-700 text-xs text-center mt-1">
+                      © 2026 TRENS - High Performance Fitness
                     </Text>
                   </View>
                 </LinearGradient>

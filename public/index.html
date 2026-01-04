@@ -1,0 +1,511 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+
+    <!-- Theme Color - NEGRO TOTAL para barra de URL -->
+    <meta name="theme-color" content="#000000" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#000000" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#000000" />
+    <meta name="msapplication-navbutton-color" content="#000000" />
+    <meta name="background-color" content="#000000" />
+    <meta name="msapplication-TileColor" content="#000000" />
+    <meta name="msapplication-config" content="/browserconfig.xml" />
+
+    <!-- PWA Meta Tags -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <meta name="apple-mobile-web-app-title" content="TRENS" />
+    <meta name="application-name" content="TRENS" />
+
+    <!-- SEO Meta Tags -->
+    <title>TRENS - High Performance Fitness</title>
+    <meta
+      name="description"
+      content="Entrena como un profesional. Registra tus entrenamientos, mide tu progreso y alcanza tus metas. La app de fitness para atletas serios."
+    />
+    <meta
+      name="keywords"
+      content="fitness, gym, workout, training, exercise, muscle, strength, bodybuilding, crossfit, powerlifting"
+    />
+    <meta name="author" content="TRENS" />
+    <meta name="robots" content="index, follow" />
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://trens.app/" />
+    <meta property="og:title" content="TRENS - High Performance Fitness" />
+    <meta
+      property="og:description"
+      content="Entrena como un profesional. Registra tus entrenamientos, mide tu progreso y alcanza tus metas."
+    />
+    <meta property="og:image" content="https://trens.app/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:locale" content="es_ES" />
+    <meta property="og:site_name" content="TRENS" />
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:url" content="https://trens.app/" />
+    <meta name="twitter:title" content="TRENS - High Performance Fitness" />
+    <meta
+      name="twitter:description"
+      content="Entrena como un profesional. Registra tus entrenamientos, mide tu progreso y alcanza tus metas."
+    />
+    <meta name="twitter:image" content="https://trens.app/og-image.png" />
+
+    <!-- Favicon & Icons -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+    <link rel="mask-icon" href="/icons/safari-pinned-tab.svg" color="#DC2626" />
+
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.json" />
+
+    <!-- Splash Screens for iOS -->
+    <link
+      rel="apple-touch-startup-image"
+      href="/splash/apple-splash-2048-2732.png"
+      media="(device-width: 1024px) and (device-height: 1366px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)"
+    />
+    <link
+      rel="apple-touch-startup-image"
+      href="/splash/apple-splash-1668-2388.png"
+      media="(device-width: 834px) and (device-height: 1194px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)"
+    />
+    <link
+      rel="apple-touch-startup-image"
+      href="/splash/apple-splash-1536-2048.png"
+      media="(device-width: 768px) and (device-height: 1024px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)"
+    />
+    <link
+      rel="apple-touch-startup-image"
+      href="/splash/apple-splash-1125-2436.png"
+      media="(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+    />
+    <link
+      rel="apple-touch-startup-image"
+      href="/splash/apple-splash-1242-2688.png"
+      media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+    />
+    <link
+      rel="apple-touch-startup-image"
+      href="/splash/apple-splash-828-1792.png"
+      media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)"
+    />
+    <link
+      rel="apple-touch-startup-image"
+      href="/splash/apple-splash-1170-2532.png"
+      media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+    />
+    <link
+      rel="apple-touch-startup-image"
+      href="/splash/apple-splash-1284-2778.png"
+      media="(device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+    />
+
+    <!-- Security Meta Tags -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.supabase.co; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; font-src 'self' data:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.spotify.com https://accounts.spotify.com https://*.cloudflare.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests"
+    />
+    <meta http-equiv="X-Content-Type-Options" content="nosniff" />
+    <meta http-equiv="X-Frame-Options" content="DENY" />
+    <meta name="format-detection" content="telephone=no" />
+
+    <!-- Preconnect for Performance -->
+    <link rel="preconnect" href="https://cnrcrhlrteeqsyhlxhbb.supabase.co" />
+    <link rel="dns-prefetch" href="https://cnrcrhlrteeqsyhlxhbb.supabase.co" />
+
+    <!-- Protection Script (Anti-zoom, Anti-right-click, Anti-long-press) -->
+    <script src="/protection.js"></script>
+
+    <!-- Critical CSS for Loading State -->
+    <style>
+      /* === PROTECCIÓN ANTI-ZOOM Y SELECCIÓN === */
+      html {
+        touch-action: pan-x pan-y;
+        -ms-touch-action: pan-x pan-y;
+        -webkit-text-size-adjust: 100%;
+        -moz-text-size-adjust: 100%;
+        -ms-text-size-adjust: 100%;
+        text-size-adjust: 100%;
+      }
+      body {
+        touch-action: pan-x pan-y;
+        -ms-touch-action: pan-x pan-y;
+        overscroll-behavior: none;
+        -webkit-overflow-scrolling: touch;
+        -webkit-text-size-adjust: 100%;
+        -moz-text-size-adjust: 100%;
+      }
+      * {
+        -webkit-user-select: none !important;
+        -moz-user-select: none !important;
+        -ms-user-select: none !important;
+        user-select: none !important;
+        -webkit-touch-callout: none !important;
+        -webkit-tap-highlight-color: transparent !important;
+        touch-action: manipulation;
+      }
+      /* Permitir selección SOLO en inputs */
+      input,
+      textarea,
+      [contenteditable='true'] {
+        -webkit-user-select: text !important;
+        -moz-user-select: text !important;
+        -ms-user-select: text !important;
+        user-select: text !important;
+        -webkit-touch-callout: default !important;
+        touch-action: auto;
+      }
+      /* Bloquear arrastrar y long-press en imágenes y enlaces */
+      img,
+      a,
+      button,
+      video {
+        -webkit-user-drag: none !important;
+        -webkit-touch-callout: none !important;
+        pointer-events: auto;
+      }
+      /* Prevenir zoom en doble tap */
+      button,
+      a,
+      [role='button'] {
+        touch-action: manipulation;
+      }
+      /* === FIN PROTECCIÓN === */
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      html,
+      body,
+      #root {
+        height: 100%;
+        width: 100%;
+        background-color: #000000;
+        color: #ffffff;
+        font-family:
+          -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        overflow: hidden;
+      }
+
+      /* Custom scrollbar */
+      ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+
+      ::-webkit-scrollbar-track {
+        background: #0a0a0a;
+      }
+
+      ::-webkit-scrollbar-thumb {
+        background: #27272a;
+        border-radius: 3px;
+      }
+
+      ::-webkit-scrollbar-thumb:hover {
+        background: #3f3f46;
+      }
+
+      /* Loading screen */
+      #trens-loader {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: #000000;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+        transition: opacity 0.3s ease-out;
+      }
+
+      #trens-loader.fade-out {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .loader-logo {
+        font-size: 48px;
+        font-weight: 900;
+        letter-spacing: 8px;
+        color: #ffffff;
+        text-shadow: 0 0 30px rgba(220, 38, 38, 0.5);
+        animation: pulse 2s ease-in-out infinite;
+      }
+
+      .loader-subtitle {
+        margin-top: 16px;
+        font-size: 12px;
+        letter-spacing: 4px;
+        color: #71717a;
+        text-transform: uppercase;
+      }
+
+      .loader-spinner {
+        margin-top: 40px;
+        width: 40px;
+        height: 40px;
+        border: 3px solid #1f1f1f;
+        border-top-color: #dc2626;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.7;
+        }
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      /* PWA Install Banner Styles */
+      .pwa-install-banner {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background: linear-gradient(to top, #000000, rgba(0, 0, 0, 0.95));
+        padding: 20px;
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        z-index: 10000;
+        border-top: 1px solid #27272a;
+      }
+
+      .pwa-install-banner.show {
+        display: flex;
+      }
+
+      .pwa-install-btn {
+        background: #dc2626;
+        color: white;
+        border: none;
+        padding: 14px 32px;
+        border-radius: 8px;
+        font-weight: 700;
+        font-size: 14px;
+        letter-spacing: 1px;
+        cursor: pointer;
+        text-transform: uppercase;
+        transition: all 0.2s;
+      }
+
+      .pwa-install-btn:hover {
+        background: #b91c1c;
+        transform: scale(1.02);
+      }
+
+      .pwa-dismiss-btn {
+        background: transparent;
+        color: #71717a;
+        border: none;
+        padding: 8px 16px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+    </style>
+
+    <!-- PROTECCIÓN ANTI-ZOOM Y SELECCIÓN -->
+    <script>
+      (function () {
+        // Bloquear gestos de zoom (iOS)
+        document.addEventListener(
+          'gesturestart',
+          function (e) {
+            e.preventDefault();
+          },
+          { passive: false, capture: true }
+        );
+        document.addEventListener(
+          'gesturechange',
+          function (e) {
+            e.preventDefault();
+          },
+          { passive: false, capture: true }
+        );
+        document.addEventListener(
+          'gestureend',
+          function (e) {
+            e.preventDefault();
+          },
+          { passive: false, capture: true }
+        );
+
+        // Bloquear zoom con multi-touch
+        document.addEventListener(
+          'touchstart',
+          function (e) {
+            if (e.touches.length > 1) {
+              e.preventDefault();
+            }
+          },
+          { passive: false }
+        );
+
+        // Bloquear zoom con pinch
+        document.addEventListener(
+          'touchmove',
+          function (e) {
+            if (e.scale !== undefined && e.scale !== 1) {
+              e.preventDefault();
+            }
+          },
+          { passive: false }
+        );
+
+        // Bloquear menú contextual (long press)
+        document.addEventListener(
+          'contextmenu',
+          function (e) {
+            e.preventDefault();
+            return false;
+          },
+          { capture: true }
+        );
+
+        // Bloquear selección de texto
+        document.addEventListener(
+          'selectstart',
+          function (e) {
+            var tag = e.target.tagName;
+            if (tag !== 'INPUT' && tag !== 'TEXTAREA') {
+              e.preventDefault();
+              return false;
+            }
+          },
+          { capture: true }
+        );
+
+        // Bloquear arrastrar elementos
+        document.addEventListener(
+          'dragstart',
+          function (e) {
+            e.preventDefault();
+            return false;
+          },
+          { capture: true }
+        );
+
+        // Bloquear double-tap zoom
+        var lastTouchEnd = 0;
+        document.addEventListener(
+          'touchend',
+          function (e) {
+            var now = Date.now();
+            if (now - lastTouchEnd <= 300) {
+              e.preventDefault();
+            }
+            lastTouchEnd = now;
+          },
+          { passive: false }
+        );
+
+        // Service Worker
+        if ('serviceWorker' in navigator) {
+          window.addEventListener('load', function () {
+            navigator.serviceWorker.register('/sw.js');
+          });
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <!-- Loading Screen -->
+    <div id="trens-loader">
+      <div class="loader-logo">TRENS</div>
+      <div class="loader-subtitle">High Performance Fitness</div>
+      <div class="loader-spinner"></div>
+    </div>
+
+    <!-- React App Root -->
+    <div id="root"></div>
+
+    <!-- PWA Install Banner -->
+    <div id="pwa-install-banner" class="pwa-install-banner">
+      <span style="color: #a1a1aa; font-size: 14px">📱 Instala TRENS en tu dispositivo</span>
+      <button id="pwa-install-btn" class="pwa-install-btn">Instalar App</button>
+      <button id="pwa-dismiss-btn" class="pwa-dismiss-btn">Ahora no</button>
+    </div>
+
+    <!-- PWA Install Script -->
+    <script>
+      let deferredPrompt;
+      const installBanner = document.getElementById('pwa-install-banner');
+      const installBtn = document.getElementById('pwa-install-btn');
+      const dismissBtn = document.getElementById('pwa-dismiss-btn');
+
+      // Check if already installed or dismissed
+      const isInstalled = window.matchMedia('(display-mode: standalone)').matches;
+      const isDismissed = localStorage.getItem('pwa-install-dismissed');
+
+      window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        deferredPrompt = e;
+
+        if (!isInstalled && !isDismissed) {
+          setTimeout(() => {
+            installBanner.classList.add('show');
+          }, 3000);
+        }
+      });
+
+      installBtn?.addEventListener('click', async () => {
+        if (deferredPrompt) {
+          deferredPrompt.prompt();
+          const { outcome } = await deferredPrompt.userChoice;
+          console.log('PWA install:', outcome);
+          deferredPrompt = null;
+          installBanner.classList.remove('show');
+        }
+      });
+
+      dismissBtn?.addEventListener('click', () => {
+        installBanner.classList.remove('show');
+        localStorage.setItem('pwa-install-dismissed', 'true');
+      });
+
+      // Hide loader when app is ready
+      window.addEventListener('load', () => {
+        setTimeout(() => {
+          const loader = document.getElementById('trens-loader');
+          if (loader) {
+            loader.classList.add('fade-out');
+            setTimeout(() => loader.remove(), 300);
+          }
+        }, 500);
+      });
+    </script>
+  </body>
+</html>
