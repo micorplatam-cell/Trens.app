@@ -4,6 +4,7 @@ import {
   Text,
   Modal,
   TouchableOpacity,
+  Pressable,
   FlatList,
   TextInput,
   ActivityIndicator,
@@ -12,6 +13,7 @@ import {
   PanResponder,
   NativeSyntheticEvent,
   NativeScrollEvent,
+  Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -1965,19 +1967,28 @@ export default function SpotifyModal({
       </View>
 
       {/* Connect Button */}
-      <TouchableOpacity
-        onPress={onSpotifyConnect}
+      <Pressable
+        onPress={() => {
+          console.log('🎵 Spotify Connect button pressed');
+          onSpotifyConnect();
+        }}
         disabled={spotifyLoading}
-        className={`w-full p-4 rounded-full items-center ${
-          spotifyLoading ? 'bg-[#1DB954]/50' : 'bg-[#1DB954]'
-        }`}
+        style={({ pressed }) => ({
+          opacity: pressed ? 0.7 : 1,
+          width: '100%',
+          padding: 16,
+          borderRadius: 9999,
+          alignItems: 'center',
+          backgroundColor: spotifyLoading ? 'rgba(29, 185, 84, 0.5)' : '#1DB954',
+          cursor: Platform.OS === 'web' ? 'pointer' : undefined,
+        })}
       >
         {spotifyLoading ? (
           <ActivityIndicator color="#000" />
         ) : (
           <Text className="text-black font-bold text-lg">Conectar con Spotify</Text>
         )}
-      </TouchableOpacity>
+      </Pressable>
 
       <Text className="text-zinc-600 text-xs text-center mt-4">Requiere Spotify Premium</Text>
     </View>

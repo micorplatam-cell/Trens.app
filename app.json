@@ -6,16 +6,11 @@
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "icon": "./assets/icon.png",
-    "assetBundlePatterns": [
-      "**/*"
-    ],
+    "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.trens.app",
-      "associatedDomains": [
-        "applinks:share.trens.app",
-        "applinks:trens.app"
-      ]
+      "associatedDomains": ["applinks:share.trens.app", "applinks:trens.app"]
     },
     "android": {
       "adaptiveIcon": {
@@ -23,10 +18,7 @@
         "backgroundColor": "#000000"
       },
       "package": "com.trens.app",
-      "permissions": [
-        "CAMERA",
-        "RECORD_AUDIO"
-      ],
+      "permissions": ["CAMERA", "RECORD_AUDIO"],
       "intentFilters": [
         {
           "action": "VIEW",
@@ -43,10 +35,7 @@
               "pathPrefix": "/share"
             }
           ],
-          "category": [
-            "BROWSABLE",
-            "DEFAULT"
-          ]
+          "category": ["BROWSABLE", "DEFAULT"]
         }
       ]
     },
@@ -65,11 +54,7 @@
       "startUrl": "/",
       "scope": "/"
     },
-    "plugins": [
-      "expo-router",
-      "expo-web-browser",
-      "expo-asset"
-    ],
+    "plugins": ["expo-router", "expo-web-browser", "expo-asset"],
     "scheme": "trensdev",
     "sdkVersion": "54.0.0",
     "experiments": {

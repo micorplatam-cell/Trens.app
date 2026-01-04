@@ -467,17 +467,22 @@ export function SpotifyOverlay() {
   // HANDLERS
   // -------------------------------------------------------------------------
   const handleSpotifyConnect = async () => {
+    console.log('🎵 handleSpotifyConnect: Starting...');
     setSpotifyLoading(true);
 
     // Guardar la ruta actual para volver después del callback
     try {
       const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
       await AsyncStorage.setItem('@spotify_return_path', pathname || '/(tabs)/adn');
+      console.log('🎵 handleSpotifyConnect: Return path saved');
     } catch (e) {
       console.warn('No se pudo guardar ruta de retorno:', e);
     }
 
+    console.log('🎵 handleSpotifyConnect: Calling spotify.authenticate()...');
     const success = await spotify.authenticate();
+    console.log('🎵 handleSpotifyConnect: authenticate result =', success);
+    
     setSpotifyConnected(success);
     if (success) {
       const playback = await spotify.getPlaybackState();
