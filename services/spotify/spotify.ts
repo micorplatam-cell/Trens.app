@@ -167,10 +167,24 @@ class SpotifyService {
 
   /**
    * Obtener la URL de redirección para la autenticación
+   * - En WEB: Usa la URL actual del origen + path
    * - En DESARROLLO (Expo Go): Usa URI dinámica del tunnel
    * - En PRODUCCIÓN (build): Usa custom scheme trensdev://
    */
   getRedirectUri(): string {
+    // En web, construimos la URI manualmente para mayor control
+    if (typeof window !== 'undefined' && window.location) {
+      const origin = window.location.origin;
+      const webUri = `${origin}/spotify-callback`;
+      if (__DEV__) {
+        console.log('🎵 Spotify Web Redirect URI:', webUri);
+        console.log(
+          '🎵 IMPORTANTE: Agrega esta URI en Spotify Dashboard → Settings → Redirect URIs'
+        );
+      }
+      return webUri;
+    }
+
     // En desarrollo con Expo Go, necesitamos la URI del tunnel
     // En producción, usamos el custom scheme
     const uri = AuthSession.makeRedirectUri({
@@ -189,6 +203,7 @@ class SpotifyService {
   /**
    * Iniciar el flujo de autenticación OAuth
    * Usa WebBrowser.openAuthSessionAsync para evitar problemas con NavigationContext
+   * En web, redirige directamente al usuario (sin popup)
    */
   async authenticate(): Promise<boolean> {
     try {
@@ -216,7 +231,17 @@ class SpotifyService {
       authUrl.searchParams.set('code_challenge_method', 'S256');
       authUrl.searchParams.set('code_challenge', codeChallenge);
 
-      // Usar WebBrowser directamente (no requiere NavigationContext)
+      // En WEB: Guardar verifier y redirigir directamente
+      if (typeof window !== 'undefined' && window.location) {
+        console.log('🎵 Spotify Web: Guardando verifier y redirigiendo...');
+        await AsyncStorage.setItem('@spotify_code_verifier', codeVerifier);
+        await AsyncStorage.setItem('@spotify_redirect_uri', redirectUri);
+        // Redirigir a Spotify (el callback procesará el código)
+        window.location.href = authUrl.toString();
+        return true; // El resultado real se procesará en el callback
+      }
+
+      // En NATIVE: Usar WebBrowser
       console.log('🎵 Spotify: Abriendo navegador para auth...');
       console.log('🎵 Spotify: redirectUri =', redirectUri);
 
@@ -286,6 +311,66 @@ class SpotifyService {
       return false;
     } catch (error) {
       console.error('🎵 Spotify: Error de autenticación:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Procesar código OAuth recibido en web callback
+   * Este método se llama desde spotify-callback.tsx en web
+   */
+  async processWebAuthCode(code: string): Promise<boolean> {
+    try {
+      console.log('🎵 Spotify Web: Procesando código OAuth...');
+
+      // Recuperar verifier y redirect URI guardados
+      const codeVerifier = await AsyncStorage.getItem('@spotify_code_verifier');
+      const redirectUri = await AsyncStorage.getItem('@spotify_redirect_uri');
+
+      if (!codeVerifier || !redirectUri) {
+        console.error('🎵 Spotify Web: No se encontró verifier o redirectUri guardado');
+        return false;
+      }
+
+      // Limpiar datos temporales
+      await AsyncStorage.removeItem('@spotify_code_verifier');
+      await AsyncStorage.removeItem('@spotify_redirect_uri');
+
+      // Intercambiar código por tokens
+      const tokenResponse = await fetch(discovery.tokenEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          client_id: SPOTIFY_CLIENT_ID,
+          grant_type: 'authorization_code',
+          code,
+          redirect_uri: redirectUri,
+          code_verifier: codeVerifier,
+        }).toString(),
+      });
+
+      if (!tokenResponse.ok) {
+        const errorData = await tokenResponse.text();
+        console.error('🎵 Spotify Web: Token exchange failed:', errorData);
+        return false;
+      }
+
+      const tokenData = await tokenResponse.json();
+
+      this.accessToken = tokenData.access_token;
+      this.refreshToken = tokenData.refresh_token || null;
+      this.expiresAt = Date.now() + (tokenData.expires_in || 3600) * 1000;
+      this.isConnected = true;
+
+      // Guardar tokens
+      await this.saveTokens();
+
+      console.log('🎵 Spotify Web: ✅ Tokens guardados exitosamente');
+      return true;
+    } catch (error) {
+      console.error('🎵 Spotify Web: Error procesando código:', error);
       return false;
     }
   }

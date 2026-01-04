@@ -29,7 +29,7 @@ import {
   Scissors,
 } from 'lucide-react-native';
 import Animated, { FadeIn, FadeOut, SlideInDown, SlideOutDown } from 'react-native-reanimated';
-import * as Haptics from 'expo-haptics';
+import { Haptics } from '../../lib/haptics';
 import spotify from '../../services/spotify/spotify';
 
 // ============================================================================

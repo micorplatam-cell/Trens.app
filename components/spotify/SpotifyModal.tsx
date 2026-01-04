@@ -34,7 +34,7 @@ import {
   PlusCircle,
   CheckCircle,
 } from 'lucide-react-native';
-import * as Haptics from 'expo-haptics';
+import { Haptics } from '../../lib/haptics';
 import Animated, {
   FadeIn,
   useSharedValue,

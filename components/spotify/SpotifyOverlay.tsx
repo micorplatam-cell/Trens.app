@@ -21,7 +21,7 @@ import Animated, {
   SlideInDown,
   SlideOutDown,
 } from 'react-native-reanimated';
-import * as Haptics from 'expo-haptics';
+import { Haptics } from '../../lib/haptics';
 import { Music, SkipForward, RotateCcw, Sparkles, GitlabIcon as Bot } from 'lucide-react-native';
 import { usePathname } from 'expo-router';
 import spotify, { SpotifyTrack, SpotifyPlaybackState } from '../../services/spotify/spotify';

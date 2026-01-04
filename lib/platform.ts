@@ -104,11 +104,12 @@ const NATIVE_ONLY_FEATURES: NativeFeature[] = [
   'haptics',
   'file-system',
   'media-library',
-  'spotify-remote',
+  // 'spotify-remote' - Movido a WEB_LIMITED, funciona vía API REST
 ];
 
 const WEB_LIMITED_FEATURES: NativeFeature[] = [
   'push-notifications', // Works with permission
+  'spotify-remote', // Works via Spotify Web API (requires Premium)
 ];
 
 /**
@@ -133,7 +134,7 @@ export const getFeatureUnavailableMessage = (feature: NativeFeature): string => 
     haptics: 'Vibración no disponible en web',
     'file-system': 'Acceso a archivos limitado en web',
     'media-library': 'Galería de fotos disponible en la app nativa',
-    'spotify-remote': 'Control de Spotify disponible en la app nativa',
+    'spotify-remote': 'Requiere Spotify Premium para control remoto',
     'push-notifications': 'Activa las notificaciones para recibir alertas',
   };
 
