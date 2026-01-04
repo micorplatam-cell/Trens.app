@@ -4,7 +4,7 @@
 // ============================================================================
 
 import React from 'react';
-import { View, Text, TouchableOpacity, Platform, Linking } from 'react-native';
+import { View, Text, TouchableOpacity, Linking } from 'react-native';
 import { Smartphone, Download, X } from 'lucide-react-native';
 import type { NativeFeature } from '../../lib/platform';
 import { isFeatureAvailable, getFeatureUnavailableMessage, isWeb } from '../../lib/platform';

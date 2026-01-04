@@ -98,12 +98,12 @@ export default function ContactScreen() {
 
         {/* Legal Links */}
         <View className="flex-row justify-center gap-6 mb-6">
-          <Link href={"/privacy" as any} asChild>
+          <Link href={'/privacy' as any} asChild>
             <TouchableOpacity>
               <Text className="text-zinc-500 text-sm underline">Privacidad</Text>
             </TouchableOpacity>
           </Link>
-          <Link href={"/terms" as any} asChild>
+          <Link href={'/terms' as any} asChild>
             <TouchableOpacity>
               <Text className="text-zinc-500 text-sm underline">Términos</Text>
             </TouchableOpacity>
