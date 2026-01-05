@@ -629,62 +629,76 @@ export default function AdnScreen() {
   };
 
   const saveProfile = async () => {
+    console.log('💾 saveProfile llamado, user:', user?.id);
+    
     if (!user) {
       Alert.alert('Error', 'Debes iniciar sesión para editar tu perfil.');
       return;
     }
 
     setIsSavingProfile(true);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     try {
       let avatarUrl = profile?.avatar_url || null;
+      console.log('📝 Guardando perfil, nombre:', editName, 'avatar nuevo:', !!editAvatarUri);
 
       // Subir nueva imagen si se seleccionó una
       if (editAvatarUri) {
         const R2_PUBLIC_URL = process.env.EXPO_PUBLIC_CLOUDFLARE_R2_PUBLIC_URL;
-        const fileName = `avatars/${user.id}_${Date.now()}.jpg`;
-        console.log('📸 Subiendo avatar:', fileName);
-
-        // Borrar avatar anterior de R2 si existe
-        const oldAvatarUrl = profile?.avatar_url;
-        if (oldAvatarUrl && oldAvatarUrl.includes(R2_PUBLIC_URL || '')) {
-          try {
-            // Extraer el path del archivo desde la URL
-            const oldFileName = oldAvatarUrl.replace(`${R2_PUBLIC_URL}/`, '');
-            await fetch(`${R2_PUBLIC_URL}/delete`, {
-              method: 'DELETE',
-              headers: { 'X-File-Name': oldFileName },
-            });
-            console.log('🗑️ Avatar anterior eliminado:', oldFileName);
-          } catch (deleteError) {
-            console.warn('Error eliminando avatar anterior:', deleteError);
-          }
-        }
-
-        // Fetch la imagen como blob
-        const response = await fetch(editAvatarUri);
-        const blob = await response.blob();
-
-        // Subir usando el worker de Cloudflare
-        const uploadResponse = await fetch(`${R2_PUBLIC_URL}/upload`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'image/jpeg',
-            'X-File-Name': fileName,
-          },
-          body: blob,
-        });
-
-        if (uploadResponse.ok) {
-          const data = await uploadResponse.json();
-          avatarUrl = data.url || `${R2_PUBLIC_URL}/${fileName}`;
+        console.log('🔗 R2_PUBLIC_URL:', R2_PUBLIC_URL);
+        
+        if (!R2_PUBLIC_URL) {
+          console.warn('⚠️ R2_PUBLIC_URL no definida, saltando subida de imagen');
         } else {
-          console.warn('Error subiendo avatar, usando imagen local');
+          const fileName = `avatars/${user.id}_${Date.now()}.jpg`;
+          console.log('📸 Subiendo avatar:', fileName);
+
+          // Borrar avatar anterior de R2 si existe
+          const oldAvatarUrl = profile?.avatar_url;
+          if (oldAvatarUrl && oldAvatarUrl.includes(R2_PUBLIC_URL)) {
+            try {
+              const oldFileName = oldAvatarUrl.replace(`${R2_PUBLIC_URL}/`, '');
+              await fetch(`${R2_PUBLIC_URL}/delete`, {
+                method: 'DELETE',
+                headers: { 'X-File-Name': oldFileName },
+              });
+              console.log('🗑️ Avatar anterior eliminado:', oldFileName);
+            } catch (deleteError) {
+              console.warn('Error eliminando avatar anterior:', deleteError);
+            }
+          }
+
+          // Fetch la imagen como blob
+          const response = await fetch(editAvatarUri);
+          const blob = await response.blob();
+          console.log('📦 Blob creado, tamaño:', blob.size);
+
+          // Subir usando el worker de Cloudflare
+          const uploadResponse = await fetch(`${R2_PUBLIC_URL}/upload`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'image/jpeg',
+              'X-File-Name': fileName,
+            },
+            body: blob,
+          });
+
+          console.log('📤 Upload response status:', uploadResponse.status);
+          
+          if (uploadResponse.ok) {
+            const data = await uploadResponse.json();
+            avatarUrl = data.url || `${R2_PUBLIC_URL}/${fileName}`;
+            console.log('✅ Avatar subido:', avatarUrl);
+          } else {
+            const errorText = await uploadResponse.text();
+            console.warn('❌ Error subiendo avatar:', errorText);
+          }
         }
       }
 
       // Actualizar perfil en Supabase
+      console.log('💾 Actualizando Supabase con:', { display_name: editName.trim(), avatar_url: avatarUrl });
+      
       const { error } = await supabase
         .from('user_profiles')
         .update({
@@ -693,7 +707,12 @@ export default function AdnScreen() {
         })
         .eq('user_id', user.id);
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Error Supabase:', error);
+        throw error;
+      }
+
+      console.log('✅ Perfil actualizado en Supabase');
 
       // Actualizar estado local
       setProfile((prev) =>
