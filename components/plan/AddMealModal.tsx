@@ -18,15 +18,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
-import {
-  X,
-  Plus,
-  Trash2,
-  AlertTriangle,
-  CheckCircle,
-  Sparkles,
-  Clock,
-} from 'lucide-react-native';
+import { X, Plus, Trash2, AlertTriangle, CheckCircle, Sparkles, Clock } from 'lucide-react-native';
 import {
   analyzeIngredientsSmart,
   IngredientAnalysis,

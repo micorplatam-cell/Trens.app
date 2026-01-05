@@ -47,6 +47,7 @@ import { SportBadges } from '../../../components/adn/SportBadges';
 import { TodayCards } from '../../../components/adn/TodayCards';
 import { ProUpgradeModal } from '../../../components/pro/ProUpgradeModal';
 import { ShareModal } from '../../../components/share/ShareModal';
+import { calculateUserDailyMacros } from '../../../services/hank/nutrition';
 
 // ============================================================================
 // TIPOS
@@ -391,9 +392,52 @@ export default function AdnScreen() {
           });
         }
       } else {
+        // Verificar si necesitamos calcular macros objetivo
+        // Si no hay comidas pero sí hay datos de perfil, calcular macros por defecto (3 comidas)
+        let cachedMacros = profileData.cached_daily_macros;
+        
+        if (!cachedMacros && profileData.weight && profileData.height && profileData.goal) {
+          try {
+            console.log('🧠 ADN: Calculando macros objetivo para usuario sin comidas...');
+            const defaultMealCount = 3; // Por defecto asumimos 3 comidas/día
+            
+            const dailyMacros = await calculateUserDailyMacros({
+              weight: profileData.weight,
+              height: profileData.height,
+              goal: profileData.goal,
+              mealCount: defaultMealCount,
+              age: profileData.age || undefined,
+              sex: profileData.sex || undefined,
+              bodyFatPercentage: profileData.body_fat_percentage || undefined,
+              muscleMass: profileData.muscle_mass || undefined,
+              activityLevel: profileData.activity_level || 'MODERADO',
+              trainingExperience: profileData.training_experience || undefined,
+              metabolicRate: profileData.metabolic_rate || undefined,
+              trainingDaysPerWeek: profileData.training_days_per_week || undefined,
+            });
+            
+            cachedMacros = dailyMacros;
+            
+            // Guardar en Supabase para sincronización
+            await supabase
+              .from('user_profiles')
+              .update({
+                cached_daily_macros: dailyMacros,
+                cached_macros_meal_count: mealCount || defaultMealCount,
+                cached_macros_updated_at: new Date().toISOString(),
+              })
+              .eq('user_id', user.id);
+            
+            console.log('💾 ADN: Macros objetivo guardados en Supabase');
+          } catch (error) {
+            console.error('Error calculating default macros:', error);
+          }
+        }
+        
         // Agregar campos calculados desde GYM y PLAN
         setProfile({
           ...profileData,
+          cached_daily_macros: cachedMacros,
           training_frequency: authProfile?.training_frequency || 0,
           meal_count: mealCount || 0,
         });

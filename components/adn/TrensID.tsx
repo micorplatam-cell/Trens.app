@@ -7,7 +7,16 @@ import Animated, {
   interpolate,
   Easing,
 } from 'react-native-reanimated';
-import { ChevronDown, X, Edit2, Save, ShieldAlert, Crown, Trash2, Flame } from 'lucide-react-native';
+import {
+  ChevronDown,
+  X,
+  Edit2,
+  Save,
+  ShieldAlert,
+  Crown,
+  Trash2,
+  Flame,
+} from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { supabase } from '../../lib/supabase';
 import { useSaveGuard } from '../../context/SaveGuardContext';
@@ -332,10 +341,12 @@ export default function TrensID({ userId, profileData, measurements, onUpdate }:
                   <View className="flex-row items-center gap-1 mb-2">
                     <Flame size={10} color="#F97316" />
                     <Text className="text-[10px] text-fire-orange font-bold uppercase tracking-wider">
-                      Macros Diarios
+                      {(editData.meal_count || 0) > 0 ? 'Macros Diarios' : 'Macros Objetivo'}
                     </Text>
                     <Text className="text-zinc-600 text-[10px] font-mono ml-auto">
-                      {editData.meal_count || 0} comidas
+                      {(editData.meal_count || 0) > 0 
+                        ? `${editData.meal_count} comidas` 
+                        : '3 comidas (default)'}
                     </Text>
                   </View>
                   <View className="flex-row justify-between">
@@ -368,6 +379,12 @@ export default function TrensID({ userId, profileData, measurements, onUpdate }:
                       <Text className="text-zinc-500 text-[9px] uppercase">Grasas</Text>
                     </View>
                   </View>
+                  {/* Hint para usuarios sin comidas */}
+                  {(editData.meal_count || 0) === 0 && (
+                    <Text className="text-zinc-600 text-[9px] text-center mt-2 italic">
+                      Ve a PLAN para configurar tus comidas
+                    </Text>
+                  )}
                 </View>
               )}
 
