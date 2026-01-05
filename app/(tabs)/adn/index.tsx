@@ -934,7 +934,7 @@ export default function AdnScreen() {
 
         {/* TODAY CARDS - Entrenamiento y Próxima Comida/Stack */}
         {isOwner && user && (
-          <View className="-mt-6">
+          <View className="mt-2">
             <TodayCards userId={user.id} />
           </View>
         )}
