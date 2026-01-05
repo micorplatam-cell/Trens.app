@@ -327,9 +327,24 @@ function PlanScreen() {
       setPlanName('MI PLAN');
 
       // Fetch meals - columnas reales de la tabla meals
+      // Fetch meals con sus opciones (alternativas)
       const { data: mealsData, error: mealsError } = await supabase
         .from('meals')
-        .select('id, name, scheduled_time, ingredients, is_completed, position')
+        .select(`
+          id, 
+          name, 
+          scheduled_time, 
+          ingredients, 
+          is_completed, 
+          position,
+          meal_options (
+            id,
+            name,
+            ingredients,
+            position,
+            is_selected
+          )
+        `)
         .eq('user_id', user.id)
         .order('scheduled_time', { ascending: true });
 
@@ -409,43 +424,46 @@ function PlanScreen() {
         }
 
         const formattedMeals: Meal[] = mealsData.map((meal: any) => {
-          // Si tiene ingredients como JSONB (nuevo formato)
+          // Ingredientes principales de la comida (JSONB en meals.ingredients)
           const jsonIngredients = meal.ingredients || [];
 
-          // Si tiene meal_options relacionadas (formato antiguo)
-          const hasOptions = meal.meal_options && meal.meal_options.length > 0;
+          // Alternativas/opciones adicionales (de meal_options)
+          const mealOptions = meal.meal_options || [];
 
-          let options;
-          if (hasOptions) {
-            // Formato con opciones relacionadas
-            options = meal.meal_options
-              .sort((a: any, b: any) => (a.position || 0) - (b.position || 0))
-              .map((opt: any) => ({
+          // Construir array de opciones
+          const options: MealOption[] = [];
+
+          // Opción principal: ingredientes JSONB de la comida
+          if (jsonIngredients.length > 0) {
+            options.push({
+              id: `main-${meal.id}`,
+              name: 'Principal',
+              ingredients: jsonIngredients.map((ing: any, idx: number) => ({
+                id: ing.id || `ing-${idx}`,
+                name: ing.name,
+                quantity: ing.quantity || '~100g',
+                portion: ing.portion,
+              })),
+            });
+          }
+
+          // Agregar opciones alternativas de meal_options
+          if (mealOptions.length > 0) {
+            const sortedOptions = [...mealOptions].sort(
+              (a: any, b: any) => (a.position || 0) - (b.position || 0)
+            );
+            sortedOptions.forEach((opt: any) => {
+              options.push({
                 id: opt.id,
-                name: opt.name || 'Opción',
+                name: opt.name || 'Alternativa',
                 ingredients: (opt.ingredients || []).map((ing: any, idx: number) => ({
-                  id: ing.id || `ing-${idx}`,
+                  id: ing.id || `opt-ing-${idx}`,
                   name: ing.name,
                   quantity: ing.quantity || '~100g',
                   portion: ing.portion,
                 })),
-              }));
-          } else if (jsonIngredients.length > 0) {
-            // Formato JSONB directo - crear una opción por defecto
-            options = [
-              {
-                id: `opt-${meal.id}`,
-                name: meal.name || 'Opción Principal',
-                ingredients: jsonIngredients.map((ing: any, idx: number) => ({
-                  id: ing.id || `ing-${idx}`,
-                  name: ing.name,
-                  quantity: ing.quantity || '~100g',
-                  portion: ing.portion,
-                })),
-              },
-            ];
-          } else {
-            options = [];
+              });
+            });
           }
 
           return {
@@ -925,37 +943,31 @@ function PlanScreen() {
 
       if (targetMealIds.length === 0) return;
 
-      // Obtener todas las opciones con sus ingredientes
-      const { data: allOptions } = await supabase
-        .from('meal_options')
-        .select(
-          `
-          id,
-          meal_id,
-          meal_ingredients (
-            id,
-            name,
-            quantity,
-            portion
-          )
-        `
-        )
-        .in('meal_id', targetMealIds);
+      // Obtener todas las comidas con sus ingredientes (JSONB)
+      const { data: allMeals } = await supabase
+        .from('meals')
+        .select('id, ingredients')
+        .in('id', targetMealIds);
 
-      if (!allOptions || allOptions.length === 0) return;
+      if (!allMeals || allMeals.length === 0) return;
 
-      // Preparar datos para recálculo
-      const mealsToRecalculate = allOptions.map((opt) => ({
-        optionId: opt.id,
-        ingredients: (
-          opt.meal_ingredients as { id: string; name: string; quantity: string; portion?: string }[]
-        ).map((ing) => ({
-          name: ing.name,
-        })),
-      }));
+      // Preparar datos para recálculo - usar ingredientes JSONB de cada comida
+      const mealsToRecalculate = allMeals
+        .filter((m) => m.ingredients && m.ingredients.length > 0)
+        .map((m) => ({
+          optionId: m.id, // Usamos el ID de la comida como optionId
+          ingredients: (m.ingredients as any[]).map((ing) => ({
+            name: ing.name,
+          })),
+        }));
+
+      if (mealsToRecalculate.length === 0) {
+        console.log('⚠️ No hay comidas con ingredientes para recalcular');
+        return;
+      }
 
       console.log(
-        `🔄 Recalculando ${mealsToRecalculate.length} opciones para ${newMealCount} comidas...`
+        `🔄 Recalculando ${mealsToRecalculate.length} comidas para ${newMealCount} comidas/día...`
       );
 
       // Recalcular con IA
@@ -966,21 +978,18 @@ function PlanScreen() {
         mealCount: newMealCount,
       });
 
-      // Actualizar cada opción en la base de datos
+      // Actualizar cada comida en la base de datos (JSONB)
       for (const option of recalculated) {
-        // Eliminar ingredientes anteriores
-        await supabase.from('meal_ingredients').delete().eq('option_id', option.optionId);
-
-        // Insertar nuevos ingredientes recalculados
-        const ingredientsToInsert = option.ingredients.map((ing, idx) => ({
-          option_id: option.optionId,
+        const ingredientsJsonb = option.ingredients.map((ing) => ({
           name: ing.name,
           quantity: ing.quantity,
-          portion: ing.portion,
-          sort_order: idx,
+          portion: ing.portion || '',
         }));
 
-        await supabase.from('meal_ingredients').insert(ingredientsToInsert);
+        await supabase
+          .from('meals')
+          .update({ ingredients: ingredientsJsonb })
+          .eq('id', option.optionId);
       }
 
       console.log('✅ Recálculo completado, actualizando UI...');
@@ -1004,27 +1013,27 @@ function PlanScreen() {
     }
   };
 
-  // Guardar cambios de ingredientes
+  // Guardar cambios de ingredientes (usando JSONB directo)
   const handleSaveIngredients = async (
     mealId: string,
-    optionId: string,
+    _optionId: string, // Ya no usamos optionId, trabajamos con JSONB
     ingredients: Ingredient[]
   ) => {
     isInternalUpdate.current = true;
     try {
-      // Delete existing ingredients
-      await supabase.from('meal_ingredients').delete().eq('option_id', optionId);
-
-      // Insert updated ingredients
-      const ingredientsToInsert = ingredients.map((ing, idx) => ({
-        option_id: optionId,
+      // Actualizar ingredientes directamente en el campo JSONB
+      const ingredientsToSave = ingredients.map((ing) => ({
         name: ing.name,
         quantity: ing.quantity || '~100g',
         portion: ing.portion || '',
-        sort_order: idx,
       }));
 
-      await supabase.from('meal_ingredients').insert(ingredientsToInsert);
+      const { error } = await supabase
+        .from('meals')
+        .update({ ingredients: ingredientsToSave })
+        .eq('id', mealId);
+
+      if (error) throw error;
 
       // Refresh data
       fetchData();
@@ -1172,6 +1181,20 @@ function PlanScreen() {
         throw mealError;
       }
 
+      // Obtener IDs de todas las comidas (incluyendo la nueva)
+      const { data: allMealsData } = await supabase
+        .from('meals')
+        .select('id')
+        .eq('user_id', user.id);
+
+      const allMealIds = allMealsData?.map((m) => m.id) || [];
+
+      // Recalcular macros de TODAS las comidas (nuevas cantidades para N comidas)
+      if (allMealIds.length > 1) {
+        console.log(`🔄 Recalculando ${allMealIds.length} comidas con nuevos macros objetivo...`);
+        await recalculateAllMealsAfterChange(allMealIds.length, allMealIds);
+      }
+
       // Refrescar datos inmediatamente
       await fetchData();
     } catch (error) {
@@ -1303,7 +1326,7 @@ function PlanScreen() {
     setShowAddOption(true);
   };
 
-  // Guardar nueva opción/platillo
+  // Guardar nueva opción/platillo (alternativa)
   const handleSaveOption = async (
     mealId: string,
     optionName: string,
@@ -1314,36 +1337,33 @@ function PlanScreen() {
     if (!canSave('save_meal')) return;
 
     try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+
       // Obtener el índice de la nueva opción
       const meal = meals.find((m) => m.id === mealId);
       const newOptionIndex = meal ? meal.options.length : 0;
 
-      // Crear la nueva opción
-      const { data: optionData, error: optionError } = await supabase
-        .from('meal_options')
-        .insert({
-          meal_id: mealId,
-          name: optionName,
-          option_index: newOptionIndex,
-        })
-        .select()
-        .single();
-
-      if (optionError || !optionData) throw optionError;
-
-      // Insertar ingredientes
-      const ingredientsToInsert = ingredients.map((ing, idx) => ({
-        option_id: optionData.id,
+      // Preparar ingredientes como JSONB
+      const ingredientsJsonb = ingredients.map((ing) => ({
         name: ing.name,
         quantity: ing.quantity || '~100g',
         portion: ing.portion || '',
-        sort_order: idx,
       }));
 
-      await supabase.from('meal_ingredients').insert(ingredientsToInsert);
+      // Crear la opción en meal_options con ingredients JSONB
+      const { error: optionError } = await supabase.from('meal_options').insert({
+        meal_id: mealId,
+        user_id: user.id,
+        name: optionName,
+        ingredients: ingredientsJsonb,
+        position: newOptionIndex,
+        is_selected: false,
+      });
 
-      // Actualizar la comida para seleccionar la nueva opción
-      await supabase.from('meals').update({ selected_option: newOptionIndex }).eq('id', mealId);
+      if (optionError) throw optionError;
 
       // Refrescar datos
       fetchData();
