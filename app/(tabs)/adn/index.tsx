@@ -12,6 +12,7 @@ import {
   Dimensions,
   Alert,
   Share,
+  TextInput,
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -31,8 +32,12 @@ import {
   LogOut,
   Trophy,
   Shield,
+  Camera,
+  ImageIcon,
+  Pencil,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { supabase } from '../../../lib/supabase';
 import cloudflareStream from '../../../services/cloudflare/stream';
@@ -178,6 +183,12 @@ export default function AdnScreen() {
 
   // Share modal state
   const [shareModalVisible, setShareModalVisible] = useState(false);
+
+  // Edit profile modal state
+  const [editProfileVisible, setEditProfileVisible] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editAvatarUri, setEditAvatarUri] = useState<string | null>(null);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
 
   // Record viewer state
   const [recordViewerVisible, setRecordViewerVisible] = useState(false);
@@ -571,6 +582,122 @@ export default function AdnScreen() {
   }, [fetchData]);
 
   // -------------------------------------------------------------------------
+  // EDIT PROFILE - Nombre y Foto
+  // -------------------------------------------------------------------------
+  const openEditProfile = () => {
+    setEditName(profile?.display_name || '');
+    setEditAvatarUri(null);
+    setEditProfileVisible(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
+
+  const pickImageFromGallery = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permiso requerido', 'Necesitamos acceso a tu galería para seleccionar una foto.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      setEditAvatarUri(result.assets[0].uri);
+    }
+  };
+
+  const takePhoto = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permiso requerido', 'Necesitamos acceso a tu cámara para tomar una foto.');
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      setEditAvatarUri(result.assets[0].uri);
+    }
+  };
+
+  const saveProfile = async () => {
+    if (!user || !canSave) return;
+
+    setIsSavingProfile(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    try {
+      let avatarUrl = profile?.avatar_url || null;
+
+      // Subir nueva imagen si se seleccionó una
+      if (editAvatarUri) {
+        // Subir a Cloudflare R2
+        const R2_PUBLIC_URL = process.env.EXPO_PUBLIC_CLOUDFLARE_R2_PUBLIC_URL;
+        const fileName = `avatars/${user.id}_${Date.now()}.jpg`;
+
+        // Fetch la imagen como blob
+        const response = await fetch(editAvatarUri);
+        const blob = await response.blob();
+
+        // Subir usando el worker de Cloudflare
+        const uploadResponse = await fetch(`${R2_PUBLIC_URL}/upload`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'image/jpeg',
+            'X-File-Name': fileName,
+          },
+          body: blob,
+        });
+
+        if (uploadResponse.ok) {
+          const data = await uploadResponse.json();
+          avatarUrl = data.url || `${R2_PUBLIC_URL}/${fileName}`;
+        } else {
+          console.warn('Error subiendo avatar, usando imagen local');
+        }
+      }
+
+      // Actualizar perfil en Supabase
+      const { error } = await supabase
+        .from('user_profiles')
+        .update({
+          display_name: editName.trim() || profile?.display_name,
+          avatar_url: avatarUrl,
+        })
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      // Actualizar estado local
+      setProfile((prev) =>
+        prev
+          ? {
+              ...prev,
+              display_name: editName.trim() || prev.display_name,
+              avatar_url: avatarUrl,
+            }
+          : prev
+      );
+
+      setEditProfileVisible(false);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (error) {
+      console.error('Error guardando perfil:', error);
+      Alert.alert('Error', 'No se pudo guardar el perfil. Intenta de nuevo.');
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
+
+  // -------------------------------------------------------------------------
   // VIDEO VISIBILITY TOGGLE - Público ↔ Privado según MASTER
   // -------------------------------------------------------------------------
   const toggleVideoVisibility = async (video: Video) => {
@@ -852,8 +979,10 @@ export default function AdnScreen() {
           <View className="flex-row items-start w-full">
             {/* Columna izquierda: Avatar + Badge PRO */}
             <View className="items-center">
-              {/* Avatar con Fire Ring */}
-              <View
+              {/* Avatar con Fire Ring - Tocable para editar */}
+              <TouchableOpacity
+                onPress={isOwner ? openEditProfile : undefined}
+                activeOpacity={isOwner ? 0.8 : 1}
                 className="w-24 h-24 rounded-full items-center justify-center"
                 style={{
                   borderWidth: 3,
@@ -885,7 +1014,13 @@ export default function AdnScreen() {
                     </LinearGradient>
                   )}
                 </View>
-              </View>
+                {/* Icono de editar sobre el avatar */}
+                {isOwner && (
+                  <View className="absolute bottom-0 right-0 w-7 h-7 bg-fire-red rounded-full items-center justify-center border-2 border-black">
+                    <Pencil size={12} color="#fff" />
+                  </View>
+                )}
+              </TouchableOpacity>
 
               {/* Badge PRO/FREE debajo del avatar */}
               <View
@@ -912,17 +1047,24 @@ export default function AdnScreen() {
 
             {/* Columna derecha: Nombre + Sport Badges */}
             <View className="flex-1 ml-4 justify-center">
-              {/* Nombre con Fire Glow */}
-              <Text
-                className="text-2xl font-black text-white uppercase tracking-tight"
-                style={{
-                  textShadowColor: '#F97316',
-                  textShadowOffset: { width: 0, height: 0 },
-                  textShadowRadius: 10,
-                }}
+              {/* Nombre con Fire Glow - Tocable para editar */}
+              <TouchableOpacity
+                onPress={isOwner ? openEditProfile : undefined}
+                activeOpacity={isOwner ? 0.8 : 1}
+                className="flex-row items-center"
               >
-                {profile?.display_name || 'ATLETA'}
-              </Text>
+                <Text
+                  className="text-2xl font-black text-white uppercase tracking-tight"
+                  style={{
+                    textShadowColor: '#F97316',
+                    textShadowOffset: { width: 0, height: 0 },
+                    textShadowRadius: 10,
+                  }}
+                >
+                  {profile?.display_name || 'ATLETA'}
+                </Text>
+                {isOwner && <Pencil size={14} color="#71717a" className="ml-2" />}
+              </TouchableOpacity>
 
               {/* Sport Badges */}
               <View className="mt-3">
@@ -1740,6 +1882,97 @@ export default function AdnScreen() {
               <Text className="text-red-400 font-bold uppercase tracking-widest text-sm">
                 Quitar de Records
               </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* MODAL: Editar Perfil */}
+      <Modal
+        visible={editProfileVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setEditProfileVisible(false)}
+      >
+        <View className="flex-1 bg-black/90 justify-end">
+          <View className="bg-zinc-900 rounded-t-3xl p-6 border-t border-zinc-800">
+            {/* Header */}
+            <View className="flex-row items-center justify-between mb-6">
+              <Text className="text-xl font-bold text-white">Editar Perfil</Text>
+              <TouchableOpacity onPress={() => setEditProfileVisible(false)}>
+                <X size={24} color="#71717a" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Avatar Preview + Botones */}
+            <View className="items-center mb-6">
+              <View
+                className="w-28 h-28 rounded-full items-center justify-center mb-4"
+                style={{ borderWidth: 3, borderColor: '#F97316' }}
+              >
+                <View className="w-24 h-24 rounded-full bg-zinc-800 overflow-hidden">
+                  {editAvatarUri ? (
+                    <Image source={{ uri: editAvatarUri }} className="w-full h-full" resizeMode="cover" />
+                  ) : profile?.avatar_url ? (
+                    <Image source={{ uri: profile.avatar_url }} className="w-full h-full" resizeMode="cover" />
+                  ) : (
+                    <LinearGradient
+                      colors={['#DC2626', '#F97316']}
+                      className="w-full h-full items-center justify-center"
+                    >
+                      <Text className="text-white text-4xl font-black">
+                        {editName?.charAt(0) || profile?.display_name?.charAt(0) || 'A'}
+                      </Text>
+                    </LinearGradient>
+                  )}
+                </View>
+              </View>
+
+              {/* Botones de foto */}
+              <View className="flex-row gap-3">
+                <TouchableOpacity
+                  onPress={takePhoto}
+                  className="flex-row items-center gap-2 px-4 py-2 bg-zinc-800 rounded-full"
+                >
+                  <Camera size={16} color="#F97316" />
+                  <Text className="text-white font-medium text-sm">Cámara</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={pickImageFromGallery}
+                  className="flex-row items-center gap-2 px-4 py-2 bg-zinc-800 rounded-full"
+                >
+                  <ImageIcon size={16} color="#F97316" />
+                  <Text className="text-white font-medium text-sm">Galería</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Input Nombre */}
+            <View className="mb-6">
+              <Text className="text-zinc-400 text-sm mb-2">Nombre</Text>
+              <TextInput
+                value={editName}
+                onChangeText={setEditName}
+                placeholder="Tu nombre"
+                placeholderTextColor="#52525b"
+                className="bg-zinc-800 text-white text-lg p-4 rounded-xl border border-zinc-700"
+                autoCapitalize="words"
+              />
+            </View>
+
+            {/* Botón Guardar */}
+            <TouchableOpacity
+              onPress={saveProfile}
+              disabled={isSavingProfile}
+              className={`py-4 rounded-xl ${isSavingProfile ? 'bg-zinc-700' : 'bg-fire-red'}`}
+            >
+              {isSavingProfile ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text className="text-white text-center font-bold text-lg uppercase tracking-widest">
+                  Guardar
+                </Text>
+              )}
             </TouchableOpacity>
           </View>
         </View>
