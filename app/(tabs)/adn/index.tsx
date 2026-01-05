@@ -639,9 +639,24 @@ export default function AdnScreen() {
 
       // Subir nueva imagen si se seleccionó una
       if (editAvatarUri) {
-        // Subir a Cloudflare R2
         const R2_PUBLIC_URL = process.env.EXPO_PUBLIC_CLOUDFLARE_R2_PUBLIC_URL;
         const fileName = `avatars/${user.id}_${Date.now()}.jpg`;
+
+        // Borrar avatar anterior de R2 si existe
+        const oldAvatarUrl = profile?.avatar_url;
+        if (oldAvatarUrl && oldAvatarUrl.includes(R2_PUBLIC_URL || '')) {
+          try {
+            // Extraer el path del archivo desde la URL
+            const oldFileName = oldAvatarUrl.replace(`${R2_PUBLIC_URL}/`, '');
+            await fetch(`${R2_PUBLIC_URL}/delete`, {
+              method: 'DELETE',
+              headers: { 'X-File-Name': oldFileName },
+            });
+            console.log('🗑️ Avatar anterior eliminado:', oldFileName);
+          } catch (deleteError) {
+            console.warn('Error eliminando avatar anterior:', deleteError);
+          }
+        }
 
         // Fetch la imagen como blob
         const response = await fetch(editAvatarUri);
