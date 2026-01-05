@@ -400,7 +400,9 @@ ${progressPhotoData ? '- USA los datos del registro de progreso si son más reci
                            RESPUESTA REQUERIDA
 ═══════════════════════════════════════════════════════════════════════════════
 RESPONDE ÚNICAMENTE CON ESTE JSON (sin markdown, sin texto adicional):
-${hasMeals ? `{
+${
+  hasMeals
+    ? `{
   "totalCalories": 2500,
   "totalProtein": 180,
   "totalCarbs": 250,
@@ -412,13 +414,15 @@ ${hasMeals ? `{
     "fat": 17
   },
   "reasoning": "Explicación técnica de 1-2 líneas de por qué estos macros específicos"
-}` : `{
+}`
+    : `{
   "totalCalories": 2500,
   "totalProtein": 180,
   "totalCarbs": 250,
   "totalFat": 70,
   "reasoning": "Explicación técnica de 1-2 líneas de por qué estos macros específicos (sin perMeal porque no hay comidas configuradas)"
-}`}`;
+}`
+}`;
 
     const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
       method: 'POST',
@@ -1199,7 +1203,7 @@ export async function recalculateAllMealsForNewCount(
       fat: Math.round(dailyMacros.totalFat / (profile.mealCount || 3)),
       calories: Math.round(dailyMacros.totalCalories / (profile.mealCount || 3)),
     };
-    
+
     console.warn(
       `🔄 Recalculando ${meals.length} comidas con ${profile.mealCount} comidas/día -> ${defaultPerMeal.protein}P ${defaultPerMeal.carbs}C ${defaultPerMeal.fat}G por comida`
     );

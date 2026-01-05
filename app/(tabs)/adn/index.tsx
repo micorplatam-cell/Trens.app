@@ -405,11 +405,11 @@ export default function AdnScreen() {
         // Si no hay cached_daily_macros pero sí hay datos de perfil, calcular macros
         let cachedMacros = profileData.cached_daily_macros;
         const hasMeals = (mealCount || 0) > 0;
-        
+
         if (!cachedMacros && profileData.weight && profileData.height && profileData.goal) {
           try {
             console.log('🧠 ADN: Calculando macros objetivo con toda la información disponible...');
-            
+
             // Extraer datos de la foto de progreso si existe
             const progressSnapshot = latestProgressPhoto?.snapshot as any;
             let latestProgressPhotoData = undefined;
@@ -426,7 +426,7 @@ export default function AdnScreen() {
               .from('body_measurements')
               .select('name, value, is_dominant')
               .eq('user_id', user.id);
-            
+
             const dailyMacros = await calculateUserDailyMacros({
               weight: profileData.weight,
               height: profileData.height,
@@ -443,9 +443,9 @@ export default function AdnScreen() {
               bodyMeasurements: measurementsForCalc || undefined,
               latestProgressPhoto: latestProgressPhotoData,
             });
-            
+
             cachedMacros = dailyMacros;
-            
+
             // Guardar en Supabase para sincronización
             await supabase
               .from('user_profiles')
@@ -455,13 +455,13 @@ export default function AdnScreen() {
                 cached_macros_updated_at: new Date().toISOString(),
               })
               .eq('user_id', user.id);
-            
+
             console.log('💾 ADN: Macros objetivo guardados en Supabase');
           } catch (error) {
             console.error('Error calculating default macros:', error);
           }
         }
-        
+
         // Agregar campos calculados desde GYM y PLAN
         setProfile({
           ...profileData,
@@ -848,26 +848,33 @@ export default function AdnScreen() {
             }}
           />
 
-          {/* Avatar con Fire Ring */}
-          <View
-            className="w-28 h-28 rounded-full mb-4 items-center justify-center"
-            style={{
-              borderWidth: 3,
-              borderColor: '#F97316',
-              shadowColor: '#F97316',
-              shadowOffset: { width: 0, height: 0 },
-              shadowOpacity: 0.8,
-              shadowRadius: 15,
-              elevation: 10,
-            }}
-          >
-            <View className="w-24 h-24 rounded-full bg-zinc-900 overflow-hidden">
-              {profile?.avatar_url ? (
-                <Image
-                  source={{ uri: profile.avatar_url }}
-                  className="w-full h-full"
-                  resizeMode="cover"
-                />
+          {/* Avatar con Fire Ring + Sport Badges a la izquierda */}
+          <View className="flex-row items-center justify-center mb-4">
+            {/* Sport Badges - Apiladas verticalmente a la izquierda */}
+            <View className="mr-4">
+              <SportBadges vertical />
+            </View>
+
+            {/* Avatar con Fire Ring */}
+            <View
+              className="w-28 h-28 rounded-full items-center justify-center"
+              style={{
+                borderWidth: 3,
+                borderColor: '#F97316',
+                shadowColor: '#F97316',
+                shadowOffset: { width: 0, height: 0 },
+                shadowOpacity: 0.8,
+                shadowRadius: 15,
+                elevation: 10,
+              }}
+            >
+              <View className="w-24 h-24 rounded-full bg-zinc-900 overflow-hidden">
+                {profile?.avatar_url ? (
+                  <Image
+                    source={{ uri: profile.avatar_url }}
+                    className="w-full h-full"
+                    resizeMode="cover"
+                  />
               ) : (
                 <LinearGradient
                   colors={['#DC2626', '#F97316']}
@@ -882,6 +889,7 @@ export default function AdnScreen() {
               )}
             </View>
           </View>
+          </View>
 
           {/* Nombre con Fire Glow */}
           <Text
@@ -894,11 +902,6 @@ export default function AdnScreen() {
           >
             {profile?.display_name || 'ATLETA'}
           </Text>
-
-          {/* Sport Badges - Insignias de deportes */}
-          <View className="mt-2">
-            <SportBadges />
-          </View>
 
           {/* Badge PRO/FREE con Fire Style */}
           <View

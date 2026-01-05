@@ -86,7 +86,11 @@ function AddSportBadge({ onPress }: AddSportBadgeProps) {
 // ============================================================================
 // SPORT BADGES CONTAINER
 // ============================================================================
-export function SportBadges() {
+interface SportBadgesProps {
+  vertical?: boolean;
+}
+
+export function SportBadges({ vertical = false }: SportBadgesProps) {
   const { activeSport, allSports, userSports, setActiveSport } = useSport();
   const [modalVisible, setModalVisible] = useState(false);
 
@@ -105,7 +109,7 @@ export function SportBadges() {
 
   return (
     <>
-      <View className="flex-row items-center justify-center flex-wrap">
+      <View className={vertical ? 'flex-col items-start gap-2' : 'flex-row items-center justify-center flex-wrap'}>
         {/* Insignias de deportes del usuario */}
         {mySports.map((sport) => (
           <SportBadge
