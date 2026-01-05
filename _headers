@@ -1,6 +1,7 @@
 # Cloudflare Pages Headers
 # https://developers.cloudflare.com/pages/configuration/headers/
 
+# Global headers for all requests
 /*
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
@@ -10,14 +11,84 @@
   Permissions-Policy: camera=(), microphone=(), geolocation=(self)
   Cross-Origin-Opener-Policy: same-origin-allow-popups
 
+# HTML files - NEVER cache
+/*.html
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Expires: 0
+
+# Root and all routes (Expo Router generates index.html in subdirs)
+/
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Expires: 0
+
+/adn
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Expires: 0
+
+/adn/*
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Expires: 0
+
+/gym
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Expires: 0
+
+/gym/*
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Expires: 0
+
+/pro
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Expires: 0
+
+/pro/*
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Expires: 0
+
+/feed
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Expires: 0
+
+/feed/*
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Expires: 0
+
+/plan
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Expires: 0
+
+/plan/*
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Expires: 0
+
+/profile/*
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Expires: 0
+
+# Service Worker
 /sw.js
-  Cache-Control: public, max-age=0, must-revalidate
+  Cache-Control: no-cache, no-store, must-revalidate
   Service-Worker-Allowed: /
 
+# Manifest
 /manifest.json
-  Cache-Control: public, max-age=0, must-revalidate
+  Cache-Control: no-cache, no-store, must-revalidate
   Content-Type: application/manifest+json
 
+# Static assets - cache forever (they have hash in filename)
 /icons/*
   Cache-Control: public, max-age=31536000, immutable
 
@@ -27,5 +98,14 @@
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
 
+# Expo bundles have content hash, can be cached
+/_expo/static/css/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# JS bundles - use content hash so they can be cached
+/_expo/static/js/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Protection script - no cache
 /protection.js
-  Cache-Control: public, max-age=0, must-revalidate
+  Cache-Control: no-cache, no-store, must-revalidate

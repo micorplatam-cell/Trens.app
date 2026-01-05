@@ -14,6 +14,8 @@ import {
   NativeSyntheticEvent,
   NativeScrollEvent,
   Platform,
+  ScrollView,
+  Animated as RNAnimated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -48,6 +50,8 @@ import Animated, {
   interpolate,
   Extrapolation,
   SharedValue,
+  runOnJS,
+  withSpring,
 } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
 import spotify, {
@@ -963,15 +967,15 @@ export default function SpotifyModal({
   // -------------------------------------------------------------------------
   // PAN RESPONDER - Cerrar deslizando hacia abajo desde el header
   // -------------------------------------------------------------------------
-  const translateY = useSharedValue(0);
+  const panY = useRef(new RNAnimated.Value(0)).current;
 
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 5,
-      onPanResponderMove: (_, gestureState) => {
+      onPanResponderMove: (e, gestureState) => {
         if (gestureState.dy > 0) {
-          translateY.value = gestureState.dy;
+          panY.setValue(gestureState.dy);
         }
       },
       onPanResponderRelease: (_, gestureState) => {
@@ -982,22 +986,25 @@ export default function SpotifyModal({
         } else {
           // Volver arriba
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          translateY.value = withTiming(0, { duration: 200 });
+          RNAnimated.spring(panY, {
+            toValue: 0,
+            useNativeDriver: false,
+          }).start();
         }
       },
     })
   ).current;
 
-  // Resetear translateY cuando el modal se abre
+  // Resetear panY cuando el modal se abre
   useEffect(() => {
     if (visible) {
-      translateY.value = 0;
+      panY.setValue(0);
     }
-  }, [visible, translateY]);
+  }, [visible]);
 
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: translateY.value }],
-  }));
+  const animatedStyle = {
+    transform: [{ translateY: panY }],
+  };
 
   // -------------------------------------------------------------------------
   // VERIFICAR SI EL TRACK ACTUAL ESTÁ EN FAVORITOS
@@ -1578,7 +1585,7 @@ export default function SpotifyModal({
       <View className="flex-1">
         {/* NOW PLAYING TAB */}
         {activeTab === 'now-playing' && (
-          <Animated.View entering={FadeIn.duration(200)} className="flex-1">
+          <View className="flex-1">
             {/* Fondo animado con carátula */}
             <AnimatedAlbumBackground
               albumArt={currentTrack?.albumArt}
@@ -1690,12 +1697,12 @@ export default function SpotifyModal({
                 </View>
               )}
             </View>
-          </Animated.View>
+          </View>
         )}
 
         {/* PLAYLISTS TAB */}
         {activeTab === 'playlists' && (
-          <Animated.View entering={FadeIn.duration(200)} className="flex-1">
+          <View className="flex-1">
             {showPlaylistTracks && selectedPlaylist ? (
               // Tracks de playlist seleccionada
               <View className="flex-1">
@@ -1741,20 +1748,10 @@ export default function SpotifyModal({
                     renderItem={({ item, index }) =>
                       renderTrackItemWithContext(item, index, tracks, 'playlist')
                     }
-                    showsVerticalScrollIndicator={false}
+                    style={{ flex: 1 }}
                     contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
                     onEndReached={loadMorePlaylistTracks}
                     onEndReachedThreshold={0.3}
-                    initialNumToRender={10}
-                    maxToRenderPerBatch={8}
-                    windowSize={3}
-                    removeClippedSubviews={true}
-                    getItemLayout={(_, index) => ({
-                      length: 60,
-                      offset: 60 * index,
-                      index,
-                    })}
-                    updateCellsBatchingPeriod={100}
                     ListFooterComponent={
                       loadingMore ? (
                         <View className="py-4 items-center">
@@ -1778,9 +1775,9 @@ export default function SpotifyModal({
                 ) : (
                   <FlatList
                     data={playlists}
-                    keyExtractor={(item, index) => `${item.id}_${index}`}
+                    keyExtractor={(item) => item.id}
                     renderItem={renderPlaylistItem}
-                    showsVerticalScrollIndicator={false}
+                    style={{ flex: 1 }}
                     contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
                     ListEmptyComponent={
                       <View className="items-center justify-center py-20">
@@ -1795,12 +1792,12 @@ export default function SpotifyModal({
                 )}
               </View>
             )}
-          </Animated.View>
+          </View>
         )}
 
         {/* LIKED SONGS TAB */}
         {activeTab === 'liked' && (
-          <Animated.View entering={FadeIn.duration(200)} className="flex-1">
+          <View className="flex-1">
             {/* Header Liked Songs */}
             <LinearGradient colors={['#5B21B6', '#1E1B4B', '#000']} className="px-4 pt-4 pb-6">
               <View className="flex-row items-center">
@@ -1825,48 +1822,42 @@ export default function SpotifyModal({
                 <ActivityIndicator size="large" color="#1DB954" />
               </View>
             ) : (
-              <FlatList
-                data={likedSongs}
-                keyExtractor={(item) => item.id}
-                renderItem={({ item, index }) =>
-                  renderTrackItemWithContext(item, index, likedSongs, 'liked')
-                }
-                showsVerticalScrollIndicator={false}
-                contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
-                onEndReached={loadMoreLikedSongs}
-                onEndReachedThreshold={0.3}
-                initialNumToRender={10}
-                maxToRenderPerBatch={8}
-                windowSize={3}
-                removeClippedSubviews={true}
-                getItemLayout={(_, index) => ({
-                  length: 60,
-                  offset: 60 * index,
-                  index,
-                })}
-                updateCellsBatchingPeriod={100}
-                ListFooterComponent={
-                  loadingMore ? (
-                    <View className="py-4 items-center">
-                      <ActivityIndicator size="small" color="#1DB954" />
-                      <Text className="text-zinc-500 text-xs mt-2">Cargando más canciones...</Text>
+              <View className="flex-1">
+                <FlatList
+                  data={likedSongs}
+                  keyExtractor={(item) => item.id}
+                  renderItem={({ item, index }) =>
+                    renderTrackItemWithContext(item, index, likedSongs, 'liked')
+                  }
+                  style={{ flex: 1 }}
+                  contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
+                  onEndReached={loadMoreLikedSongs}
+                  onEndReachedThreshold={0.3}
+                  ListFooterComponent={
+                    loadingMore ? (
+                      <View className="py-4 items-center">
+                        <ActivityIndicator size="small" color="#1DB954" />
+                        <Text className="text-zinc-500 text-xs mt-2">
+                          Cargando más canciones...
+                        </Text>
+                      </View>
+                    ) : null
+                  }
+                  ListEmptyComponent={
+                    <View className="items-center justify-center py-20">
+                      <Heart size={48} color="#71717A" />
+                      <Text className="text-zinc-400 mt-4">No tienes canciones guardadas</Text>
                     </View>
-                  ) : null
-                }
-                ListEmptyComponent={
-                  <View className="items-center justify-center py-20">
-                    <Heart size={48} color="#71717A" />
-                    <Text className="text-zinc-400 mt-4">No tienes canciones guardadas</Text>
-                  </View>
-                }
-              />
+                  }
+                />
+              </View>
             )}
-          </Animated.View>
+          </View>
         )}
 
         {/* SEARCH TAB */}
         {activeTab === 'search' && (
-          <Animated.View entering={FadeIn.duration(200)} className="flex-1">
+          <View className="flex-1">
             {/* Search Bar - Búsqueda en tiempo real */}
             <View className="px-4 pt-4 pb-2">
               <View className="flex-row items-center bg-zinc-900 rounded-xl px-4 py-3 border border-zinc-800">
@@ -1894,15 +1885,17 @@ export default function SpotifyModal({
             </View>
 
             {searchResults.length > 0 ? (
-              <FlatList
-                data={searchResults}
-                keyExtractor={(item, index) => `${item.id}_${index}`}
-                renderItem={({ item, index }) =>
-                  renderTrackItemWithContext(item, index, searchResults, 'search')
-                }
-                showsVerticalScrollIndicator={false}
-                contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
-              />
+              <View className="flex-1">
+                <FlatList
+                  data={searchResults}
+                  keyExtractor={(item) => item.id}
+                  renderItem={({ item, index }) =>
+                    renderTrackItemWithContext(item, index, searchResults, 'search')
+                  }
+                  style={{ flex: 1 }}
+                  contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
+                />
+              </View>
             ) : (
               <View className="flex-1 items-center justify-center px-8">
                 <Search size={48} color="#71717A" />
@@ -1911,7 +1904,7 @@ export default function SpotifyModal({
                 </Text>
               </View>
             )}
-          </Animated.View>
+          </View>
         )}
 
         {/* Mini Player (si hay track y no está en Now Playing) */}
@@ -2000,9 +1993,13 @@ export default function SpotifyModal({
   return (
     <Modal visible={visible} animationType="slide" transparent={true} onRequestClose={onClose}>
       <View className="flex-1 bg-transparent justify-end">
-        <Animated.View
+        <RNAnimated.View
           className="bg-black rounded-t-3xl"
-          style={[{ height: '95%', backgroundColor: '#000' }, animatedStyle]}
+          style={[
+            { height: '95%', backgroundColor: '#000' },
+            Platform.OS === 'web' ? { overflow: 'hidden' } : {},
+            animatedStyle,
+          ]}
         >
           {/* Header - Draggable para cerrar */}
           <View
@@ -2025,30 +2022,54 @@ export default function SpotifyModal({
               <View className="w-8 h-8 bg-[#1DB954] rounded-full items-center justify-center mr-2">
                 <Music size={16} color="#000" />
               </View>
-              <Text className="text-white font-bold text-lg">Spotify</Text>
+              <View>
+                <Text className="text-white font-bold text-lg">Spotify</Text>
+                <Text className="text-zinc-600 text-[10px]">v3.5</Text>
+              </View>
             </View>
 
             {spotifyConnected ? (
-              <TouchableOpacity
+              <Pressable
                 onPress={() => {
-                  Alert.alert(
-                    '🔄 RECONECTAR SPOTIFY',
-                    'Si no ves tus canciones recientes en "Me Gusta", reconecta para refrescar los permisos.',
-                    [
-                      { text: 'Cancelar', style: 'cancel' },
-                      {
-                        text: 'Reconectar',
-                        style: 'destructive',
-                        onPress: onSpotifyDisconnect,
-                      },
-                    ]
-                  );
+                  console.log('🎵 Spotify Reconectar button pressed');
+                  if (Platform.OS === 'web') {
+                    // En web, usar confirm nativo
+                    const confirmed = window.confirm(
+                      '🔄 RECONECTAR SPOTIFY\n\nSi no ves tus canciones recientes en "Me Gusta", reconecta para refrescar los permisos.\n\n¿Deseas reconectar?'
+                    );
+                    if (confirmed && onSpotifyDisconnect) {
+                      onSpotifyDisconnect();
+                    }
+                  } else {
+                    Alert.alert(
+                      '🔄 RECONECTAR SPOTIFY',
+                      'Si no ves tus canciones recientes en "Me Gusta", reconecta para refrescar los permisos.',
+                      [
+                        { text: 'Cancelar', style: 'cancel' },
+                        {
+                          text: 'Reconectar',
+                          style: 'destructive',
+                          onPress: onSpotifyDisconnect,
+                        },
+                      ]
+                    );
+                  }
                 }}
-                className="px-3 py-2 bg-zinc-900 rounded-full flex-row items-center"
+                style={({ pressed }) => [
+                  {
+                    paddingHorizontal: 12,
+                    paddingVertical: 8,
+                    backgroundColor: pressed ? '#27272a' : '#18181b',
+                    borderRadius: 9999,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    cursor: 'pointer' as any,
+                  },
+                ]}
               >
                 <Wifi size={14} color="#1DB954" />
                 <Text className="text-zinc-400 text-xs ml-1.5">Reconectar</Text>
-              </TouchableOpacity>
+              </Pressable>
             ) : (
               <View className="w-10" />
             )}
@@ -2069,7 +2090,7 @@ export default function SpotifyModal({
           ) : (
             renderNotConnectedView()
           )}
-        </Animated.View>
+        </RNAnimated.View>
       </View>
     </Modal>
   );

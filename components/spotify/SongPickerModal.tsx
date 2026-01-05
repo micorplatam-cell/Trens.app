@@ -1,6 +1,7 @@
 // =============================================================================
 // SONG PICKER MODAL - Selector de canciones de Spotify
 // Permite buscar y seleccionar canciones con punto de inicio personalizado
+// v2.9.0 - WebFlexContainer for proper nested flex scrolling - Jan 4 2026
 // =============================================================================
 
 import React, { useState, useCallback, useEffect, memo, useRef } from 'react';
@@ -16,6 +17,8 @@ import {
   PanResponder,
   GestureResponderEvent,
   PanResponderGestureState,
+  Platform,
+  ScrollView,
 } from 'react-native';
 import {
   X,
@@ -161,6 +164,13 @@ export function SongPickerModal({
   onSelectSong,
   currentTrack: _currentTrack,
 }: SongPickerModalProps) {
+  // Debug: v2.8 scroll fix deployed
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      console.log('🎵 SongPickerModal v2.8 - Web fixed position modal with native HTML scroll');
+    }
+  }, []);
+
   const [activeTab, setActiveTab] = useState<'search' | 'playlists' | 'liked'>('search');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SpotifyTrack[]>([]);
@@ -806,7 +816,7 @@ export function SongPickerModal({
     // Si está viendo tracks de una playlist
     if (selectedPlaylist) {
       return (
-        <>
+        <View className="flex-1">
           <TouchableOpacity
             onPress={handleBackFromPlaylist}
             className="flex-row items-center px-5 py-3 border-b border-zinc-800"
@@ -828,11 +838,12 @@ export function SongPickerModal({
                   onTogglePlay={() => handleToggleListPreview(item)}
                 />
               )}
+              style={{ flex: 1 }}
               contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 100 }}
               showsVerticalScrollIndicator={false}
             />
           )}
-        </>
+        </View>
       );
     }
 
@@ -840,7 +851,7 @@ export function SongPickerModal({
     switch (activeTab) {
       case 'search':
         return (
-          <>
+          <View className="flex-1">
             {/* Search Input - Búsqueda en tiempo real */}
             <View className="px-5 pb-4">
               <View className="flex-row items-center bg-zinc-800 rounded-xl px-4 py-3">
@@ -871,6 +882,7 @@ export function SongPickerModal({
                     onTogglePlay={() => handleToggleListPreview(item)}
                   />
                 )}
+                style={{ flex: 1 }}
                 contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 100 }}
                 showsVerticalScrollIndicator={false}
               />
@@ -882,45 +894,105 @@ export function SongPickerModal({
                 </Text>
               </View>
             )}
-          </>
+          </View>
         );
 
       case 'playlists':
-        return loading ? (
-          <ActivityIndicator color="#1DB954" className="mt-10" />
-        ) : (
-          <FlatList
-            data={playlists}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => (
-              <PlaylistItem playlist={item} onPress={() => setSelectedPlaylist(item)} />
+        return (
+          <View className="flex-1">
+            {loading ? (
+              <ActivityIndicator color="#1DB954" className="mt-10" />
+            ) : (
+              <FlatList
+                data={playlists}
+                keyExtractor={(item) => item.id}
+                renderItem={({ item }) => (
+                  <PlaylistItem playlist={item} onPress={() => setSelectedPlaylist(item)} />
+                )}
+                style={{ flex: 1 }}
+                contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 100 }}
+                showsVerticalScrollIndicator={false}
+              />
             )}
-            contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 100 }}
-            showsVerticalScrollIndicator={false}
-          />
+          </View>
         );
 
       case 'liked':
-        return loading ? (
-          <ActivityIndicator color="#1DB954" className="mt-10" />
-        ) : (
-          <FlatList
-            data={likedSongs}
-            keyExtractor={(item) => item.uri}
-            renderItem={({ item }) => (
-              <TrackItem
-                track={item}
-                isPlaying={previewingTrackUri === item.uri}
-                onAdd={() => handleSelectTrack(item)}
-                onTogglePlay={() => handleToggleListPreview(item)}
+        return (
+          <View className="flex-1">
+            {loading ? (
+              <ActivityIndicator color="#1DB954" className="mt-10" />
+            ) : (
+              <FlatList
+                data={likedSongs}
+                keyExtractor={(item) => item.uri}
+                renderItem={({ item }) => (
+                  <TrackItem
+                    track={item}
+                    isPlaying={previewingTrackUri === item.uri}
+                    onAdd={() => handleSelectTrack(item)}
+                    onTogglePlay={() => handleToggleListPreview(item)}
+                  />
+                )}
+                style={{ flex: 1 }}
+                contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 100 }}
+                showsVerticalScrollIndicator={false}
               />
             )}
-            contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 100 }}
-            showsVerticalScrollIndicator={false}
-          />
+          </View>
         );
     }
   };
+
+  // -------------------------------------------------------------------------
+  // MODAL CONTENT (shared between native and web)
+  // -------------------------------------------------------------------------
+  const renderModalContent = () => (
+    <>
+      {/* Header */}
+      <View className="flex-row items-center justify-between px-5 pt-5 pb-4 border-b border-zinc-800">
+        <View className="w-10" />
+        <Text className="text-white font-bold text-lg">Añadir canción</Text>
+        <TouchableOpacity
+          onPress={handleClose}
+          className="w-10 h-10 items-center justify-center rounded-full bg-zinc-800"
+        >
+          <X size={20} color="#A1A1AA" />
+        </TouchableOpacity>
+      </View>
+
+      {/* Tabs */}
+      <View className="flex-row border-b border-zinc-800">
+        {[
+          { id: 'search', label: 'Buscar' },
+          { id: 'playlists', label: 'Playlists' },
+          { id: 'liked', label: 'Me gusta' },
+        ].map((tab) => (
+          <TouchableOpacity
+            key={tab.id}
+            onPress={() => setActiveTab(tab.id as any)}
+            className={`flex-1 py-3 items-center border-b-2 ${
+              activeTab === tab.id ? 'border-green-500' : 'border-transparent'
+            }`}
+          >
+            <Text
+              className={`font-semibold ${
+                activeTab === tab.id ? 'text-green-500' : 'text-zinc-500'
+              }`}
+            >
+              {tab.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {/* Content */}
+      <View className="flex-1">{renderContent()}</View>
+
+      {/* Position Picker Overlay */}
+      {renderPositionPicker()}
+    </>
+  );
 
   // -------------------------------------------------------------------------
   // MAIN RENDER
@@ -941,50 +1013,9 @@ export function SongPickerModal({
         <Animated.View
           entering={SlideInDown.springify().damping(20)}
           exiting={SlideOutDown.duration(200)}
-          className="flex-1 bg-zinc-950 mt-12 rounded-t-3xl overflow-hidden"
+          className="flex-1 bg-zinc-950 mt-12 rounded-t-3xl"
         >
-          {/* Header */}
-          <View className="flex-row items-center justify-between px-5 pt-5 pb-4 border-b border-zinc-800">
-            <View className="w-10" />
-            <Text className="text-white font-bold text-lg">Añadir canción</Text>
-            <TouchableOpacity
-              onPress={handleClose}
-              className="w-10 h-10 items-center justify-center rounded-full bg-zinc-800"
-            >
-              <X size={20} color="#A1A1AA" />
-            </TouchableOpacity>
-          </View>
-
-          {/* Tabs */}
-          <View className="flex-row border-b border-zinc-800">
-            {[
-              { id: 'search', label: 'Buscar' },
-              { id: 'playlists', label: 'Playlists' },
-              { id: 'liked', label: 'Me gusta' },
-            ].map((tab) => (
-              <TouchableOpacity
-                key={tab.id}
-                onPress={() => setActiveTab(tab.id as any)}
-                className={`flex-1 py-3 items-center border-b-2 ${
-                  activeTab === tab.id ? 'border-green-500' : 'border-transparent'
-                }`}
-              >
-                <Text
-                  className={`font-semibold ${
-                    activeTab === tab.id ? 'text-green-500' : 'text-zinc-500'
-                  }`}
-                >
-                  {tab.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          {/* Content */}
-          <View className="flex-1">{renderContent()}</View>
-
-          {/* Position Picker Overlay */}
-          {renderPositionPicker()}
+          {renderModalContent()}
         </Animated.View>
       </Animated.View>
     </Modal>
@@ -992,3 +1023,4 @@ export function SongPickerModal({
 }
 
 export default SongPickerModal;
+// Scroll fix v2.7 - Web fixed position modal with native HTML scroll

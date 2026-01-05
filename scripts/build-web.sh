@@ -18,9 +18,10 @@ rm -rf dist
 echo "📦 Running Expo export..."
 npx expo export --platform web
 
-# Copy public assets
+# Copy public assets (EXCEPT index.html to preserve Expo's bundle reference)
 echo "📁 Copying public assets..."
-cp -r public/* dist/
+rsync -a --exclude='index.html' public/ dist/
+cp _headers dist/
 
 # Create OG image placeholder if not exists
 if [ ! -f "dist/og-image.png" ]; then

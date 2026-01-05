@@ -1,3 +1,48 @@
 // Service Worker mínimo - solo para PWA install
-self.addEventListener('install', () => self.skipWaiting());
-self.addEventListener('activate', () => self.clients.claim());
+// Cache version: 2026-01-04-v3 - FORCE UPDATE
+const CACHE_VERSION = '2026-01-04-v3';
+
+self.addEventListener('install', () => {
+  console.log('🔄 SW: Installing new version', CACHE_VERSION);
+  // Skip waiting to immediately become active
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', (event) => {
+  console.log('🔄 SW: Activating new version', CACHE_VERSION);
+  // Clear ALL caches on activation
+  event.waitUntil(
+    caches
+      .keys()
+      .then((cacheNames) => {
+        console.log('🗑️ SW: Found', cacheNames.length, 'caches to delete');
+        return Promise.all(
+          cacheNames.map((cacheName) => {
+            console.log('🗑️ SW: Deleting cache', cacheName);
+            return caches.delete(cacheName);
+          })
+        );
+      })
+      .then(() => {
+        console.log('✅ SW: All caches cleared, claiming clients');
+        return self.clients.claim();
+      })
+      .then(() => {
+        // Force refresh all open tabs
+        return self.clients.matchAll({ type: 'window' });
+      })
+      .then((clients) => {
+        clients.forEach((client) => {
+          console.log('🔄 SW: Reloading client', client.url);
+          client.postMessage({ type: 'CACHE_CLEARED', version: CACHE_VERSION });
+        });
+      })
+  );
+});
+
+// Network-first strategy - NEVER cache anything
+self.addEventListener('fetch', (event) => {
+  // Let all requests pass through to network
+  // Do not intercept or cache anything
+  return;
+});

@@ -544,7 +544,6 @@ class SpotifyService {
         headers: {
           Authorization: `Bearer ${this.accessToken}`,
           'Content-Type': 'application/json',
-          'Cache-Control': 'no-cache, no-store',
         },
         body: body ? JSON.stringify(body) : undefined,
       });

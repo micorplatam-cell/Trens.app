@@ -1,3 +1,4 @@
+// FORCE_REBUILD_1767570000
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Slot } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';

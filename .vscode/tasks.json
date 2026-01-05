@@ -58,7 +58,17 @@
       "group": "build"
     },
     {
-      "label": "🗄️ DB: List Tables",
+      "label": "� Deploy Fast (Web)",
+      "type": "shell",
+      "command": "npm run deploy:fast",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "�🗄️ DB: List Tables",
       "type": "shell",
       "command": "source .github/scripts/mega-power.sh && db-tables",
       "group": "test"

@@ -4,7 +4,7 @@
 // Funciona tanto en native como en web
 // ============================================================================
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { View, Text, ActivityIndicator, Platform } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
@@ -21,9 +21,17 @@ export default function SpotifyCallbackScreen() {
   const params = useLocalSearchParams();
   const [status, setStatus] = useState<'processing' | 'success' | 'error'>('processing');
   const [errorMessage, setErrorMessage] = useState<string>('');
+  const processedRef = useRef(false);
 
   useEffect(() => {
     const processCallback = async () => {
+      // Evitar procesamiento duplicado (React strict mode o re-renders)
+      if (processedRef.current) {
+        console.log('🎵 Spotify callback ya procesado, ignorando...');
+        return;
+      }
+      processedRef.current = true;
+
       console.log('🎵 Spotify callback recibido, params:', params);
 
       // En web, necesitamos procesar el código OAuth aquí

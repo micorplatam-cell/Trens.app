@@ -482,7 +482,7 @@ export function SpotifyOverlay() {
     console.log('🎵 handleSpotifyConnect: Calling spotify.authenticate()...');
     const success = await spotify.authenticate();
     console.log('🎵 handleSpotifyConnect: authenticate result =', success);
-    
+
     setSpotifyConnected(success);
     if (success) {
       const playback = await spotify.getPlaybackState();

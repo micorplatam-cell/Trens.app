@@ -63,4 +63,24 @@
   [role='button'] {
     touch-action: manipulation;
   }
+
+  /* ============================================
+     WEB SCROLL FIX FOR MODALS
+     React Native Web ScrollView in modals needs
+     explicit overflow and height handling
+     ============================================ */
+  [data-testid='scroll-view'],
+  [class*='r-1niwhzg'] /* RN ScrollView class */ {
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
 }
+
+/* Fix for React Native Web ScrollView in modals */
+@media screen {
+  .r-1niwhzg,
+  .css-1rynq56 > div[style*='flex: 1'] {
+    overflow-y: auto !important;
+  }
+}
+/* Build timestamp: 1767567531 */
