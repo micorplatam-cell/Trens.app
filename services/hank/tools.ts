@@ -3052,7 +3052,7 @@ export async function planUpdateIngredients(
     }));
 
     let finalIngredients = ingredientsWithId;
-    
+
     try {
       const calculatedIngredients = await calculateMacrosWithAI(ingredientsWithId);
       finalIngredients = calculatedIngredients.map((ing, idx) => ({
@@ -3080,9 +3080,9 @@ export async function planUpdateIngredients(
     // Actualizar ingredientes como JSONB en meals.ingredients
     const { error: updateError } = await supabase
       .from('meals')
-      .update({ 
+      .update({
         ingredients: finalIngredients,
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
       })
       .eq('id', mealId);
 
@@ -3318,7 +3318,9 @@ export async function planGetMealDetails(
     // Obtener todas las comidas con el modelo correcto
     const { data: meals, error } = await supabase
       .from('meals')
-      .select('id, name, scheduled_time, ingredients, calories, protein_g, carbs_g, fat_g, is_completed')
+      .select(
+        'id, name, scheduled_time, ingredients, calories, protein_g, carbs_g, fat_g, is_completed'
+      )
       .eq('user_id', userId)
       .order('scheduled_time', { ascending: true });
 
@@ -3468,17 +3470,23 @@ export async function planGetMealDetails(
 
     // Obtener ingredientes del JSONB
     const ingredients = targetMeal.ingredients || [];
-    const ingredientsText = ingredients.length > 0
-      ? ingredients.map((ing: any, idx: number) => {
-          const macros = ing.calories 
-            ? ` (${ing.calories}kcal | ${ing.protein || 0}P ${ing.carbs || 0}C ${ing.fat || 0}G)`
-            : '';
-          return `  ${idx + 1}. ${ing.name}: ${ing.quantity || '~100g'}${macros}`;
-        }).join('\n')
-      : '  Sin ingredientes configurados';
+    const ingredientsText =
+      ingredients.length > 0
+        ? ingredients
+            .map((ing: any, idx: number) => {
+              const macros = ing.calories
+                ? ` (${ing.calories}kcal | ${ing.protein || 0}P ${ing.carbs || 0}C ${ing.fat || 0}G)`
+                : '';
+              return `  ${idx + 1}. ${ing.name}: ${ing.quantity || '~100g'}${macros}`;
+            })
+            .join('\n')
+        : '  Sin ingredientes configurados';
 
     // Calcular totales de macros
-    let totalCals = 0, totalP = 0, totalC = 0, totalF = 0;
+    let totalCals = 0,
+      totalP = 0,
+      totalC = 0,
+      totalF = 0;
     ingredients.forEach((ing: any) => {
       totalCals += ing.calories || 0;
       totalP += ing.protein || 0;
@@ -3486,20 +3494,21 @@ export async function planGetMealDetails(
       totalF += ing.fat || 0;
     });
 
-    const totalsStr = totalCals > 0 
-      ? `\n\n📊 TOTALES: ${Math.round(totalCals)} kcal | ${Math.round(totalP)}g P | ${Math.round(totalC)}g C | ${Math.round(totalF)}g G`
-      : '';
+    const totalsStr =
+      totalCals > 0
+        ? `\n\n📊 TOTALES: ${Math.round(totalCals)} kcal | ${Math.round(totalP)}g P | ${Math.round(totalC)}g C | ${Math.round(totalF)}g G`
+        : '';
 
     const statusIcon = targetMeal.is_completed ? '✅' : '⏳';
 
     return {
       success: true,
       message: `🍽️ ${statusIcon} ${targetMeal.name || 'COMIDA'} ${mealIndex + 1} (${formatTime(targetMeal.scheduled_time)}):\n\n📋 INGREDIENTES:\n${ingredientsText}${totalsStr}`,
-      data: { 
-        meal: targetMeal, 
+      data: {
+        meal: targetMeal,
         mealIndex,
         ingredients,
-        macros: { calories: totalCals, protein: totalP, carbs: totalC, fat: totalF }
+        macros: { calories: totalCals, protein: totalP, carbs: totalC, fat: totalF },
       },
     };
   } catch (error) {
@@ -4238,7 +4247,7 @@ export async function planAddMealOption(
 
     if (optionError) throw optionError;
 
-    const ingredientNames = ingredients.map(i => i.name).join(', ');
+    const ingredientNames = ingredients.map((i) => i.name).join(', ');
 
     return {
       success: true,
@@ -4297,15 +4306,9 @@ export async function planSelectMealOption(
     const targetOption = options[idx];
 
     // Deseleccionar todas y seleccionar la elegida
-    await supabase
-      .from('meal_options')
-      .update({ is_selected: false })
-      .eq('meal_id', mealId);
+    await supabase.from('meal_options').update({ is_selected: false }).eq('meal_id', mealId);
 
-    await supabase
-      .from('meal_options')
-      .update({ is_selected: true })
-      .eq('id', targetOption.id);
+    await supabase.from('meal_options').update({ is_selected: true }).eq('id', targetOption.id);
 
     return {
       success: true,
@@ -4360,21 +4363,15 @@ export async function planRemoveMealOption(
     const wasSelected = targetOption.is_selected;
 
     // Eliminar la opción
-    const { error } = await supabase
-      .from('meal_options')
-      .delete()
-      .eq('id', targetOption.id);
+    const { error } = await supabase.from('meal_options').delete().eq('id', targetOption.id);
 
     if (error) throw error;
 
     // Si era la seleccionada y quedan más, seleccionar la primera
     if (wasSelected && options.length > 1) {
-      const nextOption = options.find(o => o.id !== targetOption.id);
+      const nextOption = options.find((o) => o.id !== targetOption.id);
       if (nextOption) {
-        await supabase
-          .from('meal_options')
-          .update({ is_selected: true })
-          .eq('id', nextOption.id);
+        await supabase.from('meal_options').update({ is_selected: true }).eq('id', nextOption.id);
       }
     }
 
@@ -4392,10 +4389,7 @@ export async function planRemoveMealOption(
 /**
  * Lista todas las opciones/alternativas de una comida
  */
-export async function planGetMealOptions(
-  userId: string,
-  mealId: string
-): Promise<HankToolResult> {
+export async function planGetMealOptions(userId: string, mealId: string): Promise<HankToolResult> {
   try {
     // Verificar que la comida existe
     const { data: meal } = await supabase
@@ -4432,11 +4426,15 @@ export async function planGetMealOptions(
       return `${h12}:${m.toString().padStart(2, '0')} ${period}`;
     };
 
-    const optionsList = options.map((opt, idx) => {
-      const selected = opt.is_selected ? ' ✓ ACTIVA' : '';
-      const ings = (opt.ingredients as any[])?.map(i => `${i.name} (${i.quantity})`).join(', ') || 'Sin ingredientes';
-      return `${idx + 1}. ${opt.name}${selected}\n   → ${ings}`;
-    }).join('\n\n');
+    const optionsList = options
+      .map((opt, idx) => {
+        const selected = opt.is_selected ? ' ✓ ACTIVA' : '';
+        const ings =
+          (opt.ingredients as any[])?.map((i) => `${i.name} (${i.quantity})`).join(', ') ||
+          'Sin ingredientes';
+        return `${idx + 1}. ${opt.name}${selected}\n   → ${ings}`;
+      })
+      .join('\n\n');
 
     return {
       success: true,

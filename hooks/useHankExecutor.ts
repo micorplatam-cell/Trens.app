@@ -633,9 +633,8 @@ export const useHankExecutor = (
 
           // MEAL OPTIONS (ALTERNATIVAS)
           case 'PLAN_ADD_MEAL_OPTION': {
-            const ingredients = typeof p.ingredients === 'string' 
-              ? JSON.parse(p.ingredients) 
-              : p.ingredients;
+            const ingredients =
+              typeof p.ingredients === 'string' ? JSON.parse(p.ingredients) : p.ingredients;
             result = await planAddMealOption(
               userId,
               p.mealId as string,
