@@ -595,7 +595,10 @@ export default function AdnScreen() {
   const pickImageFromGallery = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permiso requerido', 'Necesitamos acceso a tu galería para seleccionar una foto.');
+      Alert.alert(
+        'Permiso requerido',
+        'Necesitamos acceso a tu galería para seleccionar una foto.'
+      );
       return;
     }
 
@@ -678,7 +681,7 @@ export default function AdnScreen() {
 
       // Actualizar perfil en Supabase
       console.log('💾 Actualizando Supabase...');
-      
+
       const { error } = await supabase
         .from('user_profiles')
         .update({
@@ -1057,7 +1060,9 @@ export default function AdnScreen() {
                     : {}
                 }
               >
-                <Text className={`text-xs font-bold ${isPro ? 'text-fire-orange' : 'text-zinc-500'}`}>
+                <Text
+                  className={`text-xs font-bold ${isPro ? 'text-fire-orange' : 'text-zinc-500'}`}
+                >
                   {isPro ? '🔥 PRO' : '🔒 FREE'}
                 </Text>
               </View>
@@ -1930,9 +1935,17 @@ export default function AdnScreen() {
               >
                 <View className="w-24 h-24 rounded-full bg-zinc-800 overflow-hidden">
                   {editAvatarUri ? (
-                    <Image source={{ uri: editAvatarUri }} className="w-full h-full" resizeMode="cover" />
+                    <Image
+                      source={{ uri: editAvatarUri }}
+                      className="w-full h-full"
+                      resizeMode="cover"
+                    />
                   ) : profile?.avatar_url ? (
-                    <Image source={{ uri: profile.avatar_url }} className="w-full h-full" resizeMode="cover" />
+                    <Image
+                      source={{ uri: profile.avatar_url }}
+                      className="w-full h-full"
+                      resizeMode="cover"
+                    />
                   ) : (
                     <LinearGradient
                       colors={['#DC2626', '#F97316']}

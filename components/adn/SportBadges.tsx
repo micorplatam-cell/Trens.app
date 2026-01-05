@@ -111,7 +111,9 @@ export function SportBadges({ vertical = false }: SportBadgesProps) {
     <>
       <View
         className={
-          vertical ? 'flex-col items-start gap-2' : 'flex-row items-center justify-start flex-wrap gap-2'
+          vertical
+            ? 'flex-col items-start gap-2'
+            : 'flex-row items-center justify-start flex-wrap gap-2'
         }
       >
         {/* Insignias de deportes del usuario */}
