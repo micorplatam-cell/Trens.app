@@ -6,7 +6,7 @@
 import React, { useRef, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, Dimensions } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
-import * as Haptics from 'expo-haptics';
+import { Haptics } from '../../lib/haptics';
 import { Clock, Plus, ChevronLeft, ChevronRight } from 'lucide-react-native';
 import { useHankTarget } from '../../hooks/useHankTarget';
 import { HankInlineHighlight } from '../hank/HankInlineHighlight';
@@ -251,7 +251,7 @@ export const MealCard: React.FC<MealCardProps> = ({
   // RENDER - ED HARDY STYLE
   // ============================================================================
   return (
-    <Animated.View ref={targetRef} onLayout={onLayout} style={animatedStyle} className="mb-6">
+    <Animated.View ref={targetRef} onLayout={onLayout} style={animatedStyle} className="mb-8">
       {/* Hank Inline Highlight - DEBE estar fuera del View con overflow:hidden */}
       <HankInlineHighlight isActive={isHighlighted} phase={animationPhase} borderRadius={12} />
 

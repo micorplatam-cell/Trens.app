@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { View, Text, Modal, Pressable, ScrollView } from 'react-native';
-import * as Haptics from 'expo-haptics';
+import { Haptics } from '../../lib/haptics';
 import { X, Clock, Check } from 'lucide-react-native';
 
 // ============================================================================

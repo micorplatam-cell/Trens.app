@@ -1,8 +1,10 @@
 // ============================================================================
 // DRAGGABLE WORKOUT BLOCK - Wrapper con Drag & Drop
+// Funciona en nativo con gesture-handler y en web con eventos de pointer
 // ============================================================================
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Platform, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   useAnimatedStyle,
@@ -10,7 +12,7 @@ import Animated, {
   withSpring,
   runOnJS,
 } from 'react-native-reanimated';
-import * as Haptics from 'expo-haptics';
+import { Haptics } from '../../lib/haptics';
 import { WorkoutBlock } from './WorkoutBlock';
 
 interface StackItem {
@@ -52,7 +54,10 @@ interface DraggableWorkoutBlockProps {
   itemHeight?: number;
 }
 
-export const DraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
+// ============================================================================
+// WEB DRAGGABLE COMPONENT - Usa eventos de pointer (mouse + touch)
+// ============================================================================
+const WebDraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
   data,
   currentIndex,
   totalItems,
@@ -63,7 +68,182 @@ export const DraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
   onDragCancel,
   onPositionChange,
   onPressRoutine,
-  itemHeight = 150, // Altura estimada de cada item
+  itemHeight = 150,
+}) => {
+  const [isDragging, setIsDragging] = useState(false);
+  const [translateY, setTranslateY] = useState(0);
+  const [scale, setScale] = useState(1);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const startYRef = useRef(0);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastReportedIndexRef = useRef(currentIndex);
+  const isDraggingRef = useRef(false);
+  const currentTranslateRef = useRef(0);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current);
+      }
+    };
+  }, []);
+
+  // Global pointer events for drag (works with mouse AND touch)
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleGlobalPointerMove = (e: PointerEvent) => {
+      if (!isDraggingRef.current) return;
+      e.preventDefault();
+
+      const deltaY = e.clientY - startYRef.current;
+      currentTranslateRef.current = deltaY;
+      setTranslateY(deltaY);
+
+      // Calculate target position
+      const movedPositions = Math.round(deltaY / itemHeight);
+      let targetIndex = currentIndex + movedPositions;
+      targetIndex = Math.max(0, Math.min(totalItems - 1, targetIndex));
+
+      if (targetIndex !== lastReportedIndexRef.current) {
+        lastReportedIndexRef.current = targetIndex;
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        if (onPositionChange) onPositionChange(targetIndex);
+      }
+    };
+
+    const handleGlobalPointerUp = () => {
+      if (!isDraggingRef.current) return;
+
+      // Calculate final position
+      const movedPositions = Math.round(currentTranslateRef.current / itemHeight);
+      let newIndex = currentIndex + movedPositions;
+      newIndex = Math.max(0, Math.min(totalItems - 1, newIndex));
+
+      // Reset state
+      isDraggingRef.current = false;
+      setIsDragging(false);
+      setTranslateY(0);
+      setScale(1);
+      currentTranslateRef.current = 0;
+
+      if (newIndex !== currentIndex) {
+        onDragEnd(newIndex);
+      } else if (onDragCancel) {
+        onDragCancel();
+      }
+    };
+
+    // Add global listeners
+    window.addEventListener('pointermove', handleGlobalPointerMove, { passive: false });
+    window.addEventListener('pointerup', handleGlobalPointerUp);
+    window.addEventListener('pointercancel', handleGlobalPointerUp);
+
+    return () => {
+      window.removeEventListener('pointermove', handleGlobalPointerMove);
+      window.removeEventListener('pointerup', handleGlobalPointerUp);
+      window.removeEventListener('pointercancel', handleGlobalPointerUp);
+    };
+  }, [isDragging, currentIndex, totalItems, itemHeight, onDragEnd, onDragCancel, onPositionChange]);
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    // Capture pointer to receive events even when moving outside
+    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+
+    startYRef.current = e.clientY;
+
+    // Long press detection (400ms)
+    longPressTimerRef.current = setTimeout(() => {
+      isDraggingRef.current = true;
+      setIsDragging(true);
+      setScale(0.95);
+      lastReportedIndexRef.current = currentIndex;
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+      if (onDragStart) onDragStart();
+    }, 400);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (longPressTimerRef.current && !isDraggingRef.current) {
+      // If moved too much before long press, cancel it
+      const deltaY = Math.abs(e.clientY - startYRef.current);
+      if (deltaY > 10) {
+        clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
+      }
+    }
+  };
+
+  const handlePointerUp = (e: React.PointerEvent) => {
+    // Release pointer capture
+    (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
+
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const handlePointerCancel = (e: React.PointerEvent) => {
+    handlePointerUp(e);
+
+    if (isDraggingRef.current) {
+      isDraggingRef.current = false;
+      setIsDragging(false);
+      setTranslateY(0);
+      setScale(1);
+      if (onDragCancel) onDragCancel();
+    }
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
+      style={{
+        transform: `translateY(${translateY}px) scale(${scale})`,
+        zIndex: isDragging ? 100 : 1,
+        opacity: isDragging ? 0.95 : 1,
+        cursor: isDragging ? 'grabbing' : 'grab',
+        userSelect: 'none',
+        position: 'relative',
+        touchAction: 'none', // Prevent browser gestures like scroll
+        boxShadow: isDragging ? '0 8px 30px rgba(220, 38, 38, 0.4)' : 'none',
+        transition: isDragging ? 'none' : 'transform 0.2s ease-out, box-shadow 0.2s ease-out',
+      }}
+    >
+      <WorkoutBlock
+        data={data}
+        onMoveUp={onMoveUp}
+        onMoveDown={onMoveDown}
+        isFirst={currentIndex === 0}
+        isLast={currentIndex >= totalItems - 1}
+        onPressRoutine={onPressRoutine}
+        isCompressed={isDragging}
+      />
+    </div>
+  );
+};
+
+// ============================================================================
+// NATIVE DRAGGABLE COMPONENT - Usa react-native-gesture-handler
+// ============================================================================
+const NativeDraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
+  data,
+  currentIndex,
+  totalItems,
+  onMoveUp,
+  onMoveDown,
+  onDragEnd,
+  onDragStart,
+  onDragCancel,
+  onPositionChange,
+  onPressRoutine,
+  itemHeight = 150,
 }) => {
   const translateY = useSharedValue(0);
   const scale = useSharedValue(1);
@@ -84,16 +264,16 @@ export const DraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
     setIsDraggingState(value);
   };
 
-  const handleDragStart = () => {
+  const handleDragStartInternal = () => {
     if (onDragStart) onDragStart();
   };
 
-  const handleDragEnd = (newIndex: number) => {
+  const handleDragEndInternal = (newIndex: number) => {
     if (onDragCancel) onDragCancel();
     onDragEnd(newIndex);
   };
 
-  const handleDragCancel = () => {
+  const handleDragCancelInternal = () => {
     if (onDragCancel) onDragCancel();
   };
 
@@ -102,7 +282,7 @@ export const DraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
   };
 
   const panGesture = Gesture.Pan()
-    .activateAfterLongPress(400) // Activar después de 400ms de mantener presionado
+    .activateAfterLongPress(400)
     .onStart(() => {
       isDraggingShared.value = true;
       lastReportedIndex.value = currentIndex;
@@ -110,17 +290,15 @@ export const DraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
       scale.value = withSpring(0.95, { damping: 15 });
       runOnJS(setDragging)(true);
       runOnJS(triggerHaptic)();
-      runOnJS(handleDragStart)();
+      runOnJS(handleDragStartInternal)();
     })
     .onUpdate((event) => {
       translateY.value = event.translationY;
 
-      // Calcular cuántas posiciones se ha movido
       const movedPositions = Math.round(event.translationY / itemHeight);
       let targetIndex = currentIndex + movedPositions;
       targetIndex = Math.max(0, Math.min(totalItems - 1, targetIndex));
 
-      // Solo reportar si cambió el índice objetivo
       if (targetIndex !== lastReportedIndex.value) {
         lastReportedIndex.value = targetIndex;
         runOnJS(reportPositionChange)(targetIndex);
@@ -128,36 +306,30 @@ export const DraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
       }
     })
     .onEnd((event) => {
-      // Calcular nueva posición
       const movedPositions = Math.round(event.translationY / itemHeight);
       let newIndex = currentIndex + movedPositions;
-
-      // Clamp al rango válido
       newIndex = Math.max(0, Math.min(totalItems - 1, newIndex));
 
-      // Animar de vuelta
       translateY.value = withSpring(0, { damping: 15, stiffness: 150 });
       scale.value = withSpring(1);
       zIndex.value = 1;
       isDraggingShared.value = false;
       runOnJS(setDragging)(false);
 
-      // Notificar fin del drag
       if (newIndex !== currentIndex) {
-        runOnJS(handleDragEnd)(newIndex);
+        runOnJS(handleDragEndInternal)(newIndex);
       } else {
-        runOnJS(handleDragCancel)();
+        runOnJS(handleDragCancelInternal)();
       }
     })
     .onFinalize(() => {
-      // Asegurar que se resetea el estado si el gesto se cancela
       if (isDraggingShared.value) {
         translateY.value = withSpring(0, { damping: 15, stiffness: 150 });
         scale.value = withSpring(1);
         zIndex.value = 1;
         isDraggingShared.value = false;
         runOnJS(setDragging)(false);
-        runOnJS(handleDragCancel)();
+        runOnJS(handleDragCancelInternal)();
       }
     });
 
@@ -187,4 +359,14 @@ export const DraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
       </Animated.View>
     </GestureDetector>
   );
+};
+
+// ============================================================================
+// MAIN EXPORT - Platform-specific
+// ============================================================================
+export const DraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = (props) => {
+  if (Platform.OS === 'web') {
+    return <WebDraggableWorkoutBlock {...props} />;
+  }
+  return <NativeDraggableWorkoutBlock {...props} />;
 };

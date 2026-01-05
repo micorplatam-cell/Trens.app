@@ -89,6 +89,7 @@ interface StackItem {
   type: 'pill' | 'syringe' | 'powder' | 'liquid';
   notes?: string;
   time?: string;
+  times?: string[]; // Múltiples horarios para suplementos que se toman varias veces al día
   isPreWorkout?: boolean;
   isPostWorkout?: boolean;
   daysOfWeek?: number[];
@@ -271,6 +272,10 @@ function PlanScreen() {
   const itemLayouts = useRef<{ y: number; height: number }[]>([]);
   const hasScrolledToCurrentItem = useRef(false);
   const layoutsReady = useRef(0);
+  // Flag para evitar auto-scroll durante actualizaciones internas
+  const isInternalUpdate = useRef(false);
+  // Flag para saber si es la primera vez que se monta el componente
+  const isFirstMount = useRef(true);
 
   // ============================================================================
   // HELPER: Obtener perfil completo con medidas corporales Y macros cacheados
@@ -491,6 +496,7 @@ function PlanScreen() {
           type: item.type as StackItem['type'],
           notes: item.notes,
           time: item.time?.slice(0, 5),
+          times: item.times || (item.time ? [item.time.slice(0, 5)] : undefined),
           isPreWorkout: item.is_pre_workout,
           isPostWorkout: item.is_post_workout,
           daysOfWeek: item.days_of_week,
@@ -587,7 +593,7 @@ function PlanScreen() {
       }
 
       // Filtrar por día de entrenamiento
-      let todayExercisesFiltered = exercisesData.filter((item: any) => {
+      const todayExercisesFiltered = exercisesData.filter((item: any) => {
         const itemDays = item.training_days || [0];
         return itemDays.includes(currentTrainingDay);
       });
@@ -596,21 +602,8 @@ function PlanScreen() {
         `🏋️ PLAN: Ejercicios para día ${currentTrainingDay}: ${todayExercisesFiltered.length}`
       );
 
-      // Si no hay ejercicios para el día actual pero hay ejercicios en general,
-      // mostrar todos los del día 0 (rutina por defecto) o todos si no hay día 0
-      if (todayExercisesFiltered.length === 0 && exercisesData.length > 0) {
-        console.warn('🏋️ PLAN: Sin ejercicios para día actual, buscando día 0...');
-        todayExercisesFiltered = exercisesData.filter((item: any) => {
-          const itemDays = item.training_days || [0];
-          return itemDays.includes(0);
-        });
-
-        // Si aún no hay, mostrar todos
-        if (todayExercisesFiltered.length === 0) {
-          console.warn('🏋️ PLAN: Sin día 0, mostrando todos los ejercicios');
-          todayExercisesFiltered = exercisesData;
-        }
-      }
+      // Si no hay ejercicios para el día actual = DESCANSO
+      // (igual que ADN - no mostrar todos los ejercicios)
 
       if (todayExercisesFiltered.length > 0) {
         // Usar nombre de rutina guardado de la base de datos
@@ -695,6 +688,7 @@ function PlanScreen() {
   // HANDLERS
   // ============================================================================
   const handleSwap = async (mealId: string, newOptionIndex: number) => {
+    isInternalUpdate.current = true;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
     // Optimistic update
@@ -728,6 +722,7 @@ function PlanScreen() {
 
   // Guardar nueva hora desde el modal
   const handleSaveTime = async (newTime: string) => {
+    isInternalUpdate.current = true;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     if (timePickerMode === 'meal' && timePickerMealId) {
@@ -740,20 +735,46 @@ function PlanScreen() {
       await supabase.from('meals').update({ time: newTime }).eq('id', timePickerMealId);
       setTimePickerMealId(null);
     } else if (timePickerMode === 'stack' && timePickerStackTime) {
-      // Update all stack items with the old time to the new time
-      const itemsToUpdate = stackItems.filter((item) => item.time === timePickerStackTime);
+      // Find items that have this time (check both time and times array)
+      const oldTime = timePickerStackTime;
+      const itemsToUpdate = stackItems.filter((item) => {
+        // Check single time field
+        if (item.time === oldTime) return true;
+        // Check times array
+        if (item.times && item.times.includes(oldTime)) return true;
+        return false;
+      });
 
       for (const item of itemsToUpdate) {
-        await supabase.from('supplement_stack').update({ time: newTime }).eq('id', item.id);
+        // Update times array if it exists
+        if (item.times && item.times.length > 0) {
+          const newTimes = item.times.map((t) => (t === oldTime ? newTime : t));
+          await supabase
+            .from('supplement_stack')
+            .update({ times: newTimes, time: newTimes[0] })
+            .eq('id', item.id);
+        } else {
+          // Fallback to single time update
+          await supabase.from('supplement_stack').update({ time: newTime }).eq('id', item.id);
+        }
       }
 
       // Update local state
       setStackItems((prev) =>
-        prev.map((item) => (item.time === timePickerStackTime ? { ...item, time: newTime } : item))
+        prev.map((item) => {
+          if (item.times && item.times.includes(oldTime)) {
+            const newTimes = item.times.map((t) => (t === oldTime ? newTime : t));
+            return { ...item, times: newTimes, time: newTimes[0] };
+          }
+          if (item.time === oldTime) {
+            return { ...item, time: newTime };
+          }
+          return item;
+        })
       );
 
       setTimePickerStackTime(null);
-      console.warn('✅ STACK: Hora actualizada de', timePickerStackTime, 'a', newTime);
+      console.warn('✅ STACK: Hora actualizada de', oldTime, 'a', newTime);
     }
   };
 
@@ -793,6 +814,7 @@ function PlanScreen() {
 
   // Eliminar comida
   const handleDeleteMeal = async (mealId: string) => {
+    isInternalUpdate.current = true;
     Alert.alert('Eliminar Comida', '¿Estás seguro de que quieres eliminar esta comida?', [
       { text: 'Cancelar', style: 'cancel' },
       {
@@ -829,6 +851,7 @@ function PlanScreen() {
 
   // Eliminar solo una opción/platillo de una comida
   const handleDeleteOption = async (mealId: string, optionId: string) => {
+    isInternalUpdate.current = true;
     const meal = meals.find((m) => m.id === mealId);
     if (!meal) return;
 
@@ -987,6 +1010,7 @@ function PlanScreen() {
     optionId: string,
     ingredients: Ingredient[]
   ) => {
+    isInternalUpdate.current = true;
     try {
       // Delete existing ingredients
       await supabase.from('meal_ingredients').delete().eq('option_id', optionId);
@@ -1047,6 +1071,7 @@ function PlanScreen() {
     time: string,
     useHankAI: boolean
   ) => {
+    isInternalUpdate.current = true;
     // Guard: Verificar si puede guardar
     if (!canSave('create_meal')) return;
 
@@ -1159,6 +1184,7 @@ function PlanScreen() {
   };
 
   const handleAddStackItem = async (item: Omit<StackItem, 'id'>) => {
+    isInternalUpdate.current = true;
     // Guard: Verificar si puede guardar
     if (!canSave('add_supplement')) return;
 
@@ -1203,11 +1229,60 @@ function PlanScreen() {
   };
 
   const handleRemoveStackItem = async (id: string) => {
+    isInternalUpdate.current = true;
     try {
       await supabase.from('supplement_stack').delete().eq('id', id);
       setStackItems((prev) => prev.filter((item) => item.id !== id));
     } catch (error) {
       console.error('Error removing stack item:', error);
+    }
+  };
+
+  // Handler para actualizar un compuesto del stack
+  const handleUpdateStackItem = async (id: string, updates: Partial<Omit<StackItem, 'id'>>) => {
+    isInternalUpdate.current = true;
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // Preparar datos para la DB
+      const dbUpdates: Record<string, any> = {};
+      if (updates.name !== undefined) dbUpdates.name = updates.name;
+      if (updates.dose !== undefined) dbUpdates.dose = updates.dose;
+      if (updates.type !== undefined) dbUpdates.type = updates.type;
+      if (updates.notes !== undefined) dbUpdates.notes = updates.notes || null;
+      if (updates.time !== undefined) dbUpdates.time = updates.time || null;
+      if (updates.times !== undefined) dbUpdates.times = updates.times || null;
+      if (updates.isPreWorkout !== undefined) dbUpdates.is_pre_workout = updates.isPreWorkout;
+      if (updates.isPostWorkout !== undefined) dbUpdates.is_post_workout = updates.isPostWorkout;
+      if (updates.daysOfWeek !== undefined) dbUpdates.days_of_week = updates.daysOfWeek;
+
+      const { error } = await supabase.from('supplement_stack').update(dbUpdates).eq('id', id);
+
+      if (error) {
+        console.error('❌ STACK: Error actualizando:', error.message);
+        Alert.alert('Error', `No se pudo actualizar: ${error.message}`);
+        return;
+      }
+
+      // Actualizar estado local
+      setStackItems((prev) =>
+        prev.map((item) =>
+          item.id === id
+            ? {
+                ...item,
+                ...updates,
+              }
+            : item
+        )
+      );
+
+      console.warn('✅ STACK: Compuesto actualizado exitosamente');
+    } catch (error) {
+      console.error('Error updating stack item:', error);
+      Alert.alert('Error', 'No se pudo actualizar el compuesto');
     }
   };
 
@@ -1234,6 +1309,7 @@ function PlanScreen() {
     optionName: string,
     ingredients: Ingredient[]
   ) => {
+    isInternalUpdate.current = true;
     // Guard: Verificar si puede guardar
     if (!canSave('save_meal')) return;
 
@@ -1279,12 +1355,14 @@ function PlanScreen() {
   };
 
   const handleMoveWorkout = async (direction: 'up' | 'down') => {
+    isInternalUpdate.current = true;
     const newIndex = direction === 'up' ? Math.max(0, workoutPosIndex - 1) : workoutPosIndex + 1;
     await saveWorkoutPosition(newIndex);
   };
 
   // Handler for drag & drop
   const handleDragEnd = async (newIndex: number) => {
+    isInternalUpdate.current = true;
     setDragTargetIndex(null);
     setIsDraggingWorkout(false);
     await saveWorkoutPosition(newIndex);
@@ -1338,22 +1416,28 @@ function PlanScreen() {
   const buildTimeline = (): TimelineItem[] => {
     const today = new Date().getDay();
 
-    // Filter stacks for today and group by time
-    const todayStacks = stackItems.filter(
-      (item) =>
-        !item.isPreWorkout &&
-        !item.isPostWorkout &&
-        item.time &&
-        (item.daysOfWeek?.includes(today) ?? true)
-    );
-
+    // Filter stacks for today and expand items with multiple times
+    // Each time in the times array creates a separate entry in the timeline
     const groupedStacks: Stack[] = [];
     const stacksByTime: Record<string, StackItem[]> = {};
 
-    todayStacks.forEach((item) => {
-      const time = item.time || '00:00';
-      if (!stacksByTime[time]) stacksByTime[time] = [];
-      stacksByTime[time].push(item);
+    stackItems.forEach((item) => {
+      // Skip pre/post workout items (handled separately)
+      if (item.isPreWorkout || item.isPostWorkout) return;
+
+      // Check if item is for today
+      if (item.daysOfWeek && !item.daysOfWeek.includes(today)) return;
+
+      // Get all times for this item (support both times array and single time)
+      const itemTimes =
+        item.times && item.times.length > 0 ? item.times : item.time ? [item.time] : [];
+
+      // Create an entry for each time
+      itemTimes.forEach((time) => {
+        if (!stacksByTime[time]) stacksByTime[time] = [];
+        // Add item with this specific time for display
+        stacksByTime[time].push({ ...item, time });
+      });
     });
 
     Object.entries(stacksByTime).forEach(([time, items]) => {
@@ -1450,35 +1534,27 @@ function PlanScreen() {
       itemLayouts.current[index] = { y, height: 0 };
       layoutsReady.current++;
 
-      // Cuando TODOS los items han reportado su layout, hacer scroll
-      if (
-        layoutsReady.current >= timeline.length &&
-        !hasScrolledToCurrentItem.current &&
-        timeline.length > 0
-      ) {
-        const currentIndex = getCurrentTimelineIndex();
-        const layout = itemLayouts.current[currentIndex];
-
-        if (layout && layout.y > 0) {
-          // Pequeño delay para asegurar que el ScrollView esté listo
-          setTimeout(() => {
-            scrollViewRef.current?.scrollTo({
-              y: Math.max(0, layout.y - 30),
-              animated: true,
-            });
-          }, 100);
-        }
+      // Solo guardar layouts, NO hacer auto-scroll en primer mount
+      // El auto-scroll solo se activa cuando vienes de otro módulo (useFocusEffect)
+      if (layoutsReady.current >= timeline.length && timeline.length > 0) {
         hasScrolledToCurrentItem.current = true;
+        isFirstMount.current = false;
       }
     },
-    [timeline.length, getCurrentTimelineIndex]
+    [timeline.length]
   );
 
-  // Scroll automático cuando la pantalla recibe focus (para volver a PLAN)
+  // Scroll automático SOLO cuando la pantalla recibe focus desde otro módulo
   useFocusEffect(
     useCallback(() => {
-      // Si ya tenemos layouts guardados, hacer scroll inmediatamente
-      if (itemLayouts.current.length > 0 && timeline.length > 0) {
+      // Si es una actualización interna, no hacer scroll automático
+      if (isInternalUpdate.current) {
+        isInternalUpdate.current = false;
+        return;
+      }
+
+      // Solo hacer auto-scroll si venimos de otro módulo (no en el primer mount)
+      if (!isFirstMount.current && itemLayouts.current.length > 0 && timeline.length > 0) {
         const currentIndex = getCurrentTimelineIndex();
         const layout = itemLayouts.current[currentIndex];
 
@@ -1490,10 +1566,6 @@ function PlanScreen() {
             });
           }, 200);
         }
-      } else {
-        // Primera vez - resetear para que onLayout llene los datos
-        hasScrolledToCurrentItem.current = false;
-        layoutsReady.current = 0;
       }
     }, [timeline.length, getCurrentTimelineIndex])
   );
@@ -1564,7 +1636,7 @@ function PlanScreen() {
           style={{ backgroundColor: 'rgba(249, 115, 22, 0.2)' }}
         />
 
-        <View className="pt-6">
+        <View className="pt-6 gap-2">
           {timeline.length === 0 ? (
             <View className="items-center justify-center py-20">
               <Text className="text-zinc-500 text-center mb-2">No hay comidas configuradas</Text>
@@ -1665,14 +1737,17 @@ function PlanScreen() {
                       onMoveDown={() => handleMoveWorkout('down')}
                       onDragEnd={handleDragEnd}
                       onDragStart={() => {
+                        isInternalUpdate.current = true;
                         setIsDraggingWorkout(true);
                         setDragTargetIndex(workoutPosIndex);
                       }}
                       onDragCancel={() => {
+                        isInternalUpdate.current = true;
                         setIsDraggingWorkout(false);
                         setDragTargetIndex(null);
                       }}
                       onPositionChange={(targetIndex) => {
+                        isInternalUpdate.current = true;
                         setDragTargetIndex(targetIndex);
                       }}
                       onPressRoutine={() => router.push('/(tabs)/gym')}
@@ -1776,6 +1851,7 @@ function PlanScreen() {
         items={stackItems}
         onAddItem={handleAddStackItem}
         onRemoveItem={handleRemoveStackItem}
+        onUpdateItem={handleUpdateStackItem}
       />
 
       <AddOptionModal

@@ -11,7 +11,7 @@ import Animated, {
   withTiming,
   interpolate,
 } from 'react-native-reanimated';
-import * as Haptics from 'expo-haptics';
+import { Haptics } from '../../lib/haptics';
 import { Pill, Syringe, Droplets, FlaskConical, Zap, Clock, Trash2 } from 'lucide-react-native';
 import { useHankTarget } from '../../hooks/useHankTarget';
 import { HankInlineHighlight } from '../hank/HankInlineHighlight';
@@ -140,7 +140,7 @@ export const StackCard: React.FC<StackCardProps> = ({
   }
 
   return (
-    <View ref={targetRef} onLayout={onLayout} className="mb-6 pl-8 relative">
+    <View ref={targetRef} onLayout={onLayout} className="mb-8 pl-8 relative">
       {/* Hank Inline Highlight - FUERA del Pressable */}
       <HankInlineHighlight isActive={isHighlighted} phase={animationPhase} borderRadius={8} />
 

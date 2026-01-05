@@ -253,6 +253,61 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
   };
 
   const hasExercises = data.exercises && data.exercises.length > 0;
+  const isRestDay = data.routineName === 'DESCANSO' && !hasExercises;
+
+  // ============================================================================
+  // MODO DESCANSO - Sin ejercicios asignados
+  // ============================================================================
+  if (isRestDay) {
+    return (
+      <View ref={targetRef} onLayout={onLayout} className="mb-6">
+        <HankInlineHighlight isActive={isHighlighted} phase={animationPhase} borderRadius={0} />
+        <View className="bg-[#1a1a1a] border-y-2 border-zinc-700/50 shadow-lg">
+          {/* Control Handle */}
+          <View className="flex-row justify-between items-center bg-zinc-800/30 px-4 py-2 border-b border-white/5">
+            <View className="flex-row gap-3">
+              <Pressable
+                onPress={handleMoveUp}
+                disabled={isFirst}
+                className={`p-1 ${isFirst ? 'opacity-20' : ''}`}
+              >
+                <ChevronUp size={18} color={isFirst ? '#666' : '#FFF'} />
+              </Pressable>
+              <Pressable
+                onPress={handleMoveDown}
+                disabled={isLast}
+                className={`p-1 ${isLast ? 'opacity-20' : ''}`}
+              >
+                <ChevronDown size={18} color={isLast ? '#666' : '#FFF'} />
+              </Pressable>
+            </View>
+            <View className="flex-row items-center gap-1">
+              <GripHorizontal size={14} color="#71717A" />
+              <Text className="text-zinc-500 text-xs font-bold tracking-widest uppercase">
+                BLOQUE ENTRENO
+              </Text>
+            </View>
+          </View>
+
+          {/* Rest Day Content */}
+          <View className="p-4 flex-row items-center justify-between">
+            <View className="flex-row items-center gap-2">
+              <Text className="text-xl text-white font-black italic uppercase tracking-tight">
+                DESCANSO
+              </Text>
+              <Text className="text-xl">😴</Text>
+            </View>
+            <Pressable
+              onPress={onPressRoutine}
+              className="bg-zinc-800/50 px-3 py-1.5 rounded-full active:bg-zinc-700/50"
+            >
+              <Text className="text-zinc-400 text-xs font-medium">Configurar</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View ref={targetRef} onLayout={onLayout} className="mb-6">

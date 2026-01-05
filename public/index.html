@@ -26,9 +26,10 @@
     <!-- PWA Meta Tags -->
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="TRENS" />
     <meta name="application-name" content="TRENS" />
+    <meta name="color-scheme" content="dark" />
 
     <!-- SEO Meta Tags -->
     <title>TRENS - High Performance Fitness</title>
@@ -209,6 +210,30 @@
         -webkit-font-smoothing: antialiased;
         -moz-osx-font-smoothing: grayscale;
         overflow: hidden;
+      }
+
+      /* Safe areas - Barras del sistema en negro */
+      html {
+        background-color: #000000;
+        /* Extender fondo negro a las safe areas */
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+        padding-left: env(safe-area-inset-left);
+        padding-right: env(safe-area-inset-right);
+      }
+
+      /* Asegurar que el body cubra todo incluyendo safe areas */
+      body {
+        min-height: 100vh;
+        min-height: -webkit-fill-available;
+        background-color: #000000;
+      }
+
+      /* Para PWA instalada - cubrir toda la pantalla */
+      @media all and (display-mode: standalone) {
+        html, body {
+          background-color: #000000;
+        }
       }
 
       /* Custom scrollbar */
