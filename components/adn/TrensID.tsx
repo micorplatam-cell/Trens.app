@@ -7,7 +7,7 @@ import Animated, {
   interpolate,
   Easing,
 } from 'react-native-reanimated';
-import { ChevronDown, X, Edit2, Save, ShieldAlert, Crown, Trash2 } from 'lucide-react-native';
+import { ChevronDown, X, Edit2, Save, ShieldAlert, Crown, Trash2, Flame } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { supabase } from '../../lib/supabase';
 import { useSaveGuard } from '../../context/SaveGuardContext';
@@ -44,6 +44,19 @@ interface ProfileData {
   // Campos calculados (read-only, vienen de GYM y PLAN)
   training_frequency?: number; // Cantidad de días en estructura de entrenamiento
   meal_count?: number; // Cantidad de comidas configuradas en PLAN
+  // Macros diarios cacheados
+  cached_daily_macros?: {
+    totalCalories: number;
+    totalProtein: number;
+    totalCarbs: number;
+    totalFat: number;
+    perMeal: {
+      calories: number;
+      protein: number;
+      carbs: number;
+      fat: number;
+    };
+  } | null;
 }
 
 interface TrensIDProps {
@@ -312,6 +325,51 @@ export default function TrensID({ userId, profileData, measurements, onUpdate }:
                   </Text>
                 </View>
               </View>
+
+              {/* Macros Diarios */}
+              {editData.cached_daily_macros && (
+                <View className="mt-4 pt-4 border-t border-zinc-800/50">
+                  <View className="flex-row items-center gap-1 mb-2">
+                    <Flame size={10} color="#F97316" />
+                    <Text className="text-[10px] text-fire-orange font-bold uppercase tracking-wider">
+                      Macros Diarios
+                    </Text>
+                    <Text className="text-zinc-600 text-[10px] font-mono ml-auto">
+                      {editData.meal_count || 0} comidas
+                    </Text>
+                  </View>
+                  <View className="flex-row justify-between">
+                    {/* Calorías */}
+                    <View className="items-center">
+                      <Text className="text-white font-mono font-bold text-lg">
+                        {editData.cached_daily_macros.totalCalories}
+                      </Text>
+                      <Text className="text-zinc-500 text-[9px] uppercase">kcal</Text>
+                    </View>
+                    {/* Proteína */}
+                    <View className="items-center">
+                      <Text className="text-savage-red font-mono font-bold text-lg">
+                        {editData.cached_daily_macros.totalProtein}g
+                      </Text>
+                      <Text className="text-zinc-500 text-[9px] uppercase">Proteína</Text>
+                    </View>
+                    {/* Carbos */}
+                    <View className="items-center">
+                      <Text className="text-yellow-500 font-mono font-bold text-lg">
+                        {editData.cached_daily_macros.totalCarbs}g
+                      </Text>
+                      <Text className="text-zinc-500 text-[9px] uppercase">Carbos</Text>
+                    </View>
+                    {/* Grasas */}
+                    <View className="items-center">
+                      <Text className="text-blue-400 font-mono font-bold text-lg">
+                        {editData.cached_daily_macros.totalFat}g
+                      </Text>
+                      <Text className="text-zinc-500 text-[9px] uppercase">Grasas</Text>
+                    </View>
+                  </View>
+                </View>
+              )}
 
               {/* Hint para expandir */}
               <Animated.View style={chevronStyle} className="items-center mt-3">

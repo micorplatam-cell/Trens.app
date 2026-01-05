@@ -330,7 +330,8 @@ function PlanScreen() {
       // Fetch meals con sus opciones (alternativas)
       const { data: mealsData, error: mealsError } = await supabase
         .from('meals')
-        .select(`
+        .select(
+          `
           id, 
           name, 
           scheduled_time, 
@@ -344,7 +345,8 @@ function PlanScreen() {
             position,
             is_selected
           )
-        `)
+        `
+        )
         .eq('user_id', user.id)
         .order('scheduled_time', { ascending: true });
 

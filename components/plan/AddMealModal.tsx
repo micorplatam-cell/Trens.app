@@ -1,6 +1,7 @@
 // ============================================================================
 // ADD MEAL MODAL - Modal para agregar comidas
 // Análisis inteligente automático (siempre activo)
+// TimePicker visual como Stack
 // ============================================================================
 
 import React, { useState, useEffect } from 'react';
@@ -17,7 +18,15 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
-import { X, Plus, Trash2, AlertTriangle, CheckCircle, Sparkles } from 'lucide-react-native';
+import {
+  X,
+  Plus,
+  Trash2,
+  AlertTriangle,
+  CheckCircle,
+  Sparkles,
+  Clock,
+} from 'lucide-react-native';
 import {
   analyzeIngredientsSmart,
   IngredientAnalysis,
@@ -56,21 +65,24 @@ export const AddMealModal: React.FC<AddMealModalProps> = ({
   onSave,
 }) => {
   const insets = useSafeAreaInsets();
-  const [hour, setHour] = useState('12');
-  const [minute, setMinute] = useState('00');
-  const [period, setPeriod] = useState<'AM' | 'PM'>('PM');
+  const [selectedHour, setSelectedHour] = useState(12);
+  const [selectedMinute, setSelectedMinute] = useState(0);
+  const [selectedPeriod, setSelectedPeriod] = useState<'AM' | 'PM'>('PM');
   const [ingredients, setIngredients] = useState<Ingredient[]>([
     { name: '', quantity: '', portion: '' },
   ]);
   const [analysis, setAnalysis] = useState<IngredientAnalysis | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
+  const hours = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+  const minutes = [0, 15, 30, 45];
+
   // Reset cuando se abre
   useEffect(() => {
     if (visible) {
-      setHour('12');
-      setMinute('00');
-      setPeriod('PM');
+      setSelectedHour(12);
+      setSelectedMinute(0);
+      setSelectedPeriod('PM');
       setIngredients([{ name: '', quantity: '', portion: '' }]);
       setAnalysis(null);
     }
@@ -120,13 +132,28 @@ export const AddMealModal: React.FC<AddMealModalProps> = ({
   };
 
   const getTime24h = (): string => {
-    let h = parseInt(hour, 10) || 12;
-    if (period === 'AM') {
+    let h = selectedHour;
+    if (selectedPeriod === 'AM') {
       if (h === 12) h = 0;
     } else {
       if (h !== 12) h += 12;
     }
-    return `${h.toString().padStart(2, '0')}:${minute.padStart(2, '0')}`;
+    return `${h.toString().padStart(2, '0')}:${selectedMinute.toString().padStart(2, '0')}`;
+  };
+
+  const selectHour = (h: number) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setSelectedHour(h);
+  };
+
+  const selectMinute = (m: number) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setSelectedMinute(m);
+  };
+
+  const togglePeriod = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setSelectedPeriod(selectedPeriod === 'AM' ? 'PM' : 'AM');
   };
 
   const handleSave = () => {
@@ -139,16 +166,14 @@ export const AddMealModal: React.FC<AddMealModalProps> = ({
     // Siempre usar IA para cálculo automático
     onSave(validIngredients, getTime24h(), true);
     setIngredients([{ name: '', quantity: '', portion: '' }]);
-    setHour('12');
-    setMinute('00');
-    setPeriod('PM');
+    setSelectedHour(12);
+    setSelectedMinute(0);
+    setSelectedPeriod('PM');
     onClose();
   };
 
-  const togglePeriod = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setPeriod(period === 'AM' ? 'PM' : 'AM');
-  };
+  // Formatear display
+  const displayTime = `${selectedHour}:${selectedMinute.toString().padStart(2, '0')} ${selectedPeriod}`;
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -271,53 +296,77 @@ export const AddMealModal: React.FC<AddMealModalProps> = ({
                 </View>
               )}
 
-              {/* Time Input */}
+              {/* Time Picker Visual */}
               <View className="mb-4">
-                <Text className="text-zinc-400 text-xs font-bold mb-2 uppercase">Hora</Text>
+                <View className="flex-row items-center gap-2 mb-3">
+                  <Clock size={14} color="#3B82F6" />
+                  <Text className="text-zinc-400 text-xs font-bold uppercase">Hora</Text>
+                  <Text className="text-blue-400 font-mono font-bold text-sm ml-auto">
+                    {displayTime}
+                  </Text>
+                </View>
+
+                {/* Hour Selector */}
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-3">
+                  <View className="flex-row gap-2">
+                    {hours.map((h) => (
+                      <Pressable
+                        key={h}
+                        onPress={() => selectHour(h)}
+                        className={`w-11 h-11 rounded-xl items-center justify-center ${
+                          selectedHour === h ? 'bg-blue-500' : 'bg-zinc-800 active:bg-zinc-700'
+                        }`}
+                      >
+                        <Text
+                          className={`font-bold text-lg ${
+                            selectedHour === h ? 'text-white' : 'text-zinc-400'
+                          }`}
+                        >
+                          {h}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </ScrollView>
+
+                {/* Minute + Period Row */}
                 <View className="flex-row gap-2">
-                  <TextInput
-                    value={hour}
-                    onChangeText={(v) => {
-                      const num = parseInt(v, 10);
-                      if (v === '' || (num >= 1 && num <= 12)) {
-                        setHour(v.replace(/[^0-9]/g, '').slice(0, 2));
-                      }
-                    }}
-                    placeholder="12"
-                    placeholderTextColor="#666"
-                    className="flex-1 bg-black/40 border border-white/10 rounded-lg p-3 text-white font-mono text-center text-lg"
-                    keyboardType="number-pad"
-                    maxLength={2}
-                  />
-                  <Text className="text-white text-2xl self-center">:</Text>
-                  <TextInput
-                    value={minute}
-                    onChangeText={(v) => {
-                      const num = parseInt(v, 10);
-                      if (v === '' || (num >= 0 && num <= 59)) {
-                        setMinute(v.replace(/[^0-9]/g, '').slice(0, 2));
-                      }
-                    }}
-                    placeholder="00"
-                    placeholderTextColor="#666"
-                    className="flex-1 bg-black/40 border border-white/10 rounded-lg p-3 text-white font-mono text-center text-lg"
-                    keyboardType="number-pad"
-                    maxLength={2}
-                  />
+                  {/* Minutes */}
+                  <View className="flex-1 flex-row gap-2">
+                    {minutes.map((m) => (
+                      <Pressable
+                        key={m}
+                        onPress={() => selectMinute(m)}
+                        className={`flex-1 h-10 rounded-lg items-center justify-center ${
+                          selectedMinute === m ? 'bg-blue-500' : 'bg-zinc-800 active:bg-zinc-700'
+                        }`}
+                      >
+                        <Text
+                          className={`font-mono text-sm ${
+                            selectedMinute === m ? 'text-white font-bold' : 'text-zinc-400'
+                          }`}
+                        >
+                          :{m.toString().padStart(2, '0')}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+
+                  {/* AM/PM Toggle */}
                   <Pressable
                     onPress={togglePeriod}
-                    className={`px-4 rounded-lg justify-center items-center ${
-                      period === 'AM'
+                    className={`w-16 h-10 rounded-lg items-center justify-center ${
+                      selectedPeriod === 'AM'
                         ? 'bg-yellow-500/20 border border-yellow-500'
                         : 'bg-purple-500/20 border border-purple-500'
                     }`}
                   >
                     <Text
-                      className={`font-bold text-lg ${
-                        period === 'AM' ? 'text-yellow-500' : 'text-purple-500'
+                      className={`font-bold ${
+                        selectedPeriod === 'AM' ? 'text-yellow-500' : 'text-purple-500'
                       }`}
                     >
-                      {period}
+                      {selectedPeriod}
                     </Text>
                   </Pressable>
                 </View>

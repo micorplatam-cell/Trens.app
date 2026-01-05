@@ -73,6 +73,19 @@ interface UserProfile {
   // Campos CALCULADOS (vienen de GYM y PLAN)
   training_frequency?: number;
   meal_count?: number;
+  // Macros diarios cacheados
+  cached_daily_macros?: {
+    totalCalories: number;
+    totalProtein: number;
+    totalCarbs: number;
+    totalFat: number;
+    perMeal: {
+      calories: number;
+      protein: number;
+      carbs: number;
+      fat: number;
+    };
+  } | null;
 }
 
 interface Measurement {
@@ -870,6 +883,8 @@ export default function AdnScreen() {
                       // Campos CALCULADOS (no editables, vienen de GYM y PLAN)
                       training_frequency: profile.training_frequency,
                       meal_count: profile.meal_count,
+                      // Macros diarios cacheados
+                      cached_daily_macros: profile.cached_daily_macros,
                     }
                   : {
                       // Placeholder data para visitantes
@@ -888,6 +903,7 @@ export default function AdnScreen() {
                       training_days_per_week: undefined,
                       training_frequency: undefined,
                       meal_count: undefined,
+                      cached_daily_macros: null,
                     }
               }
               measurements={measurements}
