@@ -252,12 +252,18 @@ interface BodyMeasurement {
   is_dominant?: boolean;
 }
 
+interface ProgressPhotoData {
+  weight?: string;
+  bodyFatPercentage?: number;
+  date?: string;
+}
+
 interface UserMacroProfile {
   weight: string; // "80.5 KG"
   height: string; // "1.75 M"
   goal: string; // "GANAR MASA MUSCULAR", "DEFINIR", "MANTENER"
   activityLevel?: string; // "SEDENTARIO", "MODERADO", "ACTIVO", "MUY ACTIVO"
-  mealCount: number; // Número de comidas del usuario
+  mealCount?: number; // Número de comidas del usuario (opcional - si no hay, no divide)
   // Datos adicionales para ultra personalización
   age?: number; // Edad del usuario
   sex?: string; // "M", "F", "MASCULINO", "FEMENINO"
@@ -268,6 +274,8 @@ interface UserMacroProfile {
   trainingDaysPerWeek?: number; // Días de entrenamiento por semana
   // Medidas corporales del usuario
   bodyMeasurements?: BodyMeasurement[];
+  // Fotos de progreso más reciente (para usar datos actualizados)
+  latestProgressPhoto?: ProgressPhotoData;
 }
 
 interface DailyMacros {
@@ -275,7 +283,7 @@ interface DailyMacros {
   totalProtein: number;
   totalCarbs: number;
   totalFat: number;
-  perMeal: {
+  perMeal?: {
     calories: number;
     protein: number;
     carbs: number;
@@ -291,7 +299,7 @@ export async function calculateUserDailyMacros(profile: UserMacroProfile): Promi
   // Extraer valores numéricos para fallback
   const weightMatch = profile.weight.match(/(\d+\.?\d*)/);
   const weightKg = weightMatch ? parseFloat(weightMatch[1]) : 75;
-  const mealCount = Math.max(profile.mealCount, 1);
+  const mealCount = profile.mealCount && profile.mealCount > 0 ? profile.mealCount : undefined;
 
   // Si no hay API key, usar cálculo básico de fallback
   if (!GEMINI_API_KEY) {
@@ -323,6 +331,24 @@ export async function calculateUserDailyMacros(profile: UserMacroProfile): Promi
       });
     }
 
+    // Construir datos de foto de progreso si existe
+    let progressPhotoData = '';
+    if (profile.latestProgressPhoto) {
+      progressPhotoData = '\nÚLTIMO REGISTRO DE PROGRESO:\n';
+      if (profile.latestProgressPhoto.weight)
+        progressPhotoData += `- Peso registrado: ${profile.latestProgressPhoto.weight}\n`;
+      if (profile.latestProgressPhoto.bodyFatPercentage)
+        progressPhotoData += `- % Grasa registrado: ${profile.latestProgressPhoto.bodyFatPercentage}%\n`;
+      if (profile.latestProgressPhoto.date)
+        progressPhotoData += `- Fecha: ${profile.latestProgressPhoto.date}\n`;
+    }
+
+    // Determinar si calcular por comida o solo totales diarios
+    const hasMeals = mealCount !== undefined;
+    const mealCountInstruction = hasMeals
+      ? `- Número de comidas planificadas: ${mealCount}`
+      : `- SIN COMIDAS CONFIGURADAS: Calcular SOLO totales diarios objetivo`;
+
     const prompt = `Eres un nutricionista deportivo de ÉLITE con 20+ años de experiencia con atletas profesionales y culturistas.
 Tu tarea es calcular los MACROS DIARIOS PERFECTOS de forma ULTRA PERSONALIZADA usando TODA la información disponible.
 
@@ -333,8 +359,8 @@ Tu tarea es calcular los MACROS DIARIOS PERFECTOS de forma ULTRA PERSONALIZADA u
 - Altura: ${profile.height}
 - Objetivo principal: ${profile.goal}
 - Nivel de actividad física: ${profile.activityLevel || 'MODERADO'}
-- Número de comidas planificadas: ${profile.mealCount}
-${additionalData ? `\nDATOS BIOMÉTRICOS:\n${additionalData}` : ''}${bodyMeasurementsData}
+${mealCountInstruction}
+${additionalData ? `\nDATOS BIOMÉTRICOS:\n${additionalData}` : ''}${bodyMeasurementsData}${progressPhotoData}
 
 ═══════════════════════════════════════════════════════════════════════════════
                            INSTRUCCIONES CRÍTICAS
@@ -365,15 +391,16 @@ REGLAS DE CÁLCULO POR OBJETIVO:
   - Distribución equilibrada de carbos y grasas
 
 MATEMÁTICAS OBLIGATORIAS:
-- Los macros por comida × número de comidas = totales diarios EXACTOS
+${hasMeals ? '- Los macros por comida × número de comidas = totales diarios EXACTOS' : '- Calcular SOLO macros totales diarios (sin dividir por comida)'}
 - 1g proteína = 4 kcal, 1g carbos = 4 kcal, 1g grasa = 9 kcal
 - Verifica que calorías = (proteína×4) + (carbos×4) + (grasa×9)
+${progressPhotoData ? '- USA los datos del registro de progreso si son más recientes que el perfil' : ''}
 
 ═══════════════════════════════════════════════════════════════════════════════
                            RESPUESTA REQUERIDA
 ═══════════════════════════════════════════════════════════════════════════════
 RESPONDE ÚNICAMENTE CON ESTE JSON (sin markdown, sin texto adicional):
-{
+${hasMeals ? `{
   "totalCalories": 2500,
   "totalProtein": 180,
   "totalCarbs": 250,
@@ -385,7 +412,13 @@ RESPONDE ÚNICAMENTE CON ESTE JSON (sin markdown, sin texto adicional):
     "fat": 17
   },
   "reasoning": "Explicación técnica de 1-2 líneas de por qué estos macros específicos"
-}`;
+}` : `{
+  "totalCalories": 2500,
+  "totalProtein": 180,
+  "totalCarbs": 250,
+  "totalFat": 70,
+  "reasoning": "Explicación técnica de 1-2 líneas de por qué estos macros específicos (sin perMeal porque no hay comidas configuradas)"
+}`}`;
 
     const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
       method: 'POST',
@@ -419,8 +452,8 @@ RESPONDE ÚNICAMENTE CON ESTE JSON (sin markdown, sin texto adicional):
 
     const parsed = JSON.parse(jsonMatch[0]);
 
-    // Validar que tenemos todos los campos necesarios
-    if (!parsed.totalCalories || !parsed.totalProtein || !parsed.perMeal) {
+    // Validar que tenemos todos los campos necesarios (perMeal solo si hay comidas)
+    if (!parsed.totalCalories || !parsed.totalProtein) {
       throw new Error('Incomplete macro data from AI');
     }
 
@@ -429,18 +462,24 @@ RESPONDE ÚNICAMENTE CON ESTE JSON (sin markdown, sin texto adicional):
       console.log('🧠 AI Macros:', parsed.reasoning || 'Calculado');
     }
 
-    return {
+    const result: DailyMacros = {
       totalCalories: Math.round(parsed.totalCalories),
       totalProtein: Math.round(parsed.totalProtein),
       totalCarbs: Math.round(parsed.totalCarbs || 0),
       totalFat: Math.round(parsed.totalFat || 0),
-      perMeal: {
+    };
+
+    // Solo incluir perMeal si había comidas configuradas y la IA lo devolvió
+    if (hasMeals && parsed.perMeal) {
+      result.perMeal = {
         calories: Math.round(parsed.perMeal.calories),
         protein: Math.round(parsed.perMeal.protein),
         carbs: Math.round(parsed.perMeal.carbs || 0),
         fat: Math.round(parsed.perMeal.fat || 0),
-      },
-    };
+      };
+    }
+
+    return result;
   } catch (error) {
     console.error('calculateUserDailyMacros AI error:', error);
     // Fallback a cálculo básico si falla la IA
@@ -452,7 +491,7 @@ RESPONDE ÚNICAMENTE CON ESTE JSON (sin markdown, sin texto adicional):
 // FALLBACK CALCULATION (sin IA)
 // Solo se usa si Gemini no está disponible
 // ============================================================================
-function calculateFallbackMacros(weightKg: number, goal: string, mealCount: number): DailyMacros {
+function calculateFallbackMacros(weightKg: number, goal: string, mealCount?: number): DailyMacros {
   const goalLower = goal.toLowerCase();
   let calories = weightKg * 33; // Base para mantenimiento
   let proteinMultiplier = 2.0;
@@ -476,18 +515,24 @@ function calculateFallbackMacros(weightKg: number, goal: string, mealCount: numb
   const totalCarbs = Math.round((remaining * 0.55) / 4);
   const totalFat = Math.round((remaining * 0.45) / 9);
 
-  return {
+  const result: DailyMacros = {
     totalCalories,
     totalProtein,
     totalCarbs,
     totalFat,
-    perMeal: {
+  };
+
+  // Solo incluir perMeal si hay comidas configuradas
+  if (mealCount && mealCount > 0) {
+    result.perMeal = {
       calories: Math.round(totalCalories / mealCount),
       protein: Math.round(totalProtein / mealCount),
       carbs: Math.round(totalCarbs / mealCount),
       fat: Math.round(totalFat / mealCount),
-    },
-  };
+    };
+  }
+
+  return result;
 }
 
 // ============================================================================
@@ -1144,6 +1189,45 @@ export async function recalculateAllMealsForNewCount(
   // Calcular nuevos macros por comida
   const dailyMacros = await calculateUserDailyMacros(profile);
   const perMealMacros = dailyMacros.perMeal;
+
+  // Si no hay perMealMacros (no tiene comidas configuradas), usar fallback
+  if (!perMealMacros) {
+    console.warn('⚠️ No hay macros por comida, usando valores por defecto');
+    const defaultPerMeal = {
+      protein: Math.round(dailyMacros.totalProtein / (profile.mealCount || 3)),
+      carbs: Math.round(dailyMacros.totalCarbs / (profile.mealCount || 3)),
+      fat: Math.round(dailyMacros.totalFat / (profile.mealCount || 3)),
+      calories: Math.round(dailyMacros.totalCalories / (profile.mealCount || 3)),
+    };
+    
+    console.warn(
+      `🔄 Recalculando ${meals.length} comidas con ${profile.mealCount} comidas/día -> ${defaultPerMeal.protein}P ${defaultPerMeal.carbs}C ${defaultPerMeal.fat}G por comida`
+    );
+
+    const results = await Promise.all(
+      meals.map(async (meal) => {
+        const ingredientsWithIds = meal.ingredients.map((ing, i) => ({
+          id: `ing-${i}`,
+          name: ing.name,
+          quantity: '',
+          portion: '',
+        }));
+
+        const calculated = await calculateMealWithUserMacros(ingredientsWithIds, defaultPerMeal);
+
+        return {
+          optionId: meal.optionId,
+          ingredients: calculated.map((ing) => ({
+            name: ing.name,
+            quantity: ing.quantity,
+            portion: ing.portion || '',
+          })),
+        };
+      })
+    );
+
+    return results;
+  }
 
   console.warn(
     `🔄 Recalculando ${meals.length} comidas con ${profile.mealCount} comidas/día -> ${perMealMacros.protein}P ${perMealMacros.carbs}C ${perMealMacros.fat}G por comida`

@@ -372,6 +372,15 @@ export default function AdnScreen() {
         .select('*', { count: 'exact', head: true })
         .eq('user_id', user.id);
 
+      // Obtener foto de progreso más reciente con datos de snapshot
+      const { data: latestProgressPhoto } = await supabase
+        .from('progress_photos')
+        .select('snapshot, created_at')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
       // Si no existe perfil, crear uno
       if (!profileData) {
         const { data: newProfile, error: createError } = await supabase
@@ -393,19 +402,36 @@ export default function AdnScreen() {
         }
       } else {
         // Verificar si necesitamos calcular macros objetivo
-        // Si no hay comidas pero sí hay datos de perfil, calcular macros por defecto (3 comidas)
+        // Si no hay cached_daily_macros pero sí hay datos de perfil, calcular macros
         let cachedMacros = profileData.cached_daily_macros;
+        const hasMeals = (mealCount || 0) > 0;
         
         if (!cachedMacros && profileData.weight && profileData.height && profileData.goal) {
           try {
-            console.log('🧠 ADN: Calculando macros objetivo para usuario sin comidas...');
-            const defaultMealCount = 3; // Por defecto asumimos 3 comidas/día
+            console.log('🧠 ADN: Calculando macros objetivo con toda la información disponible...');
+            
+            // Extraer datos de la foto de progreso si existe
+            const progressSnapshot = latestProgressPhoto?.snapshot as any;
+            let latestProgressPhotoData = undefined;
+            if (progressSnapshot) {
+              latestProgressPhotoData = {
+                weight: progressSnapshot.weight || undefined,
+                bodyFatPercentage: progressSnapshot.bodyFatPercentage || undefined,
+                date: latestProgressPhoto?.created_at,
+              };
+            }
+
+            // Obtener medidas corporales para incluir en el cálculo
+            const { data: measurementsForCalc } = await supabase
+              .from('body_measurements')
+              .select('name, value, is_dominant')
+              .eq('user_id', user.id);
             
             const dailyMacros = await calculateUserDailyMacros({
               weight: profileData.weight,
               height: profileData.height,
               goal: profileData.goal,
-              mealCount: defaultMealCount,
+              mealCount: hasMeals ? mealCount! : undefined, // Solo si tiene comidas
               age: profileData.age || undefined,
               sex: profileData.sex || undefined,
               bodyFatPercentage: profileData.body_fat_percentage || undefined,
@@ -414,6 +440,8 @@ export default function AdnScreen() {
               trainingExperience: profileData.training_experience || undefined,
               metabolicRate: profileData.metabolic_rate || undefined,
               trainingDaysPerWeek: profileData.training_days_per_week || undefined,
+              bodyMeasurements: measurementsForCalc || undefined,
+              latestProgressPhoto: latestProgressPhotoData,
             });
             
             cachedMacros = dailyMacros;
@@ -423,7 +451,7 @@ export default function AdnScreen() {
               .from('user_profiles')
               .update({
                 cached_daily_macros: dailyMacros,
-                cached_macros_meal_count: mealCount || defaultMealCount,
+                cached_macros_meal_count: mealCount || 0,
                 cached_macros_updated_at: new Date().toISOString(),
               })
               .eq('user_id', user.id);

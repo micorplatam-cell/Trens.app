@@ -404,7 +404,7 @@ function PlanScreen() {
                 // Medidas corporales
                 bodyMeasurements: bodyMeasurements,
               });
-              perMealMacros = dailyMacros.perMeal;
+              perMealMacros = dailyMacros.perMeal || null;
 
               // Guardar en DB para próximas cargas
               await supabase
@@ -974,7 +974,7 @@ function PlanScreen() {
       console.log('💾 SYNC: Macros guardados en Supabase para sincronización');
 
       // Actualizar estado local
-      setMealMacros(dailyMacros.perMeal);
+      setMealMacros(dailyMacros.perMeal || null);
     } catch (error) {
       console.error('Error updating cached daily macros:', error);
     }

@@ -2314,7 +2314,13 @@ export async function autoAdjustAll(userId: string): Promise<HankToolResult> {
         trainingDaysPerWeek: userProfile.training_days_per_week || trainingFrequency,
       });
 
-      const perMealMacros = dailyMacros.perMeal;
+      // Si no hay perMeal, calcular manualmente
+      const perMealMacros = dailyMacros.perMeal || {
+        calories: Math.round(dailyMacros.totalCalories / mealCount),
+        protein: Math.round(dailyMacros.totalProtein / mealCount),
+        carbs: Math.round(dailyMacros.totalCarbs / mealCount),
+        fat: Math.round(dailyMacros.totalFat / mealCount),
+      };
 
       // Recalcular cada comida
       let updatedMeals = 0;
@@ -6690,6 +6696,8 @@ export async function syncNutritionMacros(userId: string): Promise<HankToolResul
       return { success: true, message: 'No hay comidas para sincronizar.' };
     }
 
+    const mealsCount = meals.length;
+
     // 3. Importar función de cálculo de macros
     const { calculateUserDailyMacros, calculateMealWithUserMacros } = await import('./nutrition');
 
@@ -6698,7 +6706,7 @@ export async function syncNutritionMacros(userId: string): Promise<HankToolResul
       weight: userProfile.weight,
       height: userProfile.height,
       goal: userProfile.goal,
-      mealCount: meals.length,
+      mealCount: mealsCount,
       age: userProfile.age,
       sex: userProfile.sex,
       activityLevel: userProfile.activity_level || 'MODERADO',
@@ -6706,7 +6714,13 @@ export async function syncNutritionMacros(userId: string): Promise<HankToolResul
       trainingDaysPerWeek: userProfile.training_days_per_week,
     });
 
-    const perMealMacros = dailyMacros.perMeal;
+    // Si no hay perMeal, calcular manualmente
+    const perMealMacros = dailyMacros.perMeal || {
+      calories: Math.round(dailyMacros.totalCalories / mealsCount),
+      protein: Math.round(dailyMacros.totalProtein / mealsCount),
+      carbs: Math.round(dailyMacros.totalCarbs / mealsCount),
+      fat: Math.round(dailyMacros.totalFat / mealsCount),
+    };
 
     // 5. Recalcular cada comida
     let updatedCount = 0;

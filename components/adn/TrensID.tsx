@@ -343,11 +343,11 @@ export default function TrensID({ userId, profileData, measurements, onUpdate }:
                     <Text className="text-[10px] text-fire-orange font-bold uppercase tracking-wider">
                       {(editData.meal_count || 0) > 0 ? 'Macros Diarios' : 'Macros Objetivo'}
                     </Text>
-                    <Text className="text-zinc-600 text-[10px] font-mono ml-auto">
-                      {(editData.meal_count || 0) > 0 
-                        ? `${editData.meal_count} comidas` 
-                        : '3 comidas (default)'}
-                    </Text>
+                    {(editData.meal_count || 0) > 0 && (
+                      <Text className="text-zinc-600 text-[10px] font-mono ml-auto">
+                        {editData.meal_count} comidas
+                      </Text>
+                    )}
                   </View>
                   <View className="flex-row justify-between">
                     {/* Calorías */}
