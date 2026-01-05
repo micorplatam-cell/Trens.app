@@ -255,6 +255,13 @@ function PlanScreen() {
     carbs: number;
     fat: number;
   } | null>(null);
+  // Macros diarios totales (para calcular por comida cuando el usuario agrega comidas)
+  const [dailyMacroTotals, setDailyMacroTotals] = useState<{
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+  } | null>(null);
   const [newMealMacros, setNewMealMacros] = useState<{
     calories: number;
     protein: number;
@@ -380,6 +387,15 @@ function PlanScreen() {
             console.log('💾 PLAN: Usando macros cacheados de DB');
           }
           perMealMacros = dbCachedMacros.perMeal;
+          // Guardar totales en estado para uso al agregar comidas
+          if (dbCachedMacros.totalCalories) {
+            setDailyMacroTotals({
+              calories: dbCachedMacros.totalCalories,
+              protein: dbCachedMacros.totalProtein,
+              carbs: dbCachedMacros.totalCarbs,
+              fat: dbCachedMacros.totalFat,
+            });
+          }
         } else {
           // Calcular nuevos macros con IA
           if (__DEV__) {
@@ -405,6 +421,14 @@ function PlanScreen() {
                 bodyMeasurements: bodyMeasurements,
               });
               perMealMacros = dailyMacros.perMeal || null;
+
+              // Guardar macros totales en estado para uso al agregar comidas
+              setDailyMacroTotals({
+                calories: dailyMacros.totalCalories,
+                protein: dailyMacros.totalProtein,
+                carbs: dailyMacros.totalCarbs,
+                fat: dailyMacros.totalFat,
+              });
 
               // Guardar en DB para próximas cargas
               await supabase
@@ -1202,6 +1226,16 @@ function PlanScreen() {
             };
           }
 
+          // Si aún no hay macros pero tenemos los totales diarios, calcular por comida
+          if (!targetMacrosForNewMeal && dailyMacroTotals) {
+            targetMacrosForNewMeal = {
+              calories: Math.round(dailyMacroTotals.calories / newMealCount),
+              protein: Math.round(dailyMacroTotals.protein / newMealCount),
+              carbs: Math.round(dailyMacroTotals.carbs / newMealCount),
+              fat: Math.round(dailyMacroTotals.fat / newMealCount),
+            };
+          }
+
           // Usar calculateMealWithUserMacros si hay targetMacros
           if (targetMacrosForNewMeal) {
             const calculated = await calculateMealWithUserMacros(
@@ -1873,11 +1907,12 @@ function PlanScreen() {
         <Pressable
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            // Usar mealMacros existente ajustado para n+1 comidas
+            const newMealCount = meals.length + 1;
+
+            // Calcular macros objetivo para la nueva comida
             if (mealMacros && meals.length > 0) {
-              const newMealCount = meals.length + 1;
+              // Si ya hay comidas, ajustar proporcionalmente
               const currentMealCount = meals.length;
-              // Ajustar macros: total diario / nueva cantidad de comidas
               const adjustedMacros = {
                 calories: Math.round((mealMacros.calories * currentMealCount) / newMealCount),
                 protein: Math.round((mealMacros.protein * currentMealCount) / newMealCount),
@@ -1885,6 +1920,15 @@ function PlanScreen() {
                 fat: Math.round((mealMacros.fat * currentMealCount) / newMealCount),
               };
               setNewMealMacros(adjustedMacros);
+            } else if (dailyMacroTotals) {
+              // Si es la primera comida, dividir los totales diarios
+              const newMealMacrosCalc = {
+                calories: Math.round(dailyMacroTotals.calories / newMealCount),
+                protein: Math.round(dailyMacroTotals.protein / newMealCount),
+                carbs: Math.round(dailyMacroTotals.carbs / newMealCount),
+                fat: Math.round(dailyMacroTotals.fat / newMealCount),
+              };
+              setNewMealMacros(newMealMacrosCalc);
             }
             setShowAddMeal(true);
           }}
