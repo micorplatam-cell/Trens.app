@@ -48,9 +48,88 @@ const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
 // ============================================================================
 // HELPER: Determinar si una herramienta es de ESCRITURA (modifica datos)
 // Las herramientas de LECTURA no deben disparar animación ni cerrar chat
+// Sistema más robusto: usa patrones + whitelist explícita
 // ============================================================================
 const isWriteTool = (toolName: string): boolean => {
-  // Patrones de herramientas de LECTURA (GET, LIST, SHOW, etc.)
+  // =========================================================================
+  // WHITELIST: Herramientas de ESCRITURA explícitas (SÍ disparan animación)
+  // =========================================================================
+  const writeTools = new Set([
+    // GYM - Modificar ejercicios
+    'GYM_ADD_EXERCISE',
+    'GYM_REMOVE_EXERCISE',
+    'GYM_REPLACE_EXERCISE',
+    'GYM_UPDATE_SERIES_DETAIL',
+    // ASSET - Modificar series y datos
+    'ASSET_UPDATE_FIELD',
+    'ASSET_REMOVE_SERIES',
+    'ASSET_ADD_SERIES',
+    'ASSET_REPLACE_SERIES',
+    'ASSET_SET_SERIES',
+    // ADN - Modificar perfil
+    'ADN_UPDATE_PROFILE',
+    'ADN_SET_BIOMETRICS',
+    'ADN_ADD_MEASUREMENT',
+    'ADN_REMOVE_MEASUREMENT',
+    'ADN_UPDATE_MEASUREMENT',
+    // PLAN - Modificar comidas/suplementos
+    'PLAN_ADD_MEAL',
+    'PLAN_REMOVE_MEAL',
+    'PLAN_UPDATE_MEAL_TIME',
+    'PLAN_UPDATE_INGREDIENTS',
+    'PLAN_ADD_SUPPLEMENT',
+    'PLAN_REMOVE_SUPPLEMENT',
+    'PLAN_UPDATE_SUPPLEMENT_TIME',
+    // PLAN BUILDER - Ejecutar plan
+    'PLAN_BUILDER_START',
+    'PLAN_BUILDER_ADD_MEAL',
+    'PLAN_BUILDER_EDIT_MEAL',
+    'PLAN_BUILDER_REMOVE_MEAL',
+    'PLAN_BUILDER_ADD_SUPPLEMENT',
+    'PLAN_BUILDER_REMOVE_SUPPLEMENT',
+    'PLAN_BUILDER_SET_TRAINING',
+    'PLAN_BUILDER_EXECUTE',
+    // TRAINING - Modificar plan de entrenamiento
+    'TRAINING_ASSIGN_PLAN',
+    'TRAINING_RESTRUCTURE',
+    'TRAINING_RENAME_DAY',
+    'TRAINING_ADD_DAY',
+    'TRAINING_REMOVE_DAY',
+    // SYNC - Sincronizar datos
+    'SYNC_NUTRITION_MACROS',
+    'AUTO_ADJUST_ALL',
+    // PRO - Guardar notas
+    'PRO_ADD_EXERCISE_NOTE',
+    // GOALS - Gestionar metas
+    'SET_USER_GOAL',
+    'UPDATE_GOAL_PROGRESS',
+    // INVENTORY - Modificar inventario
+    'INVENTORY_ADD_ITEM',
+    'INVENTORY_UPDATE_ITEM',
+    'INVENTORY_REMOVE_ITEM',
+    // MAINTENANCE - Registrar mantenimiento
+    'MAINTENANCE_LOG',
+    // EVENTS - Gestionar eventos
+    'EVENT_CREATE',
+    'EVENT_UPDATE',
+    'EVENT_DELETE',
+    // SURF - Registrar sesiones
+    'SURF_LOG_SESSION',
+    'SURF_FAVORITE_SPOT',
+    // DIET - Legacy
+    'DIET_ADD_CALORIES',
+    // LOGGING
+    'LOG_WORKOUT_SET',
+  ]);
+
+  // Si está en la whitelist de escritura, es write
+  if (writeTools.has(toolName)) {
+    return true;
+  }
+
+  // =========================================================================
+  // BLACKLIST: Herramientas de LECTURA (NO disparan animación)
+  // =========================================================================
   const readPatterns = [
     '_GET_',
     '_LIST_',
@@ -59,53 +138,20 @@ const isWriteTool = (toolName: string): boolean => {
     'GET_USER_',
     'ANALYZE_',
     '_COMPARE_',
-    'SPOTIFY_', // Consultas de Spotify
-    'HANK_CLEAR_', // Clear history no es "escribir datos del usuario"
+    'SPOTIFY_',
+    'HANK_CLEAR_',
+    'HANK_GET_',
   ];
 
-  // También considerar herramientas específicas de solo lectura
-  const readOnlyTools = [
-    'ADN_GET_PROFILE',
-    'ADN_GET_RECORDS',
-    'GYM_GET_TODAY_ROUTINE',
-    'GYM_LIST_EXERCISES',
-    'GYM_GET_EXERCISE_DETAILS',
-    'PLAN_GET_MEALS',
-    'PLAN_GET_NEXT_MEAL',
-    'PLAN_GET_STACK',
-    'PLAN_GET_MEAL_DETAILS',
-    'PLAN_BUILDER_SHOW',
-    'TRAINING_DESIGN_PLAN',
-    'TRAINING_LIST_TEMPLATES',
-    'TRAINING_GET_CURRENT_PLAN',
-    'PROGRESS_GET_PHOTOS',
-    'PROGRESS_GET_PHOTO_DETAIL',
-    'PROGRESS_COMPARE_PHOTOS',
-    'GET_FULL_USER_CONTEXT',
-    'GET_FULL_PLAN_STATUS',
-    'INVENTORY_LIST_ITEMS',
-    'MAINTENANCE_GET_HISTORY',
-    'MAINTENANCE_GET_ALERTS',
-    'EVENT_LIST',
-    'SURF_GET_SESSIONS',
-    'SURF_GET_SPOTS',
-    'ASSET_GET_SCHEMA',
-    'ASSET_READ',
-  ];
-
-  // Si es una herramienta de solo lectura, retornar false
-  if (readOnlyTools.includes(toolName)) {
-    return false;
-  }
-
-  // Si coincide con patrones de lectura, retornar false
+  // Si coincide con patrones de lectura, es read
   for (const pattern of readPatterns) {
     if (toolName.includes(pattern)) {
       return false;
     }
   }
 
-  // Por defecto, asumir que es escritura
+  // Por defecto, asumir que es escritura (fail-safe: mejor animar de más que de menos)
+  console.warn(`⚠️ isWriteTool: Herramienta "${toolName}" no clasificada, asumiendo WRITE`);
   return true;
 };
 
@@ -242,6 +288,46 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
 
   // Macro Cache Invalidation - Se incrementa cuando se actualizan datos del perfil
   const [macroCacheInvalidate, setMacroCacheInvalidate] = useState(0);
+
+  // Progress Photos - Fotos de progreso del usuario para análisis visual de Gemini
+  const [progressPhotos, setProgressPhotos] = useState<
+    Array<{
+      id: string;
+      url: string;
+      date: string;
+      weight?: number;
+      bodyFat?: number;
+      notes?: string;
+    }>
+  >([]);
+
+  // User Plan Context - Nutrición y Stack actual para contexto de Gemini
+  const [userPlanContext, setUserPlanContext] = useState<{
+    // Datos biométricos del usuario (ADN/Trens ID)
+    biometrics: {
+      weight?: number; // kg
+      height?: number; // cm
+      age?: number;
+      bodyFat?: number; // %
+      goal?: string; // bulking, cutting, recomp, maintenance
+      sex?: string;
+      activityLevel?: string;
+      bmr?: number; // Basal metabolic rate
+      tdee?: number; // Total daily energy expenditure
+    } | null;
+    meals: Array<{
+      name: string;
+      time: string;
+      ingredients: string[];
+      macros?: { calories: number; protein: number; carbs: number; fat: number };
+    }>;
+    supplements: Array<{ name: string; dose: string; time?: string; times?: string[] }>;
+    training: {
+      frequency: number;
+      currentDay: number;
+      routineNames: Record<string, string>;
+    };
+  } | null>(null);
 
   // -------------------------------------------------------------------------
   // TARGETING SYSTEM - Para animaciones visuales de Hank
@@ -618,6 +704,182 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
 
     return () => clearInterval(interval);
   }, [userId, isValidUser]);
+
+  // -------------------------------------------------------------------------
+  // PROGRESS PHOTOS - Cargar fotos de progreso para análisis visual
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    const loadProgressPhotos = async () => {
+      if (!isValidUser) return;
+
+      try {
+        const { data: photos, error } = await supabase
+          .from('progress_photos')
+          .select('id, photo_url, created_at, snapshot, notes')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(5); // Solo las 5 más recientes
+
+        if (error) {
+          console.warn('⚠️ HANK: Error cargando fotos de progreso:', error.message);
+          return;
+        }
+
+        if (photos && photos.length > 0) {
+          const formattedPhotos = photos.map((photo: any) => ({
+            id: photo.id,
+            url: photo.photo_url,
+            date: new Date(photo.created_at).toLocaleDateString('es-ES', {
+              day: 'numeric',
+              month: 'short',
+              year: 'numeric',
+            }),
+            weight: photo.snapshot?.weight,
+            bodyFat: photo.snapshot?.body_fat_percentage,
+            notes: photo.notes,
+          }));
+          console.warn(
+            `📸 HANK: Cargadas ${formattedPhotos.length} fotos de progreso para análisis visual`
+          );
+          setProgressPhotos(formattedPhotos);
+        }
+      } catch (error) {
+        console.warn('⚠️ HANK: Error cargando fotos de progreso:', error);
+      }
+    };
+
+    loadProgressPhotos();
+  }, [userId, isValidUser, refreshTrigger]); // Recargar cuando refreshTrigger cambie
+
+  // -------------------------------------------------------------------------
+  // USER PLAN CONTEXT - Cargar nutrición, stack y entrenamiento
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    const loadUserPlanContext = async () => {
+      if (!isValidUser) return;
+
+      try {
+        // 1. Cargar comidas
+        const { data: meals } = await supabase
+          .from('meals')
+          .select('name, scheduled_time, ingredients, calories, protein_g, carbs_g, fat_g')
+          .eq('user_id', userId)
+          .order('scheduled_time', { ascending: true });
+
+        // 2. Cargar stack de suplementos
+        const { data: stack, error: stackError } = await supabase
+          .from('supplement_stack')
+          .select('name, dose, time, times')
+          .eq('user_id', userId)
+          .eq('is_active', true);
+
+        if (stackError) {
+          console.warn('⚠️ Error cargando suplementos:', stackError);
+        }
+
+        // 3. Cargar datos COMPLETOS del perfil (biométricos + entrenamiento)
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles')
+          .select(
+            'training_frequency, training_current_day, training_routine_names, ' +
+              'weight_kg, height_cm, age, body_fat, goal, sex, activity_level, bmr, tdee'
+          )
+          .eq('id', userId)
+          .single();
+
+        if (profileError) {
+          console.warn('⚠️ Error cargando perfil:', profileError);
+        }
+
+        // Casting seguro del perfil
+        const profileData = profile as {
+          training_frequency?: number;
+          training_current_day?: number;
+          training_routine_names?: Record<string, string>;
+          weight_kg?: number;
+          height_cm?: number;
+          age?: number;
+          body_fat?: number;
+          goal?: string;
+          sex?: string;
+          activity_level?: string;
+          bmr?: number;
+          tdee?: number;
+        } | null;
+
+        // Formatear comidas
+        const formattedMeals = (meals || []).map((meal: any) => ({
+          name: meal.name || 'Comida',
+          time: meal.scheduled_time || '',
+          ingredients: (meal.ingredients || []).map(
+            (i: any) => `${i.name}${i.quantity ? ` (${i.quantity})` : ''}`
+          ),
+          macros: meal.calories
+            ? {
+                calories: meal.calories,
+                protein: meal.protein_g,
+                carbs: meal.carbs_g,
+                fat: meal.fat_g,
+              }
+            : undefined,
+        }));
+
+        // Formatear stack - soportar múltiples horarios
+        const formattedStack = (stack || []).map((s: any) => {
+          // Si tiene times (array), usarlo; si no, usar time
+          const allTimes: string[] = [];
+          if (s.times && Array.isArray(s.times) && s.times.length > 0) {
+            allTimes.push(...s.times);
+          } else if (s.time) {
+            allTimes.push(s.time);
+          }
+          return {
+            name: s.name,
+            dose: s.dose,
+            time: allTimes.length === 1 ? allTimes[0] : undefined,
+            times: allTimes.length > 1 ? allTimes : undefined,
+          };
+        });
+
+        // Formatear entrenamiento
+        const training = {
+          frequency: profileData?.training_frequency || 0,
+          currentDay: profileData?.training_current_day || 0,
+          routineNames: profileData?.training_routine_names || {},
+        };
+
+        // Formatear biométricos
+        const biometrics = profileData
+          ? {
+              weight: profileData.weight_kg || undefined,
+              height: profileData.height_cm || undefined,
+              age: profileData.age || undefined,
+              bodyFat: profileData.body_fat || undefined,
+              goal: profileData.goal || undefined,
+              sex: profileData.sex || undefined,
+              activityLevel: profileData.activity_level || undefined,
+              bmr: profileData.bmr || undefined,
+              tdee: profileData.tdee || undefined,
+            }
+          : null;
+
+        setUserPlanContext({
+          biometrics,
+          meals: formattedMeals,
+          supplements: formattedStack,
+          training,
+        });
+
+        console.warn(
+          `📋 HANK: Plan cargado - ${formattedMeals.length} comidas, ${formattedStack.length} suplementos, ${training.frequency} días/semana, bio: ${biometrics?.weight}kg`
+        );
+      } catch (error) {
+        console.warn('⚠️ HANK: Error cargando plan del usuario:', error);
+      }
+    };
+
+    loadUserPlanContext();
+  }, [userId, isValidUser, refreshTrigger]);
 
   // -------------------------------------------------------------------------
   // CONTEXT UPDATES
@@ -1180,16 +1442,30 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
   useEffect(() => {
     const loadExerciseCatalog = async () => {
       try {
+        // Cargar desde tabla 'exercises' (catálogo global) - arquitectura actual
         const { data, error } = await supabase
-          .from('asset_templates')
+          .from('exercises')
           .select('name')
-          .eq('asset_type', 'gym_exercise')
+          .eq('is_active', true)
           .order('name');
 
         if (!error && data) {
           const exercises = data.map((t) => t.name as string);
           setAvailableExercises(exercises);
-          console.warn('📋 CATÁLOGO DE EJERCICIOS:', exercises);
+          console.warn(`📋 CATÁLOGO DE EJERCICIOS: ${exercises.length} ejercicios cargados`);
+        } else {
+          // Fallback a asset_templates si la tabla exercises no existe o está vacía
+          const { data: fallbackData } = await supabase
+            .from('asset_templates')
+            .select('name')
+            .eq('asset_type', 'gym_exercise')
+            .order('name');
+
+          if (fallbackData) {
+            const exercises = fallbackData.map((t) => t.name as string);
+            setAvailableExercises(exercises);
+            console.warn(`📋 CATÁLOGO (fallback): ${exercises.length} ejercicios`);
+          }
         }
       } catch (e) {
         console.warn('Error loading exercise catalog:', e);
@@ -1234,14 +1510,26 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
         ? {
             mealsCount: planBuilderState.meals.length,
             supplementsCount: planBuilderState.supplements.length,
+            hasTraining: !!planBuilderState.training,
             meals: planBuilderState.meals.map((m) => ({
               time: m.time,
               name: m.name,
               ingredientsCount: m.ingredients.length,
             })),
             supplements: planBuilderState.supplements.map((s) => ({ name: s.name, dose: s.dose })),
+            training: planBuilderState.training
+              ? {
+                  goal: planBuilderState.training.goal,
+                  level: planBuilderState.training.level,
+                  frequency: planBuilderState.training.frequency,
+                }
+              : null,
           }
         : null,
+      // Progress Photos - Para análisis visual de Gemini
+      progressPhotos: progressPhotos.length > 0 ? progressPhotos : undefined,
+      // User Plan Context - Nutrición, stack y entrenamiento actual
+      userPlanContext: userPlanContext,
     };
   }, [
     screenContext,
@@ -1251,6 +1539,8 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
     aliases,
     availableExercises,
     planBuilderState,
+    progressPhotos,
+    userPlanContext,
   ]);
 
   // -------------------------------------------------------------------------

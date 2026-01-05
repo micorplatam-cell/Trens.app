@@ -2878,19 +2878,19 @@ export async function planRemoveMeal(
     let mealId = options.mealId;
 
     if (!mealId) {
-      // Find meal by time or position
+      // Find meal by time or position (usar scheduled_time, NO time)
       const { data: meals } = await supabase
         .from('meals')
-        .select('id, time')
+        .select('id, scheduled_time')
         .eq('user_id', userId)
-        .order('time', { ascending: true });
+        .order('scheduled_time', { ascending: true });
 
       if (!meals || meals.length === 0) {
         return { success: false, message: 'No hay comidas para eliminar.' };
       }
 
       if (options.time) {
-        const meal = meals.find((m) => m.time.startsWith(options.time!));
+        const meal = meals.find((m) => m.scheduled_time?.startsWith(options.time!));
         if (meal) mealId = meal.id;
       } else if (options.position) {
         if (options.position === 'first') mealId = meals[0].id;
@@ -3023,6 +3023,7 @@ export async function planUpdateMealTime(
 
 /**
  * Actualiza los ingredientes de una comida
+ * Usa el modelo JSONB en meals.ingredients (modelo actual)
  */
 export async function planUpdateIngredients(
   userId: string,
@@ -3030,37 +3031,68 @@ export async function planUpdateIngredients(
   ingredients: Array<{ name: string; quantity?: string; portion?: string }>
 ): Promise<HankToolResult> {
   try {
-    // Get the meal's option
-    const { data: options } = await supabase
-      .from('meal_options')
-      .select('id')
-      .eq('meal_id', mealId)
-      .order('option_index', { ascending: true })
-      .limit(1);
+    // Verificar que la comida existe y pertenece al usuario
+    const { data: meal, error: mealError } = await supabase
+      .from('meals')
+      .select('id, name')
+      .eq('id', mealId)
+      .eq('user_id', userId)
+      .single();
 
-    if (!options || options.length === 0) {
-      return { success: false, message: 'No encontré opciones para esta comida.' };
+    if (mealError || !meal) {
+      return { success: false, message: 'No encontré esa comida.' };
     }
 
-    const optionId = options[0].id;
-
-    // Delete existing ingredients
-    await supabase.from('meal_ingredients').delete().eq('option_id', optionId);
-
-    // Insert new ingredients
-    const ingredientsToInsert = ingredients.map((ing, idx) => ({
-      option_id: optionId,
+    // Calcular macros con IA para los nuevos ingredientes
+    const ingredientsWithId = ingredients.map((ing, idx) => ({
+      id: `ing-${idx}`,
       name: ing.name,
-      quantity: ing.quantity || '~100g',
+      quantity: ing.quantity || '',
       portion: ing.portion || '',
-      sort_order: idx,
     }));
 
-    await supabase.from('meal_ingredients').insert(ingredientsToInsert);
+    let finalIngredients = ingredientsWithId;
+    
+    try {
+      const calculatedIngredients = await calculateMacrosWithAI(ingredientsWithId);
+      finalIngredients = calculatedIngredients.map((ing, idx) => ({
+        id: `ing-${idx}`,
+        name: ing.name,
+        quantity: ing.quantity || '~100g',
+        portion: ing.portion || '',
+        calories: ing.nutritionInfo?.calories,
+        protein: ing.nutritionInfo?.protein,
+        carbs: ing.nutritionInfo?.carbs,
+        fat: ing.nutritionInfo?.fat,
+        order: idx,
+      }));
+    } catch (calcError) {
+      console.warn('Error calculando macros, usando valores sin macros:', calcError);
+      finalIngredients = ingredients.map((ing, idx) => ({
+        id: `ing-${idx}`,
+        name: ing.name,
+        quantity: ing.quantity || '~100g',
+        portion: ing.portion || '',
+        order: idx,
+      }));
+    }
+
+    // Actualizar ingredientes como JSONB en meals.ingredients
+    const { error: updateError } = await supabase
+      .from('meals')
+      .update({ 
+        ingredients: finalIngredients,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', mealId);
+
+    if (updateError) throw updateError;
+
+    const ingredientNames = ingredients.map((i) => i.name).join(', ');
 
     return {
       success: true,
-      message: `✅ Ingredientes actualizados: ${ingredients.length} ingredientes.`,
+      message: `✅ Ingredientes de ${meal.name} actualizados: ${ingredientNames}`,
       affectedRecords: ingredients.length,
     };
   } catch (error) {
@@ -3275,27 +3307,20 @@ ${stackContext}
 }
 
 /**
- * Obtiene detalles de una comida específica con TODAS sus opciones
+ * Obtiene detalles de una comida específica con todos sus ingredientes
+ * Usa el modelo JSONB en meals.ingredients y scheduled_time
  */
 export async function planGetMealDetails(
   userId: string,
   mealIdentifier: string | number // Puede ser hora (ej: "20:00", "8pm", "cena") o índice (1, 2, 3...)
 ): Promise<HankToolResult> {
   try {
-    // Primero obtener todas las comidas
+    // Obtener todas las comidas con el modelo correcto
     const { data: meals, error } = await supabase
       .from('meals')
-      .select(
-        `
-        id, time, selected_option,
-        meal_options (
-          id, name, option_index,
-          meal_ingredients (id, name, quantity, portion)
-        )
-      `
-      )
+      .select('id, name, scheduled_time, ingredients, calories, protein_g, carbs_g, fat_g, is_completed')
       .eq('user_id', userId)
-      .order('time', { ascending: true });
+      .order('scheduled_time', { ascending: true });
 
     if (error) throw error;
     if (!meals || meals.length === 0) {
@@ -3357,7 +3382,8 @@ export async function planGetMealDetails(
           if (identifier.includes(keyword)) {
             // Buscar comida en esas horas
             for (let i = 0; i < meals.length; i++) {
-              const mealHour = parseInt(meals[i].time.split(':')[0]);
+              const mealTime = meals[i].scheduled_time || '12:00';
+              const mealHour = parseInt(mealTime.split(':')[0]);
               if (hours.includes(mealHour)) {
                 targetMeal = meals[i];
                 mealIndex = i;
@@ -3368,15 +3394,12 @@ export async function planGetMealDetails(
             // Si no encontró en las horas esperadas, usar fallback inteligente
             if (!targetMeal) {
               if (keyword === 'cena') {
-                // "cena" = última comida del día
                 targetMeal = meals[meals.length - 1];
                 mealIndex = meals.length - 1;
               } else if (keyword === 'desayuno') {
-                // "desayuno" = primera comida del día
                 targetMeal = meals[0];
                 mealIndex = 0;
               } else if (keyword === 'almuerzo' || keyword === 'comida') {
-                // "almuerzo/comida" = segunda comida si hay más de una
                 if (meals.length >= 2) {
                   targetMeal = meals[1];
                   mealIndex = 1;
@@ -3395,7 +3418,8 @@ export async function planGetMealDetails(
       if (!targetMeal && identifier.includes(':')) {
         const searchTime = identifier;
         targetMeal = meals.find((m, i) => {
-          if (m.time.startsWith(searchTime)) {
+          const mealTime = m.scheduled_time || '';
+          if (mealTime.startsWith(searchTime)) {
             mealIndex = i;
             return true;
           }
@@ -3420,10 +3444,11 @@ export async function planGetMealDetails(
       // Listar las comidas disponibles
       const available = meals
         .map((m, i) => {
-          const [h] = m.time.split(':').map(Number);
+          const time = m.scheduled_time || '12:00';
+          const [h] = time.split(':').map(Number);
           const period = h >= 12 ? 'PM' : 'AM';
           const h12 = h % 12 || 12;
-          return `${i + 1}. ${h12}:00 ${period}`;
+          return `${i + 1}. ${m.name || 'Comida'} (${h12}:00 ${period})`;
         })
         .join('\n');
       return {
@@ -3432,31 +3457,50 @@ export async function planGetMealDetails(
       };
     }
 
-    // Formatear la respuesta con todas las opciones
-    const formatTime = (t: string) => {
+    // Formatear la respuesta
+    const formatTime = (t: string | null) => {
+      if (!t) return '??:??';
       const [h, m] = t.split(':').map(Number);
       const period = h >= 12 ? 'PM' : 'AM';
       const h12 = h % 12 || 12;
       return `${h12}:${m.toString().padStart(2, '0')} ${period}`;
     };
 
-    const options = (targetMeal.meal_options as any[]) || [];
-    const selectedOption = targetMeal.selected_option || 0;
+    // Obtener ingredientes del JSONB
+    const ingredients = targetMeal.ingredients || [];
+    const ingredientsText = ingredients.length > 0
+      ? ingredients.map((ing: any, idx: number) => {
+          const macros = ing.calories 
+            ? ` (${ing.calories}kcal | ${ing.protein || 0}P ${ing.carbs || 0}C ${ing.fat || 0}G)`
+            : '';
+          return `  ${idx + 1}. ${ing.name}: ${ing.quantity || '~100g'}${macros}`;
+        }).join('\n')
+      : '  Sin ingredientes configurados';
 
-    const optionsText = options
-      .map((opt, idx) => {
-        const isSelected = idx === selectedOption ? ' ✓ (SELECCIONADA)' : '';
-        const ings =
-          opt.meal_ingredients?.map((i: any) => `    • ${i.name}: ${i.quantity}`).join('\n') ||
-          '    Sin ingredientes';
-        return `📌 OPCIÓN ${idx + 1}${isSelected}:\n${ings}`;
-      })
-      .join('\n\n');
+    // Calcular totales de macros
+    let totalCals = 0, totalP = 0, totalC = 0, totalF = 0;
+    ingredients.forEach((ing: any) => {
+      totalCals += ing.calories || 0;
+      totalP += ing.protein || 0;
+      totalC += ing.carbs || 0;
+      totalF += ing.fat || 0;
+    });
+
+    const totalsStr = totalCals > 0 
+      ? `\n\n📊 TOTALES: ${Math.round(totalCals)} kcal | ${Math.round(totalP)}g P | ${Math.round(totalC)}g C | ${Math.round(totalF)}g G`
+      : '';
+
+    const statusIcon = targetMeal.is_completed ? '✅' : '⏳';
 
     return {
       success: true,
-      message: `🍽️ COMIDA ${mealIndex + 1} (${formatTime(targetMeal.time)}):\n\n${optionsText || 'Sin opciones configuradas'}`,
-      data: { meal: targetMeal, mealIndex },
+      message: `🍽️ ${statusIcon} ${targetMeal.name || 'COMIDA'} ${mealIndex + 1} (${formatTime(targetMeal.scheduled_time)}):\n\n📋 INGREDIENTES:\n${ingredientsText}${totalsStr}`,
+      data: { 
+        meal: targetMeal, 
+        mealIndex,
+        ingredients,
+        macros: { calories: totalCals, protein: totalP, carbs: totalC, fat: totalF }
+      },
     };
   } catch (error) {
     console.error('planGetMealDetails error:', error);
@@ -3803,12 +3847,14 @@ export async function planRemoveSupplement(userId: string, name: string): Promis
 }
 
 /**
- * Actualiza la hora de un suplemento
+ * Actualiza la(s) hora(s) de un suplemento
+ * Soporta tanto un solo horario (newTime) como múltiples (newTimes)
  */
 export async function planUpdateSupplementTime(
   userId: string,
   name: string,
-  newTime: string
+  newTime?: string,
+  newTimes?: string[]
 ): Promise<HankToolResult> {
   try {
     // Buscar el suplemento por nombre
@@ -3825,32 +3871,644 @@ export async function planUpdateSupplementTime(
 
     const supplement = supplements[0];
 
-    // Si es PRE o POST workout, no se puede poner hora fija
+    // Helper para formatear hora a AM/PM
+    const formatTime = (time24: string): string => {
+      const [hours, mins] = time24.split(':').map(Number);
+      const period = hours >= 12 ? 'PM' : 'AM';
+      const hours12 = hours % 12 || 12;
+      return `${hours12}:${(mins || 0).toString().padStart(2, '0')} ${period}`;
+    };
+
+    // Determinar si es un solo horario o múltiples
+    if (newTimes && newTimes.length > 0) {
+      // Múltiples horarios - usar campo times[]
+      const { error } = await supabase
+        .from('supplement_stack')
+        .update({
+          times: newTimes,
+          time: newTimes[0], // También guardar el primero en time por compatibilidad
+          is_pre_workout: false,
+          is_post_workout: false,
+        })
+        .eq('id', supplement.id);
+
+      if (error) throw error;
+
+      const timesFormatted = newTimes.map(formatTime).join(', ');
+      return {
+        success: true,
+        message: `✅ ${supplement.name} actualizado a ${newTimes.length} tomas: ${timesFormatted}.`,
+        affectedRecords: 1,
+      };
+    } else if (newTime) {
+      // Un solo horario
+      const { error } = await supabase
+        .from('supplement_stack')
+        .update({
+          time: newTime,
+          times: null, // Limpiar array de múltiples
+          is_pre_workout: false,
+          is_post_workout: false,
+        })
+        .eq('id', supplement.id);
+
+      if (error) throw error;
+
+      return {
+        success: true,
+        message: `✅ Hora de ${supplement.name} actualizada a ${formatTime(newTime)}.`,
+        affectedRecords: 1,
+      };
+    } else {
+      return { success: false, message: 'Debes especificar newTime o newTimes.' };
+    }
+  } catch (error) {
+    console.error('planUpdateSupplementTime error:', error);
+    return { success: false, message: 'Error al actualizar hora del suplemento.' };
+  }
+}
+
+/**
+ * Actualiza la dosis de un suplemento
+ */
+export async function planUpdateSupplementDose(
+  userId: string,
+  name: string,
+  newDose: string
+): Promise<HankToolResult> {
+  try {
+    const { data: supplements } = await supabase
+      .from('supplement_stack')
+      .select('id, name, dose')
+      .eq('user_id', userId)
+      .ilike('name', `%${name}%`)
+      .eq('is_active', true);
+
+    if (!supplements || supplements.length === 0) {
+      return { success: false, message: `No encontré "${name}" en tu stack.` };
+    }
+
+    const supplement = supplements[0];
+    const oldDose = supplement.dose;
+
     const { error } = await supabase
       .from('supplement_stack')
-      .update({
-        time: newTime,
-        is_pre_workout: false,
-        is_post_workout: false,
-      })
+      .update({ dose: newDose })
       .eq('id', supplement.id);
 
     if (error) throw error;
 
-    // Convertir a formato AM/PM
-    const [hours, mins] = newTime.split(':').map(Number);
-    const period = hours >= 12 ? 'PM' : 'AM';
-    const hours12 = hours % 12 || 12;
-    const timeFormatted = `${hours12}:${mins.toString().padStart(2, '0')} ${period}`;
-
     return {
       success: true,
-      message: `✅ Hora de ${supplement.name} actualizada a ${timeFormatted}.`,
+      message: `✅ Dosis de ${supplement.name} actualizada: ${oldDose} → ${newDose}`,
       affectedRecords: 1,
     };
   } catch (error) {
-    console.error('planUpdateSupplementTime error:', error);
-    return { success: false, message: 'Error al actualizar hora del suplemento.' };
+    console.error('planUpdateSupplementDose error:', error);
+    return { success: false, message: 'Error al actualizar dosis del suplemento.' };
+  }
+}
+
+/**
+ * Renombra un suplemento
+ */
+export async function planUpdateSupplementName(
+  userId: string,
+  oldName: string,
+  newName: string
+): Promise<HankToolResult> {
+  try {
+    const { data: supplements } = await supabase
+      .from('supplement_stack')
+      .select('id, name')
+      .eq('user_id', userId)
+      .ilike('name', `%${oldName}%`)
+      .eq('is_active', true);
+
+    if (!supplements || supplements.length === 0) {
+      return { success: false, message: `No encontré "${oldName}" en tu stack.` };
+    }
+
+    const supplement = supplements[0];
+
+    const { error } = await supabase
+      .from('supplement_stack')
+      .update({ name: newName })
+      .eq('id', supplement.id);
+
+    if (error) throw error;
+
+    return {
+      success: true,
+      message: `✅ Suplemento renombrado: ${supplement.name} → ${newName}`,
+      affectedRecords: 1,
+    };
+  } catch (error) {
+    console.error('planUpdateSupplementName error:', error);
+    return { success: false, message: 'Error al renombrar suplemento.' };
+  }
+}
+
+/**
+ * Actualiza el nombre de una comida
+ */
+export async function planUpdateMealName(
+  userId: string,
+  newName: string,
+  mealId?: string,
+  position?: string
+): Promise<HankToolResult> {
+  try {
+    let targetMealId = mealId;
+
+    if (!targetMealId && position) {
+      // Buscar por posición
+      const { data: meals } = await supabase
+        .from('meals')
+        .select('id, name')
+        .eq('user_id', userId)
+        .order('scheduled_time', { ascending: true });
+
+      if (!meals || meals.length === 0) {
+        return { success: false, message: 'No tienes comidas configuradas.' };
+      }
+
+      if (position === 'first') {
+        targetMealId = meals[0].id;
+      } else if (position === 'last') {
+        targetMealId = meals[meals.length - 1].id;
+      } else {
+        const idx = parseInt(position) - 1;
+        if (idx >= 0 && idx < meals.length) {
+          targetMealId = meals[idx].id;
+        }
+      }
+    }
+
+    if (!targetMealId) {
+      return { success: false, message: 'Especifica la comida a renombrar (ID o posición).' };
+    }
+
+    const { data: meal, error: fetchError } = await supabase
+      .from('meals')
+      .select('name')
+      .eq('id', targetMealId)
+      .single();
+
+    if (fetchError || !meal) {
+      return { success: false, message: 'No encontré esa comida.' };
+    }
+
+    const { error } = await supabase.from('meals').update({ name: newName }).eq('id', targetMealId);
+
+    if (error) throw error;
+
+    return {
+      success: true,
+      message: `✅ Comida renombrada: ${meal.name || 'Sin nombre'} → ${newName}`,
+      affectedRecords: 1,
+    };
+  } catch (error) {
+    console.error('planUpdateMealName error:', error);
+    return { success: false, message: 'Error al renombrar comida.' };
+  }
+}
+
+/**
+ * Actualiza los macros de una comida manualmente
+ */
+export async function planUpdateMealMacros(
+  userId: string,
+  mealId?: string,
+  position?: string,
+  calories?: number,
+  protein?: number,
+  carbs?: number,
+  fat?: number
+): Promise<HankToolResult> {
+  try {
+    let targetMealId = mealId;
+
+    if (!targetMealId && position) {
+      const { data: meals } = await supabase
+        .from('meals')
+        .select('id')
+        .eq('user_id', userId)
+        .order('scheduled_time', { ascending: true });
+
+      if (!meals || meals.length === 0) {
+        return { success: false, message: 'No tienes comidas configuradas.' };
+      }
+
+      if (position === 'first') {
+        targetMealId = meals[0].id;
+      } else if (position === 'last') {
+        targetMealId = meals[meals.length - 1].id;
+      } else {
+        const idx = parseInt(position) - 1;
+        if (idx >= 0 && idx < meals.length) {
+          targetMealId = meals[idx].id;
+        }
+      }
+    }
+
+    if (!targetMealId) {
+      return { success: false, message: 'Especifica la comida a actualizar.' };
+    }
+
+    // Construir objeto de actualización solo con campos proporcionados
+    const updates: Record<string, number> = {};
+    const changes: string[] = [];
+
+    if (calories !== undefined) {
+      updates.calories = calories;
+      changes.push(`${calories} kcal`);
+    }
+    if (protein !== undefined) {
+      updates.protein_g = protein;
+      changes.push(`P: ${protein}g`);
+    }
+    if (carbs !== undefined) {
+      updates.carbs_g = carbs;
+      changes.push(`C: ${carbs}g`);
+    }
+    if (fat !== undefined) {
+      updates.fat_g = fat;
+      changes.push(`F: ${fat}g`);
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return { success: false, message: 'Debes especificar al menos un macro a actualizar.' };
+    }
+
+    const { error } = await supabase.from('meals').update(updates).eq('id', targetMealId);
+
+    if (error) throw error;
+
+    return {
+      success: true,
+      message: `✅ Macros actualizados: ${changes.join(', ')}`,
+      affectedRecords: 1,
+    };
+  } catch (error) {
+    console.error('planUpdateMealMacros error:', error);
+    return { success: false, message: 'Error al actualizar macros.' };
+  }
+}
+
+// ============================================================================
+// MEAL OPTIONS (ALTERNATIVAS DE COMIDAS)
+// Sistema para manejar múltiples opciones/platillos por slot de comida
+// ============================================================================
+
+/**
+ * Agrega una opción/alternativa a una comida existente
+ * Esto permite tener múltiples platillos para elegir en el mismo horario
+ */
+export async function planAddMealOption(
+  userId: string,
+  mealId: string,
+  optionName: string,
+  ingredients: Array<{ name: string; quantity?: string; portion?: string }>
+): Promise<HankToolResult> {
+  try {
+    // Verificar que la comida existe
+    const { data: meal, error: mealError } = await supabase
+      .from('meals')
+      .select('id, name')
+      .eq('id', mealId)
+      .eq('user_id', userId)
+      .single();
+
+    if (mealError || !meal) {
+      return { success: false, message: 'No encontré esa comida.' };
+    }
+
+    // Contar opciones existentes
+    const { count } = await supabase
+      .from('meal_options')
+      .select('id', { count: 'exact', head: true })
+      .eq('meal_id', mealId);
+
+    const newPosition = count || 0;
+
+    // Calcular macros con IA
+    const ingredientsWithId = ingredients.map((ing, idx) => ({
+      id: `ing-${idx}`,
+      name: ing.name,
+      quantity: ing.quantity || '',
+      portion: ing.portion || '',
+    }));
+
+    let finalIngredients: any[] = [];
+    try {
+      const calculated = await calculateMacrosWithAI(ingredientsWithId);
+      finalIngredients = calculated.map((ing, idx) => ({
+        name: ing.name,
+        quantity: ing.quantity || '~100g',
+        portion: ing.portion || '',
+        calories: ing.nutritionInfo?.calories,
+        protein: ing.nutritionInfo?.protein,
+        carbs: ing.nutritionInfo?.carbs,
+        fat: ing.nutritionInfo?.fat,
+        order: idx,
+      }));
+    } catch (e) {
+      finalIngredients = ingredients.map((ing, idx) => ({
+        name: ing.name,
+        quantity: ing.quantity || '~100g',
+        portion: ing.portion || '',
+        order: idx,
+      }));
+    }
+
+    // Crear la opción en meal_options
+    const { data: optionData, error: optionError } = await supabase
+      .from('meal_options')
+      .insert({
+        meal_id: mealId,
+        user_id: userId,
+        name: optionName,
+        ingredients: finalIngredients,
+        position: newPosition,
+        is_selected: newPosition === 0, // Primera opción es la seleccionada por defecto
+      })
+      .select()
+      .single();
+
+    if (optionError) throw optionError;
+
+    const ingredientNames = ingredients.map(i => i.name).join(', ');
+
+    return {
+      success: true,
+      message: `✅ Alternativa "${optionName}" agregada a ${meal.name}: ${ingredientNames}`,
+      data: { optionId: optionData.id, position: newPosition },
+      affectedRecords: 1,
+    };
+  } catch (error) {
+    console.error('planAddMealOption error:', error);
+    return { success: false, message: 'Error al agregar alternativa.' };
+  }
+}
+
+/**
+ * Selecciona una opción/alternativa específica para una comida
+ */
+export async function planSelectMealOption(
+  userId: string,
+  mealId: string,
+  optionPosition: number
+): Promise<HankToolResult> {
+  try {
+    // Verificar que la comida existe
+    const { data: meal, error: mealError } = await supabase
+      .from('meals')
+      .select('id, name')
+      .eq('id', mealId)
+      .eq('user_id', userId)
+      .single();
+
+    if (mealError || !meal) {
+      return { success: false, message: 'No encontré esa comida.' };
+    }
+
+    // Obtener todas las opciones
+    const { data: options, error: optionsError } = await supabase
+      .from('meal_options')
+      .select('id, name, position')
+      .eq('meal_id', mealId)
+      .order('position', { ascending: true });
+
+    if (optionsError || !options || options.length === 0) {
+      return { success: false, message: 'Esta comida no tiene alternativas configuradas.' };
+    }
+
+    // Convertir posición (1-based) a índice (0-based)
+    const idx = optionPosition - 1;
+    if (idx < 0 || idx >= options.length) {
+      const available = options.map((o, i) => `${i + 1}. ${o.name}`).join('\n');
+      return {
+        success: false,
+        message: `Opción inválida. Disponibles:\n${available}`,
+      };
+    }
+
+    const targetOption = options[idx];
+
+    // Deseleccionar todas y seleccionar la elegida
+    await supabase
+      .from('meal_options')
+      .update({ is_selected: false })
+      .eq('meal_id', mealId);
+
+    await supabase
+      .from('meal_options')
+      .update({ is_selected: true })
+      .eq('id', targetOption.id);
+
+    return {
+      success: true,
+      message: `✅ Opción "${targetOption.name}" seleccionada para ${meal.name}.`,
+      affectedRecords: 1,
+    };
+  } catch (error) {
+    console.error('planSelectMealOption error:', error);
+    return { success: false, message: 'Error al seleccionar alternativa.' };
+  }
+}
+
+/**
+ * Elimina una opción/alternativa de una comida
+ */
+export async function planRemoveMealOption(
+  userId: string,
+  mealId: string,
+  optionPosition: number
+): Promise<HankToolResult> {
+  try {
+    // Verificar que la comida existe
+    const { data: meal } = await supabase
+      .from('meals')
+      .select('id, name')
+      .eq('id', mealId)
+      .eq('user_id', userId)
+      .single();
+
+    if (!meal) {
+      return { success: false, message: 'No encontré esa comida.' };
+    }
+
+    // Obtener todas las opciones
+    const { data: options } = await supabase
+      .from('meal_options')
+      .select('id, name, position, is_selected')
+      .eq('meal_id', mealId)
+      .order('position', { ascending: true });
+
+    if (!options || options.length === 0) {
+      return { success: false, message: 'Esta comida no tiene alternativas.' };
+    }
+
+    // Convertir posición (1-based) a índice (0-based)
+    const idx = optionPosition - 1;
+    if (idx < 0 || idx >= options.length) {
+      return { success: false, message: `Opción ${optionPosition} no existe.` };
+    }
+
+    const targetOption = options[idx];
+    const wasSelected = targetOption.is_selected;
+
+    // Eliminar la opción
+    const { error } = await supabase
+      .from('meal_options')
+      .delete()
+      .eq('id', targetOption.id);
+
+    if (error) throw error;
+
+    // Si era la seleccionada y quedan más, seleccionar la primera
+    if (wasSelected && options.length > 1) {
+      const nextOption = options.find(o => o.id !== targetOption.id);
+      if (nextOption) {
+        await supabase
+          .from('meal_options')
+          .update({ is_selected: true })
+          .eq('id', nextOption.id);
+      }
+    }
+
+    return {
+      success: true,
+      message: `✅ Alternativa "${targetOption.name}" eliminada de ${meal.name}.`,
+      affectedRecords: 1,
+    };
+  } catch (error) {
+    console.error('planRemoveMealOption error:', error);
+    return { success: false, message: 'Error al eliminar alternativa.' };
+  }
+}
+
+/**
+ * Lista todas las opciones/alternativas de una comida
+ */
+export async function planGetMealOptions(
+  userId: string,
+  mealId: string
+): Promise<HankToolResult> {
+  try {
+    // Verificar que la comida existe
+    const { data: meal } = await supabase
+      .from('meals')
+      .select('id, name, scheduled_time')
+      .eq('id', mealId)
+      .eq('user_id', userId)
+      .single();
+
+    if (!meal) {
+      return { success: false, message: 'No encontré esa comida.' };
+    }
+
+    // Obtener todas las opciones
+    const { data: options } = await supabase
+      .from('meal_options')
+      .select('id, name, ingredients, is_selected, position')
+      .eq('meal_id', mealId)
+      .order('position', { ascending: true });
+
+    if (!options || options.length === 0) {
+      return {
+        success: true,
+        message: `🍽️ ${meal.name} no tiene alternativas configuradas. Solo tiene los ingredientes principales.`,
+        data: { options: [] },
+      };
+    }
+
+    const formatTime = (t: string | null) => {
+      if (!t) return '??:??';
+      const [h, m] = t.split(':').map(Number);
+      const period = h >= 12 ? 'PM' : 'AM';
+      const h12 = h % 12 || 12;
+      return `${h12}:${m.toString().padStart(2, '0')} ${period}`;
+    };
+
+    const optionsList = options.map((opt, idx) => {
+      const selected = opt.is_selected ? ' ✓ ACTIVA' : '';
+      const ings = (opt.ingredients as any[])?.map(i => `${i.name} (${i.quantity})`).join(', ') || 'Sin ingredientes';
+      return `${idx + 1}. ${opt.name}${selected}\n   → ${ings}`;
+    }).join('\n\n');
+
+    return {
+      success: true,
+      message: `🍽️ ALTERNATIVAS DE ${meal.name} (${formatTime(meal.scheduled_time)}):\n\n${optionsList}`,
+      data: { options, mealName: meal.name },
+    };
+  } catch (error) {
+    console.error('planGetMealOptions error:', error);
+    return { success: false, message: 'Error al obtener alternativas.' };
+  }
+}
+
+/**
+ * Cambia la frecuencia de entrenamiento
+ */
+export async function trainingSetFrequency(
+  userId: string,
+  frequency: number
+): Promise<HankToolResult> {
+  try {
+    if (frequency < 1 || frequency > 7) {
+      return { success: false, message: 'La frecuencia debe ser entre 1 y 7 días.' };
+    }
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({ training_frequency: frequency })
+      .eq('id', userId);
+
+    if (error) throw error;
+
+    return {
+      success: true,
+      message: `✅ Frecuencia de entrenamiento actualizada a ${frequency} días/semana.`,
+      affectedRecords: 1,
+    };
+  } catch (error) {
+    console.error('trainingSetFrequency error:', error);
+    return { success: false, message: 'Error al actualizar frecuencia.' };
+  }
+}
+
+/**
+ * Cambia el día actual de la rutina
+ */
+export async function trainingSetCurrentDay(
+  userId: string,
+  dayNumber: number
+): Promise<HankToolResult> {
+  try {
+    // El usuario habla en 1-based, guardamos 0-based
+    const day0Based = dayNumber - 1;
+
+    if (day0Based < 0) {
+      return { success: false, message: 'El día debe ser al menos 1.' };
+    }
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({ training_current_day: day0Based })
+      .eq('id', userId);
+
+    if (error) throw error;
+
+    return {
+      success: true,
+      message: `✅ Día actual de la rutina cambiado a Día ${dayNumber}.`,
+      affectedRecords: 1,
+    };
+  } catch (error) {
+    console.error('trainingSetCurrentDay error:', error);
+    return { success: false, message: 'Error al cambiar día actual.' };
   }
 }
 
@@ -3878,7 +4536,7 @@ export async function planGetStack(userId: string): Promise<HankToolResult> {
 
     // Helper para formatear hora a AM/PM
     const formatTime = (time24: string | null): string => {
-      if (!time24) return 'Sin hora definida';
+      if (!time24) return 'Sin hora';
       const [hours, minutes] = time24.split(':').map(Number);
       const h = hours || 0;
       const m = minutes || 0;
@@ -3890,9 +4548,16 @@ export async function planGetStack(userId: string): Promise<HankToolResult> {
     const stackSummary = stack
       .map((s) => {
         let timing = '';
-        if (s.is_pre_workout) timing = ' 🏋️ PRE';
-        else if (s.is_post_workout) timing = ' 💪 POST';
-        else if (s.time) timing = ` ⏰ ${formatTime(s.time)}`;
+        if (s.is_pre_workout) {
+          timing = ' 🏋️ PRE-ENTRENO';
+        } else if (s.is_post_workout) {
+          timing = ' 💪 POST-ENTRENO';
+        } else if (s.times && Array.isArray(s.times) && s.times.length > 0) {
+          // Múltiples horarios
+          timing = ` ⏰ ${s.times.map((t: string) => formatTime(t)).join(', ')}`;
+        } else if (s.time) {
+          timing = ` ⏰ ${formatTime(s.time)}`;
+        }
         return `• ${s.name} - ${s.dose}${timing}`;
       })
       .join('\n');
@@ -6126,6 +6791,365 @@ export async function syncNutritionMacros(userId: string): Promise<HankToolResul
 }
 
 // ============================================================================
+// PRO TOOLS: Notas de ejercicio desde PRO module
+// ============================================================================
+
+/**
+ * Agrega o actualiza notas de un ejercicio (sin necesidad de video)
+ * Hank puede usar esto para guardar observaciones sobre técnica, sensaciones, etc.
+ */
+export async function proAddExerciseNote(
+  userId: string,
+  exerciseName: string,
+  note: string,
+  options?: {
+    weightKg?: number;
+    reps?: number;
+    tags?: string[];
+    exerciseId?: string;
+  }
+): Promise<HankToolResult> {
+  try {
+    // Buscar el ejercicio en el catálogo
+    let exerciseId = options?.exerciseId;
+    let resolvedExerciseName = exerciseName;
+
+    if (!exerciseId) {
+      const { data: exercise } = await supabase
+        .from('exercises')
+        .select('id, name')
+        .ilike('name', `%${exerciseName}%`)
+        .limit(1)
+        .maybeSingle();
+
+      if (exercise) {
+        exerciseId = exercise.id;
+        resolvedExerciseName = exercise.name;
+      }
+    }
+
+    // Insertar nota como registro en pro_videos (sin video, solo notas)
+    const { data, error } = await supabase
+      .from('pro_videos')
+      .insert({
+        user_id: userId,
+        video_url: '', // Sin video
+        exercise_id: exerciseId || null,
+        exercise_name: resolvedExerciseName,
+        exercise_notes: note,
+        notes: note,
+        tags: options?.tags || [],
+        weight_kg: options?.weightKg || null,
+        reps: options?.reps || null,
+        context_type: 'free',
+        is_public: false,
+      })
+      .select('id')
+      .single();
+
+    if (error) throw error;
+
+    return {
+      success: true,
+      message: `📝 Nota guardada para ${resolvedExerciseName}${options?.weightKg ? ` (${options.weightKg}kg` : ''}${options?.reps ? ` x ${options.reps}` : ''}${options?.weightKg ? ')' : ''}`,
+      data: { noteId: data.id, exerciseName: resolvedExerciseName },
+    };
+  } catch (error) {
+    console.error('proAddExerciseNote error:', error);
+    return { success: false, message: 'Error al guardar la nota.' };
+  }
+}
+
+/**
+ * Obtiene el historial de notas de un ejercicio
+ */
+export async function proGetExerciseNotes(
+  userId: string,
+  exerciseName: string,
+  limit: number = 10
+): Promise<HankToolResult> {
+  try {
+    const { data: notes, error } = await supabase
+      .from('pro_videos')
+      .select('id, notes, exercise_notes, weight_kg, reps, tags, created_at')
+      .eq('user_id', userId)
+      .ilike('exercise_name', `%${exerciseName}%`)
+      .not('notes', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) throw error;
+
+    if (!notes || notes.length === 0) {
+      return {
+        success: true,
+        message: `No hay notas guardadas para ${exerciseName}.`,
+        data: { notes: [] },
+      };
+    }
+
+    const formattedNotes = notes.map((n) => {
+      const date = new Date(n.created_at).toLocaleDateString('es-PE', {
+        day: 'numeric',
+        month: 'short',
+      });
+      const weight = n.weight_kg ? `${n.weight_kg}kg` : '';
+      const reps = n.reps ? `x${n.reps}` : '';
+      const noteText = n.notes || n.exercise_notes;
+      return `• ${date}${weight || reps ? ` (${weight}${reps})` : ''}: "${noteText}"`;
+    });
+
+    return {
+      success: true,
+      message: `📝 Notas de ${exerciseName}:\n${formattedNotes.join('\n')}`,
+      data: { notes, count: notes.length },
+    };
+  } catch (error) {
+    console.error('proGetExerciseNotes error:', error);
+    return { success: false, message: 'Error al obtener notas.' };
+  }
+}
+
+// ============================================================================
+// USER GOAL TOOLS: Metas con fechas
+// ============================================================================
+
+/**
+ * Establece una meta con fecha objetivo
+ * Las metas se guardan en user_profiles.goals como JSONB
+ */
+export async function setUserGoal(
+  userId: string,
+  goalType: 'weight' | 'body_fat' | 'muscle_mass' | 'strength' | 'custom',
+  targetValue: string,
+  targetDate: string,
+  options?: {
+    description?: string;
+    exerciseName?: string; // Para metas de fuerza
+    startValue?: string;
+  }
+): Promise<HankToolResult> {
+  try {
+    // Obtener metas actuales
+    const { data: profile } = await supabase
+      .from('user_profiles')
+      .select('goals, weight, body_fat_percentage')
+      .eq('user_id', userId)
+      .single();
+
+    const currentGoals = (profile?.goals as any[]) || [];
+
+    // Crear nueva meta
+    const newGoal = {
+      id: `goal-${Date.now()}`,
+      type: goalType,
+      targetValue,
+      targetDate,
+      startValue: options?.startValue || (goalType === 'weight' ? profile?.weight : null),
+      description: options?.description || getGoalDescription(goalType, targetValue),
+      exerciseName: options?.exerciseName,
+      createdAt: new Date().toISOString(),
+      status: 'active',
+    };
+
+    // Agregar nueva meta (mantener las activas, máximo 5)
+    const activeGoals = currentGoals.filter((g: any) => g.status === 'active').slice(0, 4);
+    const updatedGoals = [...activeGoals, newGoal];
+
+    // Guardar
+    const { error } = await supabase
+      .from('user_profiles')
+      .update({ goals: updatedGoals })
+      .eq('user_id', userId);
+
+    if (error) throw error;
+
+    // Calcular días hasta la meta
+    const daysRemaining = Math.ceil(
+      (new Date(targetDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
+    );
+
+    return {
+      success: true,
+      message: `🎯 Meta establecida!\n• ${newGoal.description}\n• Fecha objetivo: ${new Date(targetDate).toLocaleDateString('es-PE', { day: 'numeric', month: 'long', year: 'numeric' })}\n• ${daysRemaining} días para lograrlo`,
+      data: { goal: newGoal, daysRemaining },
+    };
+  } catch (error) {
+    console.error('setUserGoal error:', error);
+    return { success: false, message: 'Error al establecer la meta.' };
+  }
+}
+
+/**
+ * Obtiene las metas activas del usuario
+ */
+export async function getUserGoals(userId: string): Promise<HankToolResult> {
+  try {
+    const { data: profile } = await supabase
+      .from('user_profiles')
+      .select('goals, weight, body_fat_percentage')
+      .eq('user_id', userId)
+      .single();
+
+    const goals = ((profile?.goals as any[]) || []).filter((g: any) => g.status === 'active');
+
+    if (goals.length === 0) {
+      return {
+        success: true,
+        message: 'No tienes metas activas. ¿Quieres establecer una?',
+        data: { goals: [] },
+      };
+    }
+
+    const formattedGoals = goals.map((g: any) => {
+      const daysRemaining = Math.ceil(
+        (new Date(g.targetDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
+      );
+      const status = daysRemaining < 0 ? '⏰ VENCIDA' : daysRemaining < 7 ? '🔥 CERCA' : '🎯';
+      return `${status} ${g.description} (${Math.abs(daysRemaining)} días ${daysRemaining < 0 ? 'pasados' : 'restantes'})`;
+    });
+
+    return {
+      success: true,
+      message: `📋 Tus metas:\n${formattedGoals.join('\n')}`,
+      data: { goals, currentWeight: profile?.weight },
+    };
+  } catch (error) {
+    console.error('getUserGoals error:', error);
+    return { success: false, message: 'Error al obtener metas.' };
+  }
+}
+
+/**
+ * Actualiza el progreso de una meta
+ */
+export async function updateGoalProgress(
+  userId: string,
+  goalId: string,
+  newValue: string,
+  status?: 'active' | 'completed' | 'abandoned'
+): Promise<HankToolResult> {
+  try {
+    const { data: profile } = await supabase
+      .from('user_profiles')
+      .select('goals')
+      .eq('user_id', userId)
+      .single();
+
+    const goals = (profile?.goals as any[]) || [];
+    const goalIndex = goals.findIndex((g: any) => g.id === goalId);
+
+    if (goalIndex === -1) {
+      return { success: false, message: 'Meta no encontrada.' };
+    }
+
+    // Actualizar la meta
+    const goal = goals[goalIndex];
+    goal.currentValue = newValue;
+    goal.lastUpdated = new Date().toISOString();
+    if (status) goal.status = status;
+
+    // Calcular progreso
+    const start = parseFloat(goal.startValue) || 0;
+    const target = parseFloat(goal.targetValue) || 0;
+    const current = parseFloat(newValue) || 0;
+    const progress = Math.min(100, Math.max(0, ((current - start) / (target - start)) * 100));
+    goal.progressPercent = Math.round(progress);
+
+    goals[goalIndex] = goal;
+
+    const { error } = await supabase.from('user_profiles').update({ goals }).eq('user_id', userId);
+
+    if (error) throw error;
+
+    const emoji = status === 'completed' ? '🏆' : progress >= 75 ? '🔥' : '💪';
+    return {
+      success: true,
+      message: `${emoji} Progreso actualizado: ${goal.description}\n• Actual: ${newValue}\n• Objetivo: ${goal.targetValue}\n• Progreso: ${goal.progressPercent}%`,
+      data: { goal },
+    };
+  } catch (error) {
+    console.error('updateGoalProgress error:', error);
+    return { success: false, message: 'Error al actualizar progreso.' };
+  }
+}
+
+// Helper para generar descripción de meta
+function getGoalDescription(goalType: string, targetValue: string): string {
+  switch (goalType) {
+    case 'weight':
+      return `Llegar a ${targetValue} kg de peso`;
+    case 'body_fat':
+      return `Llegar a ${targetValue}% de grasa corporal`;
+    case 'muscle_mass':
+      return `Alcanzar ${targetValue} kg de masa muscular`;
+    case 'strength':
+      return `Levantar ${targetValue} kg`;
+    default:
+      return `Meta: ${targetValue}`;
+  }
+}
+
+// ============================================================================
+// HANK CAPABILITIES - Información de lo que Hank puede hacer
+// ============================================================================
+export async function hankGetCapabilities(): Promise<HankToolResult> {
+  const capabilities = `
+🤖 SOY HANK - Tu coach de alto rendimiento. Puedo ayudarte con:
+
+💪 ENTRENAMIENTO (GYM):
+• Ver tu rutina de hoy y ejercicios
+• Agregar/quitar/reemplazar ejercicios
+• Modificar series, reps, peso, RIR, tempo
+• Diseñar planes personalizados (PPL, Full Body, etc.)
+• Reestructurar tu semana de entrenamiento
+
+🍽️ NUTRICIÓN (PLAN):
+• Crear planes de comidas completos
+• Agregar/quitar/modificar comidas
+• Calcular macros automáticamente
+• Ver tu plan actual y próxima comida
+
+💊 SUPLEMENTACIÓN:
+• Configurar tu stack de suplementos
+• Establecer horarios y dosis
+• Pre/post entreno
+
+📊 ADN (PERFIL):
+• Actualizar peso, altura, objetivo
+• Registrar medidas corporales
+• Ver y establecer metas con fechas
+• Analizar tu progreso con fotos
+
+📝 NOTAS Y REGISTRO:
+• Guardar notas en ejercicios
+• Ver historial de entrenamientos
+• Registrar observaciones de técnica
+
+🏍️ DEPORTES (MOTO/SURF/AUTO):
+• Gestionar inventario (vehículos, tablas)
+• Registrar mantenimientos
+• Crear eventos y sesiones
+
+⚡ COMANDOS ÚTILES:
+• "Qué me toca hoy" → Tu rutina
+• "Crea mi plan" → Plan completo
+• "Hazme un plan de X días" → Entrenamiento
+• "Cuáles son mis metas" → Tus objetivos
+• "Borra el historial" → Nuevo chat
+`.trim();
+
+  return {
+    success: true,
+    message: capabilities,
+    data: {
+      modules: ['GYM', 'PLAN', 'ADN', 'PRO', 'MOTO', 'SURF', 'AUTO'],
+      toolCount: 70,
+    },
+  };
+}
+
+// ============================================================================
 // TOOL DEFINITIONS - Exportables para el LLM (Function Calling)
 // ============================================================================
 export const TOOL_DEFINITIONS: ToolDefinition[] = [
@@ -6793,6 +7817,81 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     parameters: {},
     requiredParams: [],
   },
+  // ============================================================================
+  // MEAL OPTIONS (ALTERNATIVAS DE COMIDAS)
+  // ============================================================================
+  {
+    name: 'PLAN_ADD_MEAL_OPTION',
+    description:
+      'Agrega una alternativa/opción a una comida existente. Usa cuando diga "agrega una alternativa para el desayuno", "quiero otra opción de cena", "pon un segundo platillo para la comida 1".',
+    parameters: {
+      mealId: {
+        type: 'string',
+        description: 'ID de la comida a la que agregar la alternativa',
+        required: true,
+      },
+      optionName: {
+        type: 'string',
+        description: 'Nombre de la alternativa (ej: "Opción Vegetariana", "Para días de entreno")',
+        required: true,
+      },
+      ingredients: {
+        type: 'string',
+        description: 'JSON array con ingredientes: [{"name": "pollo", "quantity": "150g"}]',
+        required: true,
+      },
+    },
+    requiredParams: ['mealId', 'optionName', 'ingredients'],
+  },
+  {
+    name: 'PLAN_SELECT_MEAL_OPTION',
+    description:
+      'Selecciona/activa una alternativa específica para una comida. Usa cuando diga "usa la opción 2 de la cena", "cambia a la alternativa vegetariana", "quiero el otro platillo".',
+    parameters: {
+      mealId: {
+        type: 'string',
+        description: 'ID de la comida',
+        required: true,
+      },
+      optionPosition: {
+        type: 'number',
+        description: 'Número de la opción a seleccionar (1-based: 1, 2, 3...)',
+        required: true,
+      },
+    },
+    requiredParams: ['mealId', 'optionPosition'],
+  },
+  {
+    name: 'PLAN_REMOVE_MEAL_OPTION',
+    description:
+      'Elimina una alternativa de una comida. Usa cuando diga "quita la opción 2 del almuerzo", "elimina la alternativa vegetariana", "borra ese platillo".',
+    parameters: {
+      mealId: {
+        type: 'string',
+        description: 'ID de la comida',
+        required: true,
+      },
+      optionPosition: {
+        type: 'number',
+        description: 'Número de la opción a eliminar (1-based)',
+        required: true,
+      },
+    },
+    requiredParams: ['mealId', 'optionPosition'],
+  },
+  {
+    name: 'PLAN_GET_MEAL_OPTIONS',
+    description:
+      'Lista todas las alternativas de una comida. Usa cuando pregunte "qué alternativas tengo para la cena", "muéstrame las opciones del desayuno", "cuáles son mis platillos para el almuerzo".',
+    parameters: {
+      mealId: {
+        type: 'string',
+        description: 'ID de la comida',
+        required: true,
+      },
+    },
+    requiredParams: ['mealId'],
+  },
   {
     name: 'PLAN_GET_NEXT_MEAL',
     description:
@@ -6862,7 +7961,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: 'PLAN_UPDATE_SUPPLEMENT_TIME',
     description:
-      'Cambia la hora de un suplemento. Usa cuando diga "cambia la hora de la creatina a las 8", "pon el omega 3 a las 9 de la mañana", "mueve la proteína a las 6 PM".',
+      'Cambia la(s) hora(s) de un suplemento. Soporta múltiples horarios para suplementos que se toman varias veces al día. Usa cuando diga "cambia la hora de la creatina a las 8", "pon la proteína a las 7 AM y 7 PM", "mueve el omega a las 9".',
     parameters: {
       name: {
         type: 'string',
@@ -6871,11 +7970,141 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       },
       newTime: {
         type: 'string',
-        description: 'Nueva hora en formato 24h (ej: "08:00", "20:00")',
+        description: 'Nueva hora en formato 24h (ej: "08:00", "20:00"). Para una sola hora.',
+        required: false,
+      },
+      newTimes: {
+        type: 'array',
+        items: { type: 'string' },
+        description:
+          'Array de horarios en formato 24h (ej: ["07:00", "19:00"]) para suplementos con múltiples tomas al día.',
+        required: false,
+      },
+    },
+    requiredParams: ['name'],
+  },
+  {
+    name: 'PLAN_UPDATE_SUPPLEMENT_DOSE',
+    description:
+      'Cambia la dosis de un suplemento. Usa cuando diga "cambia la dosis de creatina a 10g", "pon 2 cápsulas de omega", "sube la proteína a 40g".',
+    parameters: {
+      name: {
+        type: 'string',
+        description: 'Nombre del suplemento a modificar',
+        required: true,
+      },
+      newDose: {
+        type: 'string',
+        description: 'Nueva dosis (ej: "5g", "2 cápsulas", "1 scoop", "500mg")',
         required: true,
       },
     },
-    requiredParams: ['name', 'newTime'],
+    requiredParams: ['name', 'newDose'],
+  },
+  {
+    name: 'PLAN_UPDATE_SUPPLEMENT_NAME',
+    description:
+      'Renombra un suplemento. Usa cuando diga "cambia el nombre de creatina a mono", "renombra la proteína".',
+    parameters: {
+      oldName: {
+        type: 'string',
+        description: 'Nombre actual del suplemento',
+        required: true,
+      },
+      newName: {
+        type: 'string',
+        description: 'Nuevo nombre del suplemento',
+        required: true,
+      },
+    },
+    requiredParams: ['oldName', 'newName'],
+  },
+  {
+    name: 'PLAN_UPDATE_MEAL_NAME',
+    description:
+      'Cambia el nombre de una comida. Usa cuando diga "renombra la comida 1 a desayuno", "cambia el nombre de la cena".',
+    parameters: {
+      mealId: {
+        type: 'string',
+        description: 'ID de la comida',
+        required: false,
+      },
+      position: {
+        type: 'string',
+        description: 'Posición de la comida: "first", "last", o número (1-based)',
+        required: false,
+      },
+      newName: {
+        type: 'string',
+        description: 'Nuevo nombre de la comida (ej: "Desayuno", "Pre-entreno", "Cena")',
+        required: true,
+      },
+    },
+    requiredParams: ['newName'],
+  },
+  {
+    name: 'PLAN_UPDATE_MEAL_MACROS',
+    description:
+      'Actualiza los macros de una comida manualmente. Usa cuando diga "pon 500 calorías a la comida 1", "cambia la proteína del desayuno a 40g".',
+    parameters: {
+      mealId: {
+        type: 'string',
+        description: 'ID de la comida',
+        required: false,
+      },
+      position: {
+        type: 'string',
+        description: 'Posición de la comida: "first", "last", o número (1-based)',
+        required: false,
+      },
+      calories: {
+        type: 'number',
+        description: 'Nuevas calorías totales',
+        required: false,
+      },
+      protein: {
+        type: 'number',
+        description: 'Nuevos gramos de proteína',
+        required: false,
+      },
+      carbs: {
+        type: 'number',
+        description: 'Nuevos gramos de carbohidratos',
+        required: false,
+      },
+      fat: {
+        type: 'number',
+        description: 'Nuevos gramos de grasa',
+        required: false,
+      },
+    },
+    requiredParams: [],
+  },
+  {
+    name: 'TRAINING_SET_FREQUENCY',
+    description:
+      'Cambia la frecuencia de entrenamiento (días por semana). Usa cuando diga "entreno 5 días", "cambio a 4 días por semana", "ahora voy 6 veces".',
+    parameters: {
+      frequency: {
+        type: 'number',
+        description: 'Número de días de entrenamiento por semana (1-7)',
+        required: true,
+      },
+    },
+    requiredParams: ['frequency'],
+  },
+  {
+    name: 'TRAINING_SET_CURRENT_DAY',
+    description:
+      'Cambia el día actual de la rutina. Usa cuando diga "estoy en el día 3", "hoy me toca día 2", "resetea al día 1".',
+    parameters: {
+      dayNumber: {
+        type: 'number',
+        description: 'Número del día (0-based internamente, pero el usuario dice 1-based)',
+        required: true,
+      },
+    },
+    requiredParams: ['dayNumber'],
   },
   {
     name: 'PLAN_GET_STACK',
@@ -7220,6 +8449,144 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     name: 'SYNC_NUTRITION_MACROS',
     description:
       'Sincroniza y recalcula todos los macros de las comidas basándose en el perfil actual. Usa cuando diga "sincroniza mis macros", "recalcula mi nutrición", "actualiza las cantidades de mis comidas", o después de cambios en el perfil.',
+    parameters: {},
+    requiredParams: [],
+  },
+  // ============================================================================
+  // PRO TOOLS - Notas y registro de ejercicios
+  // ============================================================================
+  {
+    name: 'PRO_ADD_EXERCISE_NOTE',
+    description:
+      'Guarda una nota sobre un ejercicio. Usa cuando el usuario diga "anota que...", "guarda que en el press...", "recuerda que este ejercicio...", "mi sensación fue...", "noté que...".',
+    parameters: {
+      exerciseName: {
+        type: 'string',
+        description: 'Nombre del ejercicio',
+        required: true,
+      },
+      note: {
+        type: 'string',
+        description: 'La nota o observación a guardar',
+        required: true,
+      },
+      weightKg: {
+        type: 'number',
+        description: 'Peso usado (opcional)',
+        required: false,
+      },
+      reps: {
+        type: 'number',
+        description: 'Repeticiones hechas (opcional)',
+        required: false,
+      },
+      tags: {
+        type: 'array',
+        description: 'Tags para categorizar: técnica, sensación, PR, dolor, etc.',
+        items: { type: 'string' },
+        required: false,
+      },
+    },
+    requiredParams: ['exerciseName', 'note'],
+  },
+  {
+    name: 'PRO_GET_EXERCISE_NOTES',
+    description:
+      'Obtiene el historial de notas de un ejercicio. Usa cuando pregunte "qué notas tengo de...", "historial de...", "qué anoté sobre...".',
+    parameters: {
+      exerciseName: {
+        type: 'string',
+        description: 'Nombre del ejercicio',
+        required: true,
+      },
+      limit: {
+        type: 'number',
+        description: 'Cantidad máxima de notas a mostrar (default: 10)',
+        required: false,
+      },
+    },
+    requiredParams: ['exerciseName'],
+  },
+  // ============================================================================
+  // USER GOAL TOOLS - Metas con fechas
+  // ============================================================================
+  {
+    name: 'SET_USER_GOAL',
+    description:
+      'Establece una meta con fecha objetivo. Usa cuando diga "mi meta es...", "quiero llegar a...", "para [fecha] quiero...", "en 3 meses quiero...".',
+    parameters: {
+      goalType: {
+        type: 'string',
+        description: 'Tipo de meta',
+        enum: ['weight', 'body_fat', 'muscle_mass', 'strength', 'custom'],
+        required: true,
+      },
+      targetValue: {
+        type: 'string',
+        description: 'Valor objetivo (ej: "80", "15%", "100kg")',
+        required: true,
+      },
+      targetDate: {
+        type: 'string',
+        description: 'Fecha objetivo en formato YYYY-MM-DD',
+        required: true,
+      },
+      description: {
+        type: 'string',
+        description: 'Descripción personalizada de la meta (opcional)',
+        required: false,
+      },
+      exerciseName: {
+        type: 'string',
+        description: 'Para metas de fuerza, el ejercicio objetivo (ej: "Press de Banca")',
+        required: false,
+      },
+      startValue: {
+        type: 'string',
+        description: 'Valor inicial para calcular progreso (se auto-detecta si no se proporciona)',
+        required: false,
+      },
+    },
+    requiredParams: ['goalType', 'targetValue', 'targetDate'],
+  },
+  {
+    name: 'GET_USER_GOALS',
+    description:
+      'Obtiene las metas activas del usuario. Usa cuando pregunte "cuáles son mis metas", "qué objetivos tengo", "mis goals".',
+    parameters: {},
+    requiredParams: [],
+  },
+  {
+    name: 'UPDATE_GOAL_PROGRESS',
+    description:
+      'Actualiza el progreso de una meta. Usa cuando diga "actualiza mi meta", "ya estoy en X", "logré la meta".',
+    parameters: {
+      goalId: {
+        type: 'string',
+        description: 'ID de la meta a actualizar',
+        required: true,
+      },
+      newValue: {
+        type: 'string',
+        description: 'Nuevo valor actual',
+        required: true,
+      },
+      status: {
+        type: 'string',
+        description: 'Nuevo estado de la meta',
+        enum: ['active', 'completed', 'abandoned'],
+        required: false,
+      },
+    },
+    requiredParams: ['goalId', 'newValue'],
+  },
+  // ============================================================================
+  // HANK SYSTEM TOOLS - Información del sistema
+  // ============================================================================
+  {
+    name: 'HANK_GET_CAPABILITIES',
+    description:
+      'Muestra todo lo que HANK puede hacer. Usa cuando pregunte "qué puedes hacer", "ayuda", "help", "cuáles son tus funciones", "cómo te uso".',
     parameters: {},
     requiredParams: [],
   },

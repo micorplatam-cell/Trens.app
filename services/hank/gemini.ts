@@ -3,7 +3,18 @@
 // ============================================================================
 
 import { TOOL_DEFINITIONS } from './tools';
+import { SPORT_TOOL_DEFINITIONS } from './sportTools';
 import type { HankToolCall, HankToolName, ToolDefinition } from '../../types/hank';
+
+// ============================================================================
+// ALL TOOLS - Combina herramientas base + deportes
+// ============================================================================
+const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [...TOOL_DEFINITIONS, ...SPORT_TOOL_DEFINITIONS];
+
+// 🔍 DEBUG: Log al cargar el módulo para verificar que las herramientas se cargan
+console.warn(
+  `🚀 GEMINI MODULE LOADED - TOOL_DEFINITIONS: ${TOOL_DEFINITIONS.length}, SPORT_TOOL_DEFINITIONS: ${SPORT_TOOL_DEFINITIONS.length}, TOTAL: ${ALL_TOOL_DEFINITIONS.length}`
+);
 
 // ============================================================================
 // TYPES
@@ -14,6 +25,7 @@ interface GeminiMessage {
     | { text: string }
     | { functionCall: GeminiFunctionCall }
     | { functionResponse: GeminiFunctionResponse }
+    | { inlineData: { mimeType: string; data: string } } // Para imágenes
   >;
 }
 
@@ -64,27 +76,102 @@ const GEMINI_API_URL =
   'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 
 // ============================================================================
+// IMAGE UTILITIES - Para análisis visual de fotos de progreso
+// ============================================================================
+
+/**
+ * Convierte una URL de imagen a base64 para enviar a Gemini
+ * Usa fetch para obtener la imagen y la convierte a base64
+ */
+async function imageUrlToBase64(url: string): Promise<{ data: string; mimeType: string } | null> {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      console.warn(`⚠️ No se pudo obtener imagen: ${url}`);
+      return null;
+    }
+
+    const blob = await response.blob();
+    const mimeType = blob.type || 'image/jpeg';
+
+    // Convertir blob a base64
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64 = reader.result as string;
+        // Remover el prefijo "data:image/...;base64,"
+        const data = base64.split(',')[1];
+        resolve({ data, mimeType });
+      };
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch (error) {
+    console.warn(`⚠️ Error al convertir imagen a base64: ${error}`);
+    return null;
+  }
+}
+
+/**
+ * Prepara las fotos de progreso para enviar a Gemini
+ * Solo incluye las 2 más recientes para no exceder límites
+ */
+async function prepareProgressPhotosForGemini(
+  photos: GeminiContext['progressPhotos']
+): Promise<Array<{ inlineData: { mimeType: string; data: string } }>> {
+  if (!photos || photos.length === 0) return [];
+
+  const photoParts: Array<{ inlineData: { mimeType: string; data: string } }> = [];
+
+  // Solo las 2 fotos más recientes para análisis visual
+  const recentPhotos = photos.slice(0, 2);
+
+  for (const photo of recentPhotos) {
+    const imageData = await imageUrlToBase64(photo.url);
+    if (imageData) {
+      photoParts.push({
+        inlineData: {
+          mimeType: imageData.mimeType,
+          data: imageData.data,
+        },
+      });
+    }
+  }
+
+  console.warn(`📸 Fotos de progreso preparadas para Gemini: ${photoParts.length}`);
+  return photoParts;
+}
+
+// ============================================================================
 // CONVERT TOOL DEFINITIONS TO GEMINI FORMAT
 // ============================================================================
 function convertToGeminiTools(tools: ToolDefinition[]): GeminiToolDeclaration[] {
-  return tools.map((tool) => ({
-    name: tool.name,
-    description: tool.description,
-    parameters: {
-      type: 'object',
-      properties: Object.fromEntries(
-        Object.entries(tool.parameters).map(([key, param]) => [
-          key,
-          {
-            type: param.type,
-            description: param.description,
-            ...(param.enum ? { enum: param.enum } : {}),
-          },
-        ])
-      ),
-      required: tool.requiredParams,
-    },
-  }));
+  return tools.map((tool, index) => {
+    // Validar que el tool tiene todos los campos requeridos
+    if (!tool.name || !tool.description) {
+      console.warn(`⚠️ Tool #${index} inválido:`, tool);
+    }
+    return {
+      name: tool.name,
+      description: tool.description,
+      parameters: {
+        type: 'object',
+        properties: Object.fromEntries(
+          Object.entries(tool.parameters || {}).map(([key, param]) => [
+            key,
+            {
+              type: param.type,
+              description: param.description,
+              ...(param.enum ? { enum: param.enum } : {}),
+              // Gemini requiere 'items' para arrays
+              ...(param.type === 'array' && param.items ? { items: param.items } : {}),
+            },
+          ])
+        ),
+        required: tool.requiredParams || [],
+      },
+    };
+  });
 }
 
 // ============================================================================
@@ -175,6 +262,136 @@ PLANK (Plancha)
   }
 
   return `Ejercicio: ${exerciseName}. Mantén técnica estricta, controla el movimiento, respira correctamente.`;
+}
+
+// ============================================================================
+// USER PLAN SECTION - Genera resumen del plan actual del usuario
+// ============================================================================
+function getUserPlanSection(context: GeminiContext): string {
+  const plan = context.userPlanContext;
+
+  if (!plan) {
+    return `[📋 PLAN ACTUAL DEL USUARIO]
+⚠️ No se pudo cargar el plan. Usa GET_FULL_USER_CONTEXT para obtener información completa.`;
+  }
+
+  const bio = plan.biometrics;
+  const hasBiometrics = bio && (bio.weight || bio.height || bio.age || bio.goal);
+  const hasMeals = plan.meals && plan.meals.length > 0;
+  const hasSupplements = plan.supplements && plan.supplements.length > 0;
+  const hasTraining = plan.training && plan.training.frequency > 0;
+
+  // Formatear hora
+  const formatTime = (t: string) => {
+    if (!t) return '';
+    const [h, m] = t.split(':').map(Number);
+    const period = h >= 12 ? 'PM' : 'AM';
+    const h12 = h % 12 || 12;
+    return `${h12}:${m?.toString().padStart(2, '0') || '00'} ${period}`;
+  };
+
+  // Generar sección de biométricos (TRENS ID / ADN)
+  const biometricsSection = hasBiometrics
+    ? `👤 DATOS DEL USUARIO (ADN/TRENS ID):
+  • Peso: ${bio.weight ? `${bio.weight}kg` : '❓ No configurado'}
+  • Altura: ${bio.height ? `${bio.height}cm` : '❓ No configurado'}
+  • Edad: ${bio.age ? `${bio.age} años` : '❓ No configurado'}
+  • Sexo: ${bio.sex || '❓ No configurado'}
+  • Grasa corporal: ${bio.bodyFat ? `${bio.bodyFat}%` : '❓ No configurado'}
+  • Objetivo: ${bio.goal || '❓ No configurado'}
+  • Nivel de actividad: ${bio.activityLevel || '❓ No configurado'}
+  • BMR (metabolismo basal): ${bio.bmr ? `${bio.bmr} kcal` : '❓ No calculado'}
+  • TDEE (gasto diario): ${bio.tdee ? `${bio.tdee} kcal` : '❓ No calculado'}`
+    : `👤 DATOS DEL USUARIO: ❌ Sin datos biométricos configurados`;
+
+  // Generar sección de comidas CON MACROS DETALLADOS
+  const mealsSection = hasMeals
+    ? `🍽️ COMIDAS (${plan.meals.length}):
+${plan.meals
+  .map((m, i) => {
+    const time = m.time ? formatTime(m.time) : '';
+    const macrosLine = m.macros
+      ? `\n     📊 Macros: ${m.macros.calories}kcal | Proteína: ${m.macros.protein}g | Carbos: ${m.macros.carbs}g | Grasa: ${m.macros.fat}g`
+      : '\n     📊 Macros: ❓ Sin calcular';
+    const ings =
+      m.ingredients.length > 0 ? m.ingredients.join(', ') : 'Sin ingredientes detallados';
+    return `  ${i + 1}. ${m.name}${time ? ` (${time})` : ''}\n     🥗 Ingredientes: ${ings}${macrosLine}`;
+  })
+  .join('\n')}`
+    : `🍽️ COMIDAS: ❌ Sin plan de nutrición configurado`;
+
+  // Generar sección de suplementos - soportar múltiples horarios
+  const supplementsSection = hasSupplements
+    ? `💊 STACK DE SUPLEMENTOS (${plan.supplements.length}):
+${plan.supplements
+  .map((s) => {
+    // Si tiene times (array), mostrar todos; si no, usar time
+    let timingInfo = '';
+    if (s.times && s.times.length > 0) {
+      timingInfo = ` (${s.times.map((t) => formatTime(t)).join(', ')})`;
+    } else if (s.time) {
+      timingInfo = ` (${formatTime(s.time)})`;
+    }
+    return `  • ${s.name} - ${s.dose}${timingInfo}`;
+  })
+  .join('\n')}`
+    : `💊 STACK: ❌ Sin suplementos configurados`;
+
+  // Generar sección de entrenamiento
+  const trainingSection = hasTraining
+    ? `🏋️ ENTRENAMIENTO:
+  • Frecuencia: ${plan.training.frequency} días/semana
+  • Día actual: ${plan.training.currentDay + 1}
+  • Rutinas: ${
+    Object.entries(plan.training.routineNames)
+      .map(([day, name]) => `Día ${parseInt(day) + 1}: ${name}`)
+      .join(', ') || 'Sin nombres'
+  }`
+    : `🏋️ ENTRENAMIENTO: ❌ Sin rutina configurada`;
+
+  // Calcular totales diarios de macros
+  let totalMacros = { calories: 0, protein: 0, carbs: 0, fat: 0 };
+  if (hasMeals) {
+    plan.meals.forEach((m) => {
+      if (m.macros) {
+        totalMacros.calories += m.macros.calories || 0;
+        totalMacros.protein += m.macros.protein || 0;
+        totalMacros.carbs += m.macros.carbs || 0;
+        totalMacros.fat += m.macros.fat || 0;
+      }
+    });
+  }
+  const hasTotals = totalMacros.calories > 0;
+  const totalsSection = hasTotals
+    ? `📈 TOTALES DIARIOS:
+  • Calorías: ${totalMacros.calories} kcal
+  • Proteína: ${totalMacros.protein}g
+  • Carbohidratos: ${totalMacros.carbs}g
+  • Grasa: ${totalMacros.fat}g`
+    : '';
+
+  return `[📋 PERFIL COMPLETO DEL USUARIO - YA TIENES TODA ESTA INFO]
+${hasBiometrics ? '✅' : '❌'} Datos biométricos ${hasBiometrics ? '(peso, altura, objetivo)' : '- No configurado'}
+${hasMeals ? '✅' : '❌'} Nutrición ${hasMeals ? `(${plan.meals.length} comidas)` : '- No configurado'}
+${hasSupplements ? '✅' : '❌'} Stack ${hasSupplements ? `(${plan.supplements.length} suplementos)` : '- No configurado'}
+${hasTraining ? '✅' : '❌'} Entrenamiento ${hasTraining ? `(${plan.training.frequency} días/semana)` : '- No configurado'}
+
+${biometricsSection}
+
+${mealsSection}
+
+${hasTotals ? totalsSection + '\n' : ''}
+${supplementsSection}
+
+${trainingSection}
+
+⚡ REGLA CRÍTICA - RESPONDE DIRECTAMENTE CON ESTA INFO:
+• "¿cuál es mi stack?" → Responde con la sección STACK DE SUPLEMENTOS de arriba
+• "¿qué peso tengo?" / "¿cuál es mi objetivo?" → Responde con DATOS DEL USUARIO de arriba
+• "¿cuántas calorías tengo?" → Responde con TOTALES DIARIOS de arriba
+• "¿qué debo comer?" → Responde con la sección COMIDAS de arriba
+• NUNCA ejecutes herramientas de lectura si la info ya está aquí
+• SOLO usa GET_FULL_USER_CONTEXT si necesitas más detalles que no están arriba`;
 }
 
 // ============================================================================
@@ -313,6 +530,13 @@ Ejemplos de cuándo DEBES usar herramientas:
 • "cambia las reps a 10" → ASSET_UPDATE_FIELD
 • "qué me toca hoy" → GYM_GET_TODAY_ROUTINE
 
+Ejemplos de cuándo NO usar herramientas (responde directamente):
+• "¿cuál es mi stack?" → RESPONDE con la info de [📋 PLAN ACTUAL DEL USUARIO]
+• "¿qué suplementos tomo?" → RESPONDE con la info de [📋 PLAN ACTUAL DEL USUARIO]
+• "¿cuál es mi plan de nutrición?" → RESPONDE con la info de [📋 PLAN ACTUAL DEL USUARIO]
+• "¿cuántas comidas tengo?" → RESPONDE con la info de [📋 PLAN ACTUAL DEL USUARIO]
+⚡ Si la info ya está en el contexto de arriba, ÚSALA DIRECTAMENTE sin ejecutar herramientas.
+
 [⚠️ REGLA DE ORO: USA EL HISTORIAL]
 • Si el usuario ya mencionó comidas, suplementos, horarios o cualquier dato en mensajes anteriores, ÚSALO SIN PREGUNTAR DE NUEVO.
 • NUNCA digas "dime las horas" o "cuáles comidas" si ya las acordaron antes en la conversación.
@@ -324,6 +548,8 @@ Ejemplos de cuándo DEBES usar herramientas:
 • Deporte: ${context.sportMode || 'BODYBUILDING'}
 • Nivel: ${context.userLevel}
 • Día: ${context.currentTrainingDay + 1}
+
+${getUserPlanSection(context)}
 
 [DIRECTIVAS ${(context.sportMode || 'BODYBUILDING').toUpperCase()}]
 ${getSportDirectives(context.sportMode)}
@@ -350,6 +576,7 @@ ${
     ? `⚡ PLAN BUILDER ACTIVO - Estado actual:
 • Comidas: ${context.planBuilderSummary?.mealsCount || 0}
 • Suplementos: ${context.planBuilderSummary?.supplementsCount || 0}
+• Entrenamiento: ${context.planBuilderSummary?.training ? `${context.planBuilderSummary.training.goal} | ${context.planBuilderSummary.training.level} | ${context.planBuilderSummary.training.frequency} días/semana` : 'No configurado'}
 ${context.planBuilderSummary?.meals?.map((m) => `  📍 ${m.time} - ${m.name || 'Sin nombre'} (${m.ingredientsCount} ingredientes)`).join('\n') || ''}
 ${context.planBuilderSummary?.supplements?.map((s) => `  💊 ${s.name} - ${s.dose}`).join('\n') || ''}`
     : '📋 Plan Builder INACTIVO'
@@ -482,6 +709,49 @@ ANTES de crear cualquier plan, llama GET_FULL_USER_CONTEXT y analiza:
 5. Usuario: "5 días"
 6. Hank llama TRAINING_DESIGN_PLAN(goal=auto-detect, level=auto-detect, frequency=5)
 
+[📸 ANÁLISIS VISUAL DE FOTOS DE PROGRESO]
+${
+  context.progressPhotos && context.progressPhotos.length > 0
+    ? `🔥 TIENES ACCESO A ${context.progressPhotos.length} FOTO(S) DE PROGRESO DEL USUARIO
+    
+Las imágenes adjuntas son FOTOS REALES del cuerpo del usuario. ANALÍZALAS para:
+
+📊 EVALUACIÓN FÍSICA (observa en las fotos):
+• Distribución de grasa corporal (abdomen, espalda baja, pecho, brazos)
+• Desarrollo muscular visible (hombros, pecho, espalda, brazos, piernas)
+• Simetría muscular (izquierda vs derecha, superior vs inferior)
+• Definición/vascularidad si es visible
+• Postura general
+
+🎯 USA ESTE ANÁLISIS PARA:
+• Recomendar el plan de ENTRENAMIENTO más adecuado:
+  - Si hay poca masa muscular → Hipertrofia, Full Body o Upper/Lower
+  - Si hay grasa acumulada → Definición con cardio, más volumen
+  - Si hay buena base → PPL avanzado o Bro Split
+  - Si hay asimetría → Ejercicios unilaterales, trabajo correctivo
+
+• Recomendar el plan de NUTRICIÓN correcto:
+  - Si hay grasa excesiva → Cutting (déficit calórico)
+  - Si está muy flaco → Bulking (superávit calórico)
+  - Si tiene buena base → Recomposición (mantenimiento)
+  
+• Recomendar SUPLEMENTACIÓN apropiada:
+  - Flaco/poco músculo → Creatina + proteína + carbos
+  - Grasa alta → L-carnitina + proteína + termogénico suave
+  - Intermedio → Stack estándar (creatina, proteína, omega3)
+
+📝 DATOS DE LAS FOTOS:
+${context.progressPhotos.map((p, i) => `• Foto ${i + 1}: ${p.date}${p.weight ? ` | ${p.weight}kg` : ''}${p.bodyFat ? ` | ${p.bodyFat}%` : ''}${p.notes ? ` | "${p.notes}"` : ''}`).join('\n')}
+
+⚠️ IMPORTANTE:
+• Sé ESPECÍFICO al describir lo que VES en las fotos
+• NO inventes datos - describe solo lo observable
+• Si el usuario pregunta "cómo me ves" o "analiza mi progreso", USA las fotos
+• Compara fotos si hay más de una para mostrar progreso`
+    : `📸 El usuario NO tiene fotos de progreso aún.
+Si necesitas evaluar su físico para recomendar un plan, pídele que suba una foto desde TRENS ID.`
+}
+
 [TONO]
 • Directo, sin bullshit, nunca irrespetuoso
 • Jerga natural: al fallo, PR, pump, gains, sets
@@ -523,8 +793,50 @@ export interface GeminiContext {
   planBuilderSummary?: {
     mealsCount: number;
     supplementsCount: number;
+    hasTraining?: boolean;
     meals: Array<{ time: string; name: string | undefined; ingredientsCount: number }>;
     supplements: Array<{ name: string; dose: string }>;
+    training?: {
+      goal: string;
+      level: string;
+      frequency: number;
+    } | null;
+  } | null;
+  // Progress Photos - Para análisis visual
+  progressPhotos?: Array<{
+    id: string;
+    url: string;
+    date: string;
+    weight?: number;
+    bodyFat?: number;
+    notes?: string;
+  }>;
+  // User Plan Context - Nutrición, stack, entrenamiento y biométricos
+  userPlanContext?: {
+    // Datos biométricos del usuario (ADN/Trens ID)
+    biometrics: {
+      weight?: number; // kg
+      height?: number; // cm
+      age?: number;
+      bodyFat?: number; // %
+      goal?: string; // bulking, cutting, recomp, maintenance
+      sex?: string;
+      activityLevel?: string;
+      bmr?: number; // Basal metabolic rate
+      tdee?: number; // Total daily energy expenditure
+    } | null;
+    meals: Array<{
+      name: string;
+      time: string;
+      ingredients: string[];
+      macros?: { calories: number; protein: number; carbs: number; fat: number };
+    }>;
+    supplements: Array<{ name: string; dose: string; time?: string; times?: string[] }>;
+    training: {
+      frequency: number;
+      currentDay: number;
+      routineNames: Record<string, string>;
+    };
   } | null;
 }
 
@@ -548,24 +860,58 @@ export async function callGemini(
   // 🔍 DEBUG: Ver qué ejercicio está activo en el contexto
   console.warn('🎯 GEMINI activeAsset:', context.activeAsset?.name || 'NINGUNO');
 
-  // Preparar herramientas en formato Gemini
-  const geminiTools = convertToGeminiTools(TOOL_DEFINITIONS);
+  // Preparar herramientas en formato Gemini (incluye GYM, PLAN, ADN + MOTO, SURF, AUTO)
+  let geminiTools: GeminiToolDeclaration[];
+  try {
+    geminiTools = convertToGeminiTools(ALL_TOOL_DEFINITIONS);
+    console.warn(`📦 Herramientas convertidas: ${geminiTools.length}`);
+  } catch (convertError) {
+    console.warn('❌ Error al convertir herramientas:', convertError);
+    throw new Error(`Tool conversion failed: ${(convertError as Error).message}`);
+  }
 
   // 🔍 DEBUG: Log herramientas disponibles
   console.warn(`📦 Herramientas enviadas a Gemini: ${geminiTools.length}`);
-  console.warn(`📦 Nombres: ${geminiTools.map((t) => t.name).join(', ')}`);
+
+  // 🔍 DEBUG: Detectar si es un comando de acción
+  const lowerMessage = userMessage.toLowerCase();
+
+  // Detectar si el usuario está preguntando sobre su físico, progreso o planes
+  // En estos casos, incluiremos las fotos de progreso
+  const isPhysiqueQuestion =
+    /c[oó]mo me ve|analiza|progreso|f[ií]sico|cuerpo|m[uú]sculo|grasa|definici[oó]n|foto|imagen|plan.*entrena|qu[eé] rutina|qu[eé] plan|recomien/i.test(
+      lowerMessage
+    );
+
+  // Preparar fotos si hay y si es relevante
+  let photosParts: Array<{ inlineData: { mimeType: string; data: string } }> = [];
+  if (context.progressPhotos && context.progressPhotos.length > 0 && isPhysiqueQuestion) {
+    console.warn(
+      `📸 Pregunta sobre físico detectada, preparando ${context.progressPhotos.length} fotos...`
+    );
+    photosParts = await prepareProgressPhotosForGemini(context.progressPhotos);
+  }
+
+  // Construir las partes del mensaje del usuario
+  const userMessageParts: GeminiMessage['parts'] = [];
+
+  // Primero el texto
+  userMessageParts.push({ text: userMessage });
+
+  // Después las fotos si las hay
+  if (photosParts.length > 0) {
+    console.warn(`📸 Incluyendo ${photosParts.length} fotos en el mensaje`);
+    userMessageParts.push(...photosParts);
+  }
 
   // Construir el historial con el nuevo mensaje
   const messages: GeminiMessage[] = [
     ...conversationHistory,
     {
       role: 'user',
-      parts: [{ text: userMessage }],
+      parts: userMessageParts,
     },
   ];
-
-  // 🔍 DEBUG: Detectar si es un comando de acción
-  const lowerMessage = userMessage.toLowerCase();
 
   // Detectar si es una CONFIRMACIÓN para ejecutar plan (solo entonces forzar herramientas)
   const isPlanConfirmation =
@@ -650,9 +996,10 @@ export async function callGemini(
 
     if (!response.ok) {
       const errorText = await response.text();
-      // Solo log como warning, no error
+      // Log detallado del error para debugging
       console.warn('⚠️ Gemini API respondió con error:', response.status);
-      throw new Error(`Gemini API error: ${response.status}`);
+      console.warn('⚠️ Error detallado:', errorText);
+      throw new Error(`Gemini API error: ${response.status} - ${errorText.substring(0, 200)}`);
     }
 
     const data: GeminiResponse = await response.json();
@@ -857,8 +1204,8 @@ export async function continueWithMoreTools(
   additionalInstruction?: string,
   conversationHistory?: GeminiMessage[]
 ): Promise<GeminiResult> {
-  // Preparar herramientas en formato Gemini
-  const geminiTools = convertToGeminiTools(TOOL_DEFINITIONS);
+  // Preparar herramientas en formato Gemini (incluye GYM, PLAN, ADN + MOTO, SURF, AUTO)
+  const geminiTools = convertToGeminiTools(ALL_TOOL_DEFINITIONS);
 
   // Construir historial incluyendo la conversación previa
   const messages: GeminiMessage[] = [

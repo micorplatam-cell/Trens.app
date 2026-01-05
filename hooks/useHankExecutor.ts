@@ -39,7 +39,19 @@ import {
   planAddSupplement,
   planRemoveSupplement,
   planUpdateSupplementTime,
+  planUpdateSupplementDose,
+  planUpdateSupplementName,
+  planUpdateMealName,
+  planUpdateMealMacros,
   planGetStack,
+  // Meal Options (Alternativas)
+  planAddMealOption,
+  planSelectMealOption,
+  planRemoveMealOption,
+  planGetMealOptions,
+  // Training Tools
+  trainingSetFrequency,
+  trainingSetCurrentDay,
   // Omniscient Tools
   getFullUserContext,
   planGetMealDetails,
@@ -61,6 +73,15 @@ import {
   progressGetPhotos,
   progressGetPhotoDetail,
   progressComparePhotos,
+  // PRO Tools
+  proAddExerciseNote,
+  proGetExerciseNotes,
+  // User Goal Tools
+  setUserGoal,
+  getUserGoals,
+  updateGoalProgress,
+  // System Tools
+  hankGetCapabilities,
   TOOL_DEFINITIONS,
 } from '../services/hank/tools';
 import {
@@ -561,7 +582,87 @@ export const useHankExecutor = (
             break;
 
           case 'PLAN_UPDATE_SUPPLEMENT_TIME':
-            result = await planUpdateSupplementTime(userId, p.name as string, p.newTime as string);
+            result = await planUpdateSupplementTime(
+              userId,
+              p.name as string,
+              p.newTime as string | undefined,
+              p.newTimes as string[] | undefined
+            );
+            break;
+
+          case 'PLAN_UPDATE_SUPPLEMENT_DOSE':
+            result = await planUpdateSupplementDose(userId, p.name as string, p.newDose as string);
+            break;
+
+          case 'PLAN_UPDATE_SUPPLEMENT_NAME':
+            result = await planUpdateSupplementName(
+              userId,
+              p.oldName as string,
+              p.newName as string
+            );
+            break;
+
+          case 'PLAN_UPDATE_MEAL_NAME':
+            result = await planUpdateMealName(
+              userId,
+              p.newName as string,
+              p.mealId as string | undefined,
+              p.position as string | undefined
+            );
+            break;
+
+          case 'PLAN_UPDATE_MEAL_MACROS':
+            result = await planUpdateMealMacros(
+              userId,
+              p.mealId as string | undefined,
+              p.position as string | undefined,
+              p.calories as number | undefined,
+              p.protein as number | undefined,
+              p.carbs as number | undefined,
+              p.fat as number | undefined
+            );
+            break;
+
+          case 'TRAINING_SET_FREQUENCY':
+            result = await trainingSetFrequency(userId, p.frequency as number);
+            break;
+
+          case 'TRAINING_SET_CURRENT_DAY':
+            result = await trainingSetCurrentDay(userId, p.dayNumber as number);
+            break;
+
+          // MEAL OPTIONS (ALTERNATIVAS)
+          case 'PLAN_ADD_MEAL_OPTION': {
+            const ingredients = typeof p.ingredients === 'string' 
+              ? JSON.parse(p.ingredients) 
+              : p.ingredients;
+            result = await planAddMealOption(
+              userId,
+              p.mealId as string,
+              p.optionName as string,
+              ingredients
+            );
+            break;
+          }
+
+          case 'PLAN_SELECT_MEAL_OPTION':
+            result = await planSelectMealOption(
+              userId,
+              p.mealId as string,
+              p.optionPosition as number
+            );
+            break;
+
+          case 'PLAN_REMOVE_MEAL_OPTION':
+            result = await planRemoveMealOption(
+              userId,
+              p.mealId as string,
+              p.optionPosition as number
+            );
+            break;
+
+          case 'PLAN_GET_MEAL_OPTIONS':
+            result = await planGetMealOptions(userId, p.mealId as string);
             break;
 
           case 'PLAN_GET_STACK':
@@ -911,6 +1012,62 @@ Cuando termines, di **"ejecuta el plan"** y lo guardaré todo.`,
 
           case 'SURF_GET_SPOTS':
             result = await surfGetSpots(userId);
+            break;
+
+          // =========================================================================
+          // PRO TOOLS (Notas de ejercicio)
+          // =========================================================================
+          case 'PRO_ADD_EXERCISE_NOTE':
+            result = await proAddExerciseNote(userId, p.exerciseName as string, p.note as string, {
+              weightKg: p.weightKg as number | undefined,
+              reps: p.reps as number | undefined,
+              tags: p.tags as string[] | undefined,
+            });
+            break;
+
+          case 'PRO_GET_EXERCISE_NOTES':
+            result = await proGetExerciseNotes(
+              userId,
+              p.exerciseName as string,
+              p.limit as number | undefined
+            );
+            break;
+
+          // =========================================================================
+          // USER GOAL TOOLS (Metas con fechas)
+          // =========================================================================
+          case 'SET_USER_GOAL':
+            result = await setUserGoal(
+              userId,
+              p.goalType as 'weight' | 'body_fat' | 'muscle_mass' | 'strength' | 'custom',
+              p.targetValue as string,
+              p.targetDate as string,
+              {
+                description: p.description as string | undefined,
+                exerciseName: p.exerciseName as string | undefined,
+                startValue: p.startValue as string | undefined,
+              }
+            );
+            break;
+
+          case 'GET_USER_GOALS':
+            result = await getUserGoals(userId);
+            break;
+
+          case 'UPDATE_GOAL_PROGRESS':
+            result = await updateGoalProgress(
+              userId,
+              p.goalId as string,
+              p.newValue as string,
+              p.status as 'active' | 'completed' | 'abandoned' | undefined
+            );
+            break;
+
+          // =========================================================================
+          // HANK SYSTEM TOOLS
+          // =========================================================================
+          case 'HANK_GET_CAPABILITIES':
+            result = await hankGetCapabilities();
             break;
 
           default:

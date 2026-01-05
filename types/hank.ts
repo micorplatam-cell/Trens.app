@@ -48,9 +48,18 @@ export type HankToolName =
   | 'PLAN_ADD_SUPPLEMENT'
   | 'PLAN_REMOVE_SUPPLEMENT'
   | 'PLAN_UPDATE_SUPPLEMENT_TIME'
+  | 'PLAN_UPDATE_SUPPLEMENT_DOSE'
+  | 'PLAN_UPDATE_SUPPLEMENT_NAME'
+  | 'PLAN_UPDATE_MEAL_NAME'
+  | 'PLAN_UPDATE_MEAL_MACROS'
   | 'PLAN_GET_STACK'
   | 'PLAN_ANALYZE_NUTRITION'
   | 'PLAN_GET_NEXT_MEAL'
+  // MEAL OPTIONS (Alternativas de comidas)
+  | 'PLAN_ADD_MEAL_OPTION'
+  | 'PLAN_SELECT_MEAL_OPTION'
+  | 'PLAN_REMOVE_MEAL_OPTION'
+  | 'PLAN_GET_MEAL_OPTIONS'
   // PLAN BUILDER Tools (Construcción interactiva de planes)
   | 'PLAN_BUILDER_START'
   | 'PLAN_BUILDER_ADD_MEAL'
@@ -71,6 +80,8 @@ export type HankToolName =
   | 'TRAINING_RENAME_DAY'
   | 'TRAINING_ADD_DAY'
   | 'TRAINING_REMOVE_DAY'
+  | 'TRAINING_SET_FREQUENCY'
+  | 'TRAINING_SET_CURRENT_DAY'
   // SYNC Tools (Sincronización completa)
   | 'GET_FULL_PLAN_STATUS'
   | 'SYNC_NUTRITION_MACROS'
@@ -84,6 +95,14 @@ export type HankToolName =
   | 'GET_USER_CONTEXT'
   // System Tools
   | 'HANK_CLEAR_HISTORY'
+  | 'HANK_GET_CAPABILITIES'
+  // PRO Tools (Notas de ejercicio)
+  | 'PRO_ADD_EXERCISE_NOTE'
+  | 'PRO_GET_EXERCISE_NOTES'
+  // User Goal Tools (Metas con fechas)
+  | 'SET_USER_GOAL'
+  | 'GET_USER_GOALS'
+  | 'UPDATE_GOAL_PROGRESS'
   // INVENTORY Tools (MOTO/AUTO/SURF)
   | 'INVENTORY_ADD_ITEM'
   | 'INVENTORY_UPDATE_ITEM'
@@ -111,6 +130,7 @@ export interface ToolParameter {
   type: 'string' | 'number' | 'boolean' | 'array' | 'object';
   description: string;
   enum?: string[];
+  items?: { type: string }; // Requerido para type: 'array' en Gemini
   required?: boolean;
   default?: unknown;
 }
