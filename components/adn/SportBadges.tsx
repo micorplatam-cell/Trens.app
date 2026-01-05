@@ -41,7 +41,7 @@ function SportBadge({ sport, isActive, onPress }: SportBadgeProps) {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         onPress();
       }}
-      className="flex-row items-center px-4 py-2 rounded-full mr-2"
+      className="flex-row items-center px-4 py-2 rounded-full"
       style={{
         backgroundColor: isActive ? sportColor : 'transparent',
         borderWidth: 2,
@@ -111,7 +111,7 @@ export function SportBadges({ vertical = false }: SportBadgesProps) {
     <>
       <View
         className={
-          vertical ? 'flex-col items-start gap-2' : 'flex-row items-center justify-center flex-wrap'
+          vertical ? 'flex-col items-start gap-2' : 'flex-row items-center justify-start flex-wrap gap-2'
         }
       >
         {/* Insignias de deportes del usuario */}
