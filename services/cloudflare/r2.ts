@@ -326,6 +326,117 @@ class CloudflareR2Service {
     }
     return this.deleteFile(key);
   }
+
+  // --------------------------------------------------------------------------
+  // SUBIR AVATAR DE USUARIO
+  // --------------------------------------------------------------------------
+  async uploadAvatar(fileUri: string, userId: string): Promise<R2UploadResult> {
+    const timestamp = Date.now();
+    const key = `avatars/${userId}_${timestamp}.jpg`;
+
+    return this.uploadFile(fileUri, key, 'image/jpeg');
+  }
+
+  // --------------------------------------------------------------------------
+  // ELIMINAR AVATAR DE USUARIO
+  // --------------------------------------------------------------------------
+  async deleteAvatar(avatarUrl: string): Promise<R2DeleteResult> {
+    const key = this.getKeyFromUrl(avatarUrl);
+    if (!key) {
+      return { success: false, error: 'URL inválida' };
+    }
+    return this.deleteFile(key);
+  }
+
+  // --------------------------------------------------------------------------
+  // SUBIR DESDE BLOB (para WEB)
+  // Usa PUT directo a R2 con AWS Signature V4
+  // --------------------------------------------------------------------------
+  async uploadFromBlob(blob: Blob, key: string, contentType: string): Promise<R2UploadResult> {
+    try {
+      if (!ACCESS_KEY_ID || !SECRET_ACCESS_KEY || !ACCOUNT_ID) {
+        console.error('❌ R2 credentials not configured');
+        return { success: false, error: 'R2 credentials not configured' };
+      }
+
+      const uploadUrl = `${R2_ENDPOINT}/${BUCKET_NAME}/${key}`;
+
+      // Preparar headers de autenticación AWS4
+      const now = new Date();
+      const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
+      const dateStamp = amzDate.substring(0, 8);
+      const region = 'auto';
+      const service = 's3';
+
+      // Usar UNSIGNED-PAYLOAD para evitar calcular hash del contenido
+      const contentHash = 'UNSIGNED-PAYLOAD';
+
+      // Headers canónicos
+      const host = `${ACCOUNT_ID}.r2.cloudflarestorage.com`;
+      const canonicalHeaders =
+        `content-type:${contentType}\n` +
+        `host:${host}\n` +
+        `x-amz-content-sha256:${contentHash}\n` +
+        `x-amz-date:${amzDate}\n`;
+
+      const signedHeaders = 'content-type;host;x-amz-content-sha256;x-amz-date';
+
+      // Request canónico
+      const canonicalRequest =
+        `PUT\n` +
+        `/${BUCKET_NAME}/${key}\n` +
+        `\n` +
+        `${canonicalHeaders}\n` +
+        `${signedHeaders}\n` +
+        `${contentHash}`;
+
+      // String to sign
+      const algorithm = 'AWS4-HMAC-SHA256';
+      const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
+      const canonicalRequestHash = sha256(canonicalRequest);
+
+      const stringToSign = `${algorithm}\n${amzDate}\n${credentialScope}\n${canonicalRequestHash}`;
+
+      // Calcular firma con HMAC real
+      const signingKey = getSignatureKey(SECRET_ACCESS_KEY, dateStamp, region, service);
+      const signature = hmacSha256(signingKey, stringToSign).toString(CryptoJS.enc.Hex);
+
+      // Authorization header
+      const authorization =
+        `${algorithm} ` +
+        `Credential=${ACCESS_KEY_ID}/${credentialScope}, ` +
+        `SignedHeaders=${signedHeaders}, ` +
+        `Signature=${signature}`;
+
+      // Subir usando fetch con blob
+      const response = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': contentType,
+          'x-amz-content-sha256': contentHash,
+          'x-amz-date': amzDate,
+          Authorization: authorization,
+        },
+        body: blob,
+      });
+
+      if (!response.ok) {
+        console.error('❌ R2 Blob Upload Error:', response.status, await response.text());
+        return { success: false, error: `Upload failed: ${response.status}` };
+      }
+
+      const publicUrl = `${PUBLIC_URL}/${key}`;
+
+      return {
+        success: true,
+        url: publicUrl,
+        key,
+      };
+    } catch (error) {
+      console.error('💥 R2 Blob Upload Exception:', error);
+      return { success: false, error: String(error) };
+    }
+  }
 }
 
 // Singleton

@@ -41,6 +41,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { supabase } from '../../../lib/supabase';
 import cloudflareStream from '../../../services/cloudflare/stream';
+import cloudflareR2 from '../../../services/cloudflare/r2';
 import { useUserRoleContext } from '../../../context/UserRoleContext';
 import { useHank } from '../../../context/HankContext';
 import { useSaveGuard } from '../../_layout';
@@ -629,8 +630,6 @@ export default function AdnScreen() {
   };
 
   const saveProfile = async () => {
-    console.log('💾 saveProfile llamado, user:', user?.id);
-    
     if (!user) {
       Alert.alert('Error', 'Debes iniciar sesión para editar tu perfil.');
       return;
@@ -644,60 +643,41 @@ export default function AdnScreen() {
 
       // Subir nueva imagen si se seleccionó una
       if (editAvatarUri) {
-        const R2_PUBLIC_URL = process.env.EXPO_PUBLIC_CLOUDFLARE_R2_PUBLIC_URL;
-        console.log('🔗 R2_PUBLIC_URL:', R2_PUBLIC_URL);
-        
-        if (!R2_PUBLIC_URL) {
-          console.warn('⚠️ R2_PUBLIC_URL no definida, saltando subida de imagen');
-        } else {
-          const fileName = `avatars/${user.id}_${Date.now()}.jpg`;
-          console.log('📸 Subiendo avatar:', fileName);
+        console.log('📸 Subiendo avatar usando R2 service...');
 
-          // Borrar avatar anterior de R2 si existe
-          const oldAvatarUrl = profile?.avatar_url;
-          if (oldAvatarUrl && oldAvatarUrl.includes(R2_PUBLIC_URL)) {
-            try {
-              const oldFileName = oldAvatarUrl.replace(`${R2_PUBLIC_URL}/`, '');
-              await fetch(`${R2_PUBLIC_URL}/delete`, {
-                method: 'DELETE',
-                headers: { 'X-File-Name': oldFileName },
-              });
-              console.log('🗑️ Avatar anterior eliminado:', oldFileName);
-            } catch (deleteError) {
-              console.warn('Error eliminando avatar anterior:', deleteError);
+        // Borrar avatar anterior de R2 si existe
+        const oldAvatarUrl = profile?.avatar_url;
+        if (oldAvatarUrl) {
+          try {
+            const deleteResult = await cloudflareR2.deleteAvatar(oldAvatarUrl);
+            if (deleteResult.success) {
+              console.log('🗑️ Avatar anterior eliminado');
             }
+          } catch (deleteError) {
+            console.warn('Error eliminando avatar anterior:', deleteError);
           }
+        }
 
-          // Fetch la imagen como blob
-          const response = await fetch(editAvatarUri);
-          const blob = await response.blob();
-          console.log('📦 Blob creado, tamaño:', blob.size);
+        // Fetch la imagen como blob
+        const response = await fetch(editAvatarUri);
+        const blob = await response.blob();
+        console.log('📦 Blob creado, tamaño:', blob.size);
 
-          // Subir usando el worker de Cloudflare
-          const uploadResponse = await fetch(`${R2_PUBLIC_URL}/upload`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'image/jpeg',
-              'X-File-Name': fileName,
-            },
-            body: blob,
-          });
+        // Subir usando el servicio R2 con método uploadFromBlob
+        const fileName = `avatars/${user.id}_${Date.now()}.jpg`;
+        const uploadResult = await cloudflareR2.uploadFromBlob(blob, fileName, 'image/jpeg');
 
-          console.log('📤 Upload response status:', uploadResponse.status);
-          
-          if (uploadResponse.ok) {
-            const data = await uploadResponse.json();
-            avatarUrl = data.url || `${R2_PUBLIC_URL}/${fileName}`;
-            console.log('✅ Avatar subido:', avatarUrl);
-          } else {
-            const errorText = await uploadResponse.text();
-            console.warn('❌ Error subiendo avatar:', errorText);
-          }
+        if (uploadResult.success && uploadResult.url) {
+          avatarUrl = uploadResult.url;
+          console.log('✅ Avatar subido:', avatarUrl);
+        } else {
+          console.warn('❌ Error subiendo avatar:', uploadResult.error);
+          Alert.alert('Error', 'No se pudo subir la imagen. El nombre se guardará.');
         }
       }
 
       // Actualizar perfil en Supabase
-      console.log('💾 Actualizando Supabase con:', { display_name: editName.trim(), avatar_url: avatarUrl });
+      console.log('💾 Actualizando Supabase...');
       
       const { error } = await supabase
         .from('user_profiles')
