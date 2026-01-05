@@ -827,7 +827,7 @@ export default function AdnScreen() {
         }
       >
         {/* HEADER (PÚBLICO) - ED HARDY FIRE STYLE */}
-        <View className="relative pt-16 pb-20 px-6 items-center">
+        <View className="relative pt-16 pb-8 px-6 items-center">
           {/* Fire Gradient Background */}
           <LinearGradient
             colors={['#1a0a0a', '#0a0000', '#000000']}
@@ -934,7 +934,7 @@ export default function AdnScreen() {
 
         {/* TODAY CARDS - Entrenamiento y Próxima Comida/Stack */}
         {isOwner && user && (
-          <View className="mt-2">
+          <View className="mt-6">
             <TodayCards userId={user.id} />
           </View>
         )}
