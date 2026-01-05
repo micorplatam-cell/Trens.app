@@ -629,7 +629,10 @@ export default function AdnScreen() {
   };
 
   const saveProfile = async () => {
-    if (!user || !canSave) return;
+    if (!user) {
+      Alert.alert('Error', 'Debes iniciar sesión para editar tu perfil.');
+      return;
+    }
 
     setIsSavingProfile(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -641,6 +644,7 @@ export default function AdnScreen() {
       if (editAvatarUri) {
         const R2_PUBLIC_URL = process.env.EXPO_PUBLIC_CLOUDFLARE_R2_PUBLIC_URL;
         const fileName = `avatars/${user.id}_${Date.now()}.jpg`;
+        console.log('📸 Subiendo avatar:', fileName);
 
         // Borrar avatar anterior de R2 si existe
         const oldAvatarUrl = profile?.avatar_url;
