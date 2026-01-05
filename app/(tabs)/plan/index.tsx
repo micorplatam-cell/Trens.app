@@ -856,14 +856,28 @@ function PlanScreen() {
               .eq('id', newMeals[i].id);
           }
 
-          // Recalcular macros de todas las comidas restantes
+          // Recalcular macros o limpiar si no hay comidas
           if (newMeals.length > 0) {
             const mealIds = newMeals.map((m) => m.id);
-            recalculateAllMealsAfterChange(newMeals.length, mealIds);
+            await recalculateAllMealsAfterChange(newMeals.length, mealIds);
+          } else {
+            // Si no quedan comidas, limpiar cached_daily_macros
+            const {
+              data: { user },
+            } = await supabase.auth.getUser();
+            if (user) {
+              await supabase
+                .from('user_profiles')
+                .update({
+                  cached_daily_macros: null,
+                  cached_macros_meal_count: 0,
+                  cached_macros_updated_at: new Date().toISOString(),
+                })
+                .eq('user_id', user.id);
+              console.log('🗑️ SYNC: Macros limpiados (sin comidas)');
+            }
+            await fetchData();
           }
-
-          // Refrescar datos
-          await fetchData();
         },
       },
     ]);
@@ -914,6 +928,56 @@ function PlanScreen() {
         },
       },
     ]);
+  };
+
+  // ============================================================================
+  // SYNC: Actualizar cached_daily_macros en Supabase para sincronización
+  // ============================================================================
+  const updateCachedDailyMacros = async (mealCount: number) => {
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // Obtener perfil completo
+      const { profile, bodyMeasurements } = await getFullProfileWithMeasurements(user.id);
+      if (!profile) return;
+
+      // Calcular macros diarios con IA
+      const dailyMacros = await calculateUserDailyMacros({
+        weight: profile.weight || '75 KG',
+        height: profile.height || '1.75 M',
+        goal: profile.goal || 'MANTENER',
+        mealCount: mealCount,
+        age: profile.age || undefined,
+        sex: profile.sex || undefined,
+        bodyFatPercentage: profile.body_fat_percentage || undefined,
+        muscleMass: profile.muscle_mass || undefined,
+        activityLevel: profile.activity_level || 'MODERADO',
+        trainingExperience: profile.training_experience || undefined,
+        metabolicRate: profile.metabolic_rate || undefined,
+        trainingDaysPerWeek: profile.training_days_per_week || undefined,
+        bodyMeasurements: bodyMeasurements,
+      });
+
+      // Guardar en Supabase para sincronización entre dispositivos
+      await supabase
+        .from('user_profiles')
+        .update({
+          cached_daily_macros: dailyMacros,
+          cached_macros_meal_count: mealCount,
+          cached_macros_updated_at: new Date().toISOString(),
+        })
+        .eq('user_id', user.id);
+
+      console.log('💾 SYNC: Macros guardados en Supabase para sincronización');
+
+      // Actualizar estado local
+      setMealMacros(dailyMacros.perMeal);
+    } catch (error) {
+      console.error('Error updating cached daily macros:', error);
+    }
   };
 
   // Recalcular macros de todas las comidas cuando cambia la cantidad
@@ -994,12 +1058,15 @@ function PlanScreen() {
           .eq('id', option.optionId);
       }
 
-      console.log('✅ Recálculo completado, actualizando UI...');
+      console.log('✅ Recálculo completado, actualizando cached_daily_macros...');
+
+      // Actualizar cached_daily_macros en user_profiles
+      await updateCachedDailyMacros(newMealCount);
 
       // Refrescar datos para actualizar la UI
       await fetchData();
 
-      console.log('✅ UI actualizada');
+      console.log('✅ UI y cache actualizados');
     } catch (error) {
       console.error('❌ Error recalculando comidas:', error);
     }
@@ -1195,10 +1262,11 @@ function PlanScreen() {
       if (allMealIds.length > 1) {
         console.log(`🔄 Recalculando ${allMealIds.length} comidas con nuevos macros objetivo...`);
         await recalculateAllMealsAfterChange(allMealIds.length, allMealIds);
+      } else {
+        // Primera comida: solo actualizar cached_daily_macros
+        await updateCachedDailyMacros(1);
+        await fetchData();
       }
-
-      // Refrescar datos inmediatamente
-      await fetchData();
     } catch (error) {
       console.error('Error adding meal:', error);
       Alert.alert('Error', 'No se pudo agregar la comida');
