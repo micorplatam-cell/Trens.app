@@ -848,81 +848,87 @@ export default function AdnScreen() {
             }}
           />
 
-          {/* Avatar con Fire Ring + Sport Badges a la izquierda */}
-          <View className="flex-row items-center justify-center mb-4">
-            {/* Sport Badges - Apiladas verticalmente a la izquierda */}
-            <View className="mr-4">
-              <SportBadges vertical />
+          {/* LAYOUT ESTILO INSTAGRAM: Avatar izquierda, Nombre+Pills derecha */}
+          <View className="flex-row items-start w-full">
+            {/* Columna izquierda: Avatar + Badge PRO */}
+            <View className="items-center">
+              {/* Avatar con Fire Ring */}
+              <View
+                className="w-24 h-24 rounded-full items-center justify-center"
+                style={{
+                  borderWidth: 3,
+                  borderColor: '#F97316',
+                  shadowColor: '#F97316',
+                  shadowOffset: { width: 0, height: 0 },
+                  shadowOpacity: 0.8,
+                  shadowRadius: 15,
+                  elevation: 10,
+                }}
+              >
+                <View className="w-20 h-20 rounded-full bg-zinc-900 overflow-hidden">
+                  {profile?.avatar_url ? (
+                    <Image
+                      source={{ uri: profile.avatar_url }}
+                      className="w-full h-full"
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <LinearGradient
+                      colors={['#DC2626', '#F97316']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      className="w-full h-full items-center justify-center"
+                    >
+                      <Text className="text-white text-3xl font-black">
+                        {profile?.display_name?.charAt(0) || 'A'}
+                      </Text>
+                    </LinearGradient>
+                  )}
+                </View>
+              </View>
+
+              {/* Badge PRO/FREE debajo del avatar */}
+              <View
+                className={`mt-2 px-3 py-1 rounded-full ${isPro ? '' : 'bg-zinc-800'}`}
+                style={
+                  isPro
+                    ? {
+                        backgroundColor: '#0a0000',
+                        borderWidth: 2,
+                        borderColor: '#F97316',
+                        shadowColor: '#DC2626',
+                        shadowOffset: { width: 0, height: 0 },
+                        shadowOpacity: 0.8,
+                        shadowRadius: 10,
+                      }
+                    : {}
+                }
+              >
+                <Text className={`text-xs font-bold ${isPro ? 'text-fire-orange' : 'text-zinc-500'}`}>
+                  {isPro ? '🔥 PRO' : '🔒 FREE'}
+                </Text>
+              </View>
             </View>
 
-            {/* Avatar con Fire Ring */}
-            <View
-              className="w-28 h-28 rounded-full items-center justify-center"
-              style={{
-                borderWidth: 3,
-                borderColor: '#F97316',
-                shadowColor: '#F97316',
-                shadowOffset: { width: 0, height: 0 },
-                shadowOpacity: 0.8,
-                shadowRadius: 15,
-                elevation: 10,
-              }}
-            >
-              <View className="w-24 h-24 rounded-full bg-zinc-900 overflow-hidden">
-                {profile?.avatar_url ? (
-                  <Image
-                    source={{ uri: profile.avatar_url }}
-                    className="w-full h-full"
-                    resizeMode="cover"
-                  />
-              ) : (
-                <LinearGradient
-                  colors={['#DC2626', '#F97316']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  className="w-full h-full items-center justify-center"
-                >
-                  <Text className="text-white text-4xl font-black">
-                    {profile?.display_name?.charAt(0) || 'A'}
-                  </Text>
-                </LinearGradient>
-              )}
+            {/* Columna derecha: Nombre + Sport Badges */}
+            <View className="flex-1 ml-4 justify-center">
+              {/* Nombre con Fire Glow */}
+              <Text
+                className="text-2xl font-black text-white uppercase tracking-tight"
+                style={{
+                  textShadowColor: '#F97316',
+                  textShadowOffset: { width: 0, height: 0 },
+                  textShadowRadius: 10,
+                }}
+              >
+                {profile?.display_name || 'ATLETA'}
+              </Text>
+
+              {/* Sport Badges */}
+              <View className="mt-3">
+                <SportBadges />
+              </View>
             </View>
-          </View>
-          </View>
-
-          {/* Nombre con Fire Glow */}
-          <Text
-            className="text-3xl font-black text-white uppercase tracking-tight mb-1"
-            style={{
-              textShadowColor: '#F97316',
-              textShadowOffset: { width: 0, height: 0 },
-              textShadowRadius: 10,
-            }}
-          >
-            {profile?.display_name || 'ATLETA'}
-          </Text>
-
-          {/* Badge PRO/FREE con Fire Style */}
-          <View
-            className={`mt-3 px-4 py-1.5 rounded-full ${isPro ? '' : 'bg-zinc-800'}`}
-            style={
-              isPro
-                ? {
-                    backgroundColor: '#0a0000',
-                    borderWidth: 2,
-                    borderColor: '#F97316',
-                    shadowColor: '#DC2626',
-                    shadowOffset: { width: 0, height: 0 },
-                    shadowOpacity: 0.8,
-                    shadowRadius: 10,
-                  }
-                : {}
-            }
-          >
-            <Text className={`text-xs font-bold ${isPro ? 'text-fire-orange' : 'text-zinc-500'}`}>
-              {isPro ? '🔥 PRO' : '🔒 FREE'}
-            </Text>
           </View>
         </View>
 
