@@ -114,6 +114,7 @@ interface WorkoutBlockData {
     imageUrl?: string;
     videoUrl?: string;
   }[];
+  isExternalMode?: boolean; // True si usa horario externo (no módulo GYM)
 }
 
 interface TimelineItem {
@@ -225,6 +226,7 @@ function PlanScreen() {
   const [stackItems, setStackItems] = useState<StackItem[]>([]);
   const [workoutPosIndex, setWorkoutPosIndex] = useState(2);
   const [todayRoutine, setTodayRoutine] = useState<string>('SIN RUTINA');
+  const [isExternalMode, setIsExternalMode] = useState(false); // Modo entrenamiento externo
   const [todayExercises, setTodayExercises] = useState<
     {
       id: string;
@@ -572,30 +574,66 @@ function PlanScreen() {
         .eq('id', user.id)
         .single();
 
-      // Usar el día guardado en la base de datos
-      const currentTrainingDay = profileData?.training_current_day ?? 0;
+      // ===========================================================================
+      // DETECTAR MODO DE ENTRENAMIENTO (external vs gym_module)
+      // ===========================================================================
+      const { data: userProfileData } = await supabase
+        .from('user_profiles')
+        .select('training_mode, external_schedule')
+        .eq('user_id', user.id)
+        .single();
 
-      // Leer nombres de rutinas directamente de la base de datos
-      // Si no hay, mostrará "ENTRENAMIENTO" para indicar que GYM no ha sincronizado
-      const routineNames = profileData?.training_routine_names || {};
+      const trainingMode = userProfileData?.training_mode || 'none';
+      const externalSchedule = userProfileData?.external_schedule || {};
+      const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+      const todayName = dayNames[new Date().getDay()];
 
-      console.warn(
-        `🏋️ PLAN: Día: ${currentTrainingDay}, Rutina: ${routineNames[String(currentTrainingDay)] || 'NO SINCRONIZADO'}`
-      );
+      // ===========================================================================
+      // MODO EXTERNO: Usuario entrena por su cuenta, no usa módulo GYM
+      // ===========================================================================
+      if (trainingMode === 'external' && Object.keys(externalSchedule).length > 0) {
+        const todayMuscle = externalSchedule[todayName] || null;
+        setIsExternalMode(true);
 
-      // Fetch exercises for current training day
-      // ARQUITECTURA: user_exercise_config + exercises (igual que GYM)
-      const { data: userConfigs, error: exercisesError } = await supabase
-        .from('user_exercise_config')
-        .select(
-          `
-          id,
-          exercise_id,
-          training_days,
-          display_order,
-          custom_media_url,
-          exercises (
+        if (todayMuscle) {
+          setTodayRoutine(todayMuscle);
+          setTodayExercises([]); // Modo externo no tiene ejercicios detallados
+          console.warn(`🏋️ PLAN [EXTERNO]: ${todayName} → ${todayMuscle}`);
+        } else {
+          setTodayRoutine('DESCANSO');
+          setTodayExercises([]);
+          console.warn('🏋️ PLAN [EXTERNO]: Hoy es descanso');
+        }
+      } else {
+        // ===========================================================================
+        // MODO GYM MODULE: Cargar ejercicios del día actual
+        // ===========================================================================
+        setIsExternalMode(false);
+
+        // Usar el día guardado en la base de datos
+        const currentTrainingDay = profileData?.training_current_day ?? 0;
+
+        // Leer nombres de rutinas directamente de la base de datos
+        // Si no hay, mostrará "ENTRENAMIENTO" para indicar que GYM no ha sincronizado
+        const routineNames = profileData?.training_routine_names || {};
+
+        console.warn(
+          `🏋️ PLAN: Día: ${currentTrainingDay}, Rutina: ${routineNames[String(currentTrainingDay)] || 'NO SINCRONIZADO'}`
+        );
+
+        // Fetch exercises for current training day
+        // ARQUITECTURA: user_exercise_config + exercises (igual que GYM)
+        const { data: userConfigs, error: exercisesError } = await supabase
+          .from('user_exercise_config')
+          .select(
+            `
             id,
+            exercise_id,
+            training_days,
+            display_order,
+            custom_media_url,
+            exercises (
+              id,
             name,
             default_media_url,
             thumbnail_url,
@@ -703,6 +741,7 @@ function PlanScreen() {
         setTodayRoutine('DESCANSO');
         setTodayExercises([]);
       }
+      } // Fin del else (modo GYM MODULE)
     } catch (error) {
       console.error('Error fetching plan data:', error);
     } finally {
@@ -1592,6 +1631,7 @@ function PlanScreen() {
       preStack,
       postStack,
       exercises: todayExercises,
+      isExternalMode: isExternalMode, // Indica si es modo externo
     };
 
     const safeIndex = Math.min(Math.max(0, workoutPosIndex), timeline.length);

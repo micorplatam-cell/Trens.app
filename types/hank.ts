@@ -82,6 +82,10 @@ export type HankToolName =
   | 'TRAINING_REMOVE_DAY'
   | 'TRAINING_SET_FREQUENCY'
   | 'TRAINING_SET_CURRENT_DAY'
+  // EXTERNAL TRAINING Tools (Usuarios que no usan módulo GYM)
+  | 'TRAINING_SET_EXTERNAL_MODE'
+  | 'TRAINING_SET_EXTERNAL_SCHEDULE'
+  | 'TRAINING_GET_STATUS'
   // SYNC Tools (Sincronización completa)
   | 'GET_FULL_PLAN_STATUS'
   | 'SYNC_NUTRITION_MACROS'
@@ -456,4 +460,37 @@ export interface TrainingPlanAssignResult {
   frequency: number;
   daysConfigured: number;
   message: string;
+}
+
+// ============================================================================
+// TRAINING STATUS - Estado de entrenamiento del usuario (SIMPLIFICADO)
+// ============================================================================
+
+/**
+ * Modo de entrenamiento del usuario (simplificado)
+ * - gym_module: Usa el módulo GYM con ejercicios en user_exercise_config
+ * - external: Entrena por su cuenta, solo guarda frecuencia/horario simple
+ * - none: No tiene nada configurado
+ */
+export type TrainingMode = 'gym_module' | 'external' | 'none';
+
+/**
+ * Nivel de experiencia del usuario
+ */
+export type ExperienceLevel = 'PRINCIPIANTE' | 'INTERMEDIO' | 'AVANZADO' | 'ELITE';
+
+/**
+ * Estado de entrenamiento simplificado
+ */
+export interface UserTrainingStatus {
+  level: ExperienceLevel;
+  declaredMode: TrainingMode; // Lo que el usuario declaró
+  effectiveMode: TrainingMode; // Lo que realmente tiene (basado en datos)
+  frequency: number;
+  currentDay: number;
+  routineNames: Record<string, string>;
+  externalSchedule: Record<string, string>; // {"Lunes": "Pecho", "Martes": "Espalda"}
+  gymExercisesCount: number;
+  planSource: 'hank' | 'custom' | null;
+  isExperienced: boolean;
 }

@@ -31,6 +31,7 @@ interface TodayWorkout {
   routineName: string;
   exercises: Exercise[];
   isRestDay: boolean;
+  isExternalMode?: boolean; // True si es modo externo (no usa módulo GYM)
 }
 
 interface MealItem {
@@ -180,23 +181,60 @@ export const TodayCards: React.FC<TodayCardsProps> = ({ userId }) => {
     try {
       const currentMinutes = getCurrentMinutes();
       const today = new Date().getDay();
+      const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+      const todayName = dayNames[today];
 
       // =====================================================================
-      // 1. FETCH WORKOUT DATA
+      // 0. DETECT TRAINING MODE - Verificar si usa módulo GYM o modo externo
       // =====================================================================
-      const { data: profileData } = await supabase
-        .from('profiles')
-        .select('training_current_day, training_routine_names, training_frequency')
-        .eq('id', userId)
+      const { data: userProfile } = await supabase
+        .from('user_profiles')
+        .select('training_mode, external_schedule')
+        .eq('user_id', userId)
         .single();
 
-      const currentTrainingDay = profileData?.training_current_day ?? 0;
-      const routineNames = profileData?.training_routine_names || {};
-      const routineName = routineNames[String(currentTrainingDay)] || 'ENTRENAMIENTO';
+      const trainingMode = userProfile?.training_mode || 'none';
+      const externalSchedule = userProfile?.external_schedule || {};
 
-      // Fetch ejercicios del día actual con su media
-      const { data: exerciseConfigs } = await supabase
-        .from('user_exercise_config')
+      // =====================================================================
+      // 1A. SI ES MODO EXTERNO - Mostrar horario simple del usuario
+      // =====================================================================
+      if (trainingMode === 'external' && Object.keys(externalSchedule).length > 0) {
+        // Buscar qué entrena hoy según su external_schedule
+        const todayTraining = externalSchedule[todayName] || null;
+
+        if (todayTraining) {
+          setWorkout({
+            routineName: todayTraining,
+            exercises: [], // Modo externo no tiene ejercicios
+            isRestDay: false,
+            isExternalMode: true,
+          });
+        } else {
+          setWorkout({
+            routineName: 'DESCANSO',
+            exercises: [],
+            isRestDay: true,
+            isExternalMode: true,
+          });
+        }
+      } else {
+        // =====================================================================
+        // 1B. MODO GYM MODULE - Cargar ejercicios del día actual
+        // =====================================================================
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('training_current_day, training_routine_names, training_frequency')
+          .eq('id', userId)
+          .single();
+
+        const currentTrainingDay = profileData?.training_current_day ?? 0;
+        const routineNames = profileData?.training_routine_names || {};
+        const routineName = routineNames[String(currentTrainingDay)] || 'ENTRENAMIENTO';
+
+        // Fetch ejercicios del día actual con su media
+        const { data: exerciseConfigs } = await supabase
+          .from('user_exercise_config')
         .select(
           `
           id,
@@ -264,7 +302,9 @@ export const TodayCards: React.FC<TodayCardsProps> = ({ userId }) => {
         routineName: isRestDay ? 'DESCANSO' : routineName,
         exercises: todayExercises,
         isRestDay,
+        isExternalMode: false,
       });
+      } // Fin del else (modo GYM MODULE)
 
       // =====================================================================
       // 2. FETCH MEALS - Usando lógica de PLAN
@@ -495,10 +535,17 @@ export const TodayCards: React.FC<TodayCardsProps> = ({ userId }) => {
           </View>
 
           <View className="flex-row items-center gap-2">
-            {!workout?.isRestDay && workout?.exercises && (
+            {!workout?.isRestDay && !workout?.isExternalMode && workout?.exercises && (
               <View className="px-2 py-1 rounded-md" style={{ backgroundColor: '#DC262620' }}>
                 <Text className="text-fire-red text-[10px] font-mono font-bold">
                   {workout.exercises.length} ejercicios
+                </Text>
+              </View>
+            )}
+            {!workout?.isRestDay && workout?.isExternalMode && (
+              <View className="px-2 py-1 rounded-md" style={{ backgroundColor: '#3b82f620' }}>
+                <Text className="text-blue-400 text-[10px] font-mono font-bold">
+                  🎯 EXTERNO
                 </Text>
               </View>
             )}
@@ -506,8 +553,8 @@ export const TodayCards: React.FC<TodayCardsProps> = ({ userId }) => {
           </View>
         </View>
 
-        {/* Slider de Ejercicios */}
-        {!workout?.isRestDay && workout?.exercises && workout.exercises.length > 0 && (
+        {/* Slider de Ejercicios (solo en modo GYM) */}
+        {!workout?.isRestDay && !workout?.isExternalMode && workout?.exercises && workout.exercises.length > 0 && (
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -518,6 +565,15 @@ export const TodayCards: React.FC<TodayCardsProps> = ({ userId }) => {
               <ExerciseMiniCard key={ex.id} exercise={ex} />
             ))}
           </ScrollView>
+        )}
+
+        {/* Modo externo - Mensaje motivacional */}
+        {!workout?.isRestDay && workout?.isExternalMode && (
+          <View className="px-4 pb-3">
+            <Text className="text-zinc-400 text-xs font-mono">
+              💪 Entrenas por tu cuenta • Habla con Hank para detallar
+            </Text>
+          </View>
         )}
 
         {/* Día de descanso */}

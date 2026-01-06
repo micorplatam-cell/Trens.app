@@ -55,6 +55,7 @@ interface WorkoutBlockData {
   preStack: StackItem[];
   postStack: StackItem[];
   exercises?: Exercise[];
+  isExternalMode?: boolean; // True si usa horario externo (no módulo GYM)
 }
 
 interface WorkoutBlockProps {
@@ -411,16 +412,25 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
                   {data.routineName || 'DÍA DE DESCANSO'}
                 </Text>
               </View>
-              {hasExercises && (
+              {/* Badge: Ejercicios (modo GYM) o Externo */}
+              {hasExercises && !data.isExternalMode && (
                 <View className="bg-red-500/20 px-2 py-1 rounded-lg">
                   <Text className="text-red-500 text-xs font-mono font-bold">
                     {data.exercises!.length} ejercicios
                   </Text>
                 </View>
               )}
+              {data.isExternalMode && data.routineName !== 'DESCANSO' && (
+                <View className="bg-blue-500/20 px-2 py-1 rounded-lg">
+                  <Text className="text-blue-400 text-xs font-mono font-bold">
+                    🎯 EXTERNO
+                  </Text>
+                </View>
+              )}
             </View>
 
-            {hasExercises ? (
+            {/* Modo GYM: Slider de ejercicios */}
+            {hasExercises && !data.isExternalMode ? (
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
@@ -431,6 +441,21 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
                   <ExerciseCard key={ex.id} exercise={ex} index={index} onPress={onPressRoutine} />
                 ))}
               </ScrollView>
+            ) : data.isExternalMode && data.routineName !== 'DESCANSO' ? (
+              /* Modo EXTERNO: Mensaje motivacional */
+              <View className="items-center py-4">
+                <Text className="text-zinc-400 text-xs font-mono text-center">
+                  💪 Entrenas por tu cuenta hoy
+                </Text>
+                <Pressable onPress={onPressRoutine} className="mt-2 active:opacity-70">
+                  <View className="flex-row items-center gap-2 bg-blue-500/10 px-4 py-2 rounded-full">
+                    <Dumbbell size={14} color="#3b82f6" />
+                    <Text className="text-blue-400 text-xs font-medium">
+                      Agregar ejercicios detallados
+                    </Text>
+                  </View>
+                </Pressable>
+              </View>
             ) : (
               <Pressable onPress={onPressRoutine} className="items-center py-4 active:opacity-70">
                 <View className="flex-row items-center gap-2 bg-red-500/10 px-4 py-2 rounded-full">

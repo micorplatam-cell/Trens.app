@@ -428,6 +428,8 @@ function GymScreen() {
   const isFocused = useIsFocused(); // Detecta si esta pantalla está activa
   const { setActiveAsset, setScreenContext, refreshTrigger } = useHank();
   const [viewMode, setViewMode] = useState<ViewMode>('LOADING');
+  const [isExternalMode, setIsExternalMode] = useState(false); // Modo externo (no usa GYM)
+  const [externalSchedule, setExternalSchedule] = useState<Record<string, string>>({}); // Horario externo
   const [exercises, setExercises] = useState<Exercise[]>([]); // Ejercicios del día actual
   const [allUserExercises, setAllUserExercises] = useState<{ name: string; image_url: string }[]>(
     []
@@ -1824,6 +1826,28 @@ function GymScreen() {
     if (!user) return;
 
     try {
+      // ===========================================================================
+      // DETECTAR MODO DE ENTRENAMIENTO (external vs gym_module)
+      // ===========================================================================
+      const { data: userProfileData } = await supabase
+        .from('user_profiles')
+        .select('training_mode, external_schedule')
+        .eq('user_id', user.id)
+        .single();
+
+      const trainingMode = userProfileData?.training_mode || 'none';
+      const extSchedule = userProfileData?.external_schedule || {};
+
+      if (trainingMode === 'external' && Object.keys(extSchedule).length > 0) {
+        // MODO EXTERNO: Usuario entrena por su cuenta
+        setIsExternalMode(true);
+        setExternalSchedule(extSchedule);
+        console.warn('🏋️ GYM [EXTERNO]: Horario cargado:', extSchedule);
+      } else {
+        setIsExternalMode(false);
+        setExternalSchedule({});
+      }
+
       const { data: profile } = await supabase
         .from('profiles')
         .select(
@@ -4318,7 +4342,9 @@ function GymScreen() {
                     ESTRUCTURA
                   </Text>
                   <Text className="text-zinc-500 text-[10px] uppercase tracking-widest font-mono">
-                    {trainingProgram.days.length} DÍAS • {exercises.length} EJERCICIOS
+                    {isExternalMode 
+                      ? `🎯 EXTERNO • ${Object.keys(externalSchedule).length} DÍAS`
+                      : `${trainingProgram.days.length} DÍAS • ${exercises.length} EJERCICIOS`}
                   </Text>
                 </View>
               </View>
@@ -4350,10 +4376,10 @@ function GymScreen() {
                   setViewMode('FOCUS');
                 }
               }}
-              disabled={exercises.length === 0}
+              disabled={exercises.length === 0 && !isExternalMode}
               className="flex-row items-center gap-2 px-5 py-3 rounded-xl"
               style={
-                exercises.length > 0
+                exercises.length > 0 || isExternalMode
                   ? {
                       backgroundColor: '#DC2626',
                       shadowColor: '#DC2626',
@@ -4379,13 +4405,46 @@ function GymScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* DAYS SELECTOR - Horizontal Pills */}
+          {/* DAYS SELECTOR - Horizontal Pills (MODO GYM o EXTERNO) */}
           <View className="mb-2">
             <Text className="text-zinc-600 text-[10px] font-mono mb-2 uppercase tracking-wider">
-              Selecciona el día a configurar
+              {isExternalMode ? 'Tu horario de entrenamiento externo' : 'Selecciona el día a configurar'}
             </Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} className="-mx-4 px-4">
-              {trainingProgram.days.map((day, index) => {
+              {/* MODO EXTERNO: Mostrar días del external_schedule */}
+              {isExternalMode && Object.entries(externalSchedule).map(([dayName, muscleGroup], index) => (
+                <View
+                  key={dayName}
+                  className="mr-2 px-4 py-2.5 rounded-xl"
+                  style={{
+                    backgroundColor: '#1e3a5f',
+                    borderWidth: 1,
+                    borderColor: '#3b82f6',
+                  }}
+                >
+                  <View className="flex-row items-center gap-2">
+                    <View
+                      className="w-6 h-6 rounded-lg items-center justify-center"
+                      style={{ backgroundColor: 'rgba(59,130,246,0.3)' }}
+                    >
+                      <Text className="text-blue-400 font-bold text-xs font-mono">
+                        {index + 1}
+                      </Text>
+                    </View>
+                    <View>
+                      <Text className="text-blue-300 font-bold text-[10px] uppercase tracking-wide">
+                        {dayName}
+                      </Text>
+                      <Text className="text-white font-bold text-xs uppercase" numberOfLines={1}>
+                        {muscleGroup}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              ))}
+              
+              {/* MODO GYM MODULE: Mostrar días del trainingProgram */}
+              {!isExternalMode && trainingProgram.days.map((day, index) => {
                 const isActive = selectedDayIndex === index;
                 const isCurrent = trainingProgram.currentDayIndex === index;
 
@@ -4551,7 +4610,8 @@ function GymScreen() {
                 );
               })}
 
-              {/* BOTÓN AGREGAR DÍA */}
+              {/* BOTÓN AGREGAR DÍA - Solo en modo GYM */}
+              {!isExternalMode && (
               <TouchableOpacity
                 onPress={() => {
                   if (trainingProgram.days.length >= 7) {
@@ -4568,6 +4628,16 @@ function GymScreen() {
                 <Plus size={16} color="#F97316" />
                 <Text className="text-fire-orange font-bold text-xs">NUEVO</Text>
               </TouchableOpacity>
+              )}
+              
+              {/* Mensaje para modo EXTERNO */}
+              {isExternalMode && (
+                <View className="px-4 py-2.5 rounded-xl bg-blue-900/30 border border-blue-500/30">
+                  <Text className="text-blue-400 text-[10px] font-mono">
+                    💡 Habla con Hank para editar
+                  </Text>
+                </View>
+              )}
             </ScrollView>
           </View>
         </View>

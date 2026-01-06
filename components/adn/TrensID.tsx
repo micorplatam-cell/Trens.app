@@ -53,6 +53,11 @@ interface ProfileData {
   // Campos calculados (read-only, vienen de GYM y PLAN)
   training_frequency?: number; // Cantidad de días en estructura de entrenamiento
   meal_count?: number; // Cantidad de comidas configuradas en PLAN
+  // Modos de entrenamiento
+  uses_gym_module?: boolean; // true = usa módulo GYM, false = entrena por su cuenta
+  external_training_frequency?: number; // Frecuencia para modo externo
+  external_training_schedule?: Record<string, string>; // {"Lunes": "Pecho", "Martes": "Espalda"}
+  has_custom_plan?: boolean; // true = tiene plan personalizado
   // Macros diarios cacheados
   cached_daily_macros?: {
     totalCalories: number;

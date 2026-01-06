@@ -66,6 +66,10 @@ import {
   trainingRenameDay,
   trainingAddDay,
   trainingRemoveDay,
+  // External Training Tools (Modo externo para usuarios experimentados)
+  trainingGetStatus,
+  trainingSetExternalMode,
+  trainingSetExternalSchedule,
   // Sync Tools
   getFullPlanStatus,
   syncNutritionMacros,
@@ -872,6 +876,30 @@ Cuando termines, di **"ejecuta el plan"** y lo guardaré todo.`,
             result = await trainingRemoveDay(userId, p.dayIndex as number);
             break;
 
+          // =========================================================================
+          // EXTERNAL TRAINING TOOLS (Usuarios que no usan módulo GYM)
+          // =========================================================================
+          case 'TRAINING_GET_STATUS':
+            result = await trainingGetStatus(userId);
+            break;
+
+          case 'TRAINING_SET_EXTERNAL_MODE':
+            result = await trainingSetExternalMode(userId, {
+              enabled: p.enabled as boolean,
+              frequency: p.frequency as number | undefined,
+            });
+            break;
+
+          case 'TRAINING_SET_EXTERNAL_SCHEDULE':
+            result = await trainingSetExternalSchedule(
+              userId,
+              p.schedule as Record<string, string>
+            );
+            break;
+
+          // =========================================================================
+          // SYNC TOOLS
+          // =========================================================================
           case 'GET_FULL_PLAN_STATUS':
             result = await getFullPlanStatus(userId);
             break;

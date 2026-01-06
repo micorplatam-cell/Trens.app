@@ -6513,6 +6513,238 @@ export async function trainingRemoveDay(userId: string, dayIndex: number): Promi
 }
 
 // ============================================================================
+// TRAINING STATUS TOOLS: Detectar modo de entrenamiento del usuario
+// Modos: gym_module (usa ejercicios), external (entrena por su cuenta), none
+// ============================================================================
+
+/**
+ * Obtiene el estado de entrenamiento del usuario
+ * Detecta automáticamente si usa módulo GYM, modo externo, o nada
+ */
+export async function trainingGetStatus(userId: string): Promise<HankToolResult> {
+  try {
+    // Obtener datos de user_profiles
+    const { data: userProfile } = await supabase
+      .from('user_profiles')
+      .select('training_experience, training_mode, external_schedule, training_days_per_week')
+      .eq('user_id', userId)
+      .single();
+
+    // Obtener datos de profiles (plan actual)
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('training_frequency, training_current_day, training_routine_names, plan_source')
+      .eq('id', userId)
+      .single();
+
+    // Contar ejercicios en el módulo GYM
+    const { count: exerciseCount } = await supabase
+      .from('user_exercise_config')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId);
+
+    const level = userProfile?.training_experience || 'INTERMEDIO';
+    const declaredMode = userProfile?.training_mode || 'none';
+    const externalSchedule = userProfile?.external_schedule || {};
+    const gymExercises = exerciseCount || 0;
+
+    // Determinar modo EFECTIVO (basado en datos reales, no solo declaración)
+    let effectiveMode = 'none';
+    if (gymExercises > 0) {
+      effectiveMode = 'gym_module';
+    } else if (externalSchedule && Object.keys(externalSchedule).length > 0) {
+      effectiveMode = 'external';
+    }
+
+    // Calcular frecuencia
+    const frequency =
+      profile?.training_frequency ||
+      userProfile?.training_days_per_week ||
+      Object.keys(externalSchedule).length ||
+      0;
+
+    // Construir resumen del horario externo
+    const scheduleInfo =
+      Object.keys(externalSchedule).length > 0
+        ? Object.entries(externalSchedule)
+            .map(([day, muscle]) => `• ${day}: ${muscle}`)
+            .join('\n')
+        : null;
+
+    // Mensaje descriptivo según el modo
+    let description = '';
+    if (effectiveMode === 'gym_module') {
+      description = `Usas el módulo GYM con ${gymExercises} ejercicios configurados.`;
+      if (profile?.plan_source) {
+        description += ` Plan ${profile.plan_source === 'hank' ? 'creado por Hank' : 'personalizado'}.`;
+      }
+    } else if (effectiveMode === 'external') {
+      description = `Entrenas por tu cuenta ${frequency} días por semana.`;
+    } else {
+      description = `No tienes entrenamiento configurado.`;
+    }
+
+    // Si el usuario es intermedio/avanzado/elite y no tiene nada, Hank ofrece opciones
+    const isExperienced = ['INTERMEDIO', 'AVANZADO', 'ELITE'].includes(level.toUpperCase());
+    if (effectiveMode === 'none' && isExperienced) {
+      description = `Eres nivel ${level} pero no tienes entrenamiento en TRENS. ¿Entrenas por tu cuenta? Puedo:
+1️⃣ Guardar tu frecuencia y horario simple (modo externo)
+2️⃣ Asignarte un plan del módulo GYM`;
+    } else if (effectiveMode === 'none') {
+      description = `No tienes entrenamiento configurado. ¿Quieres que te diseñe un plan?`;
+    }
+
+    return {
+      success: true,
+      message: `📊 ESTADO DE ENTRENAMIENTO
+
+🎯 Nivel: ${level}
+🏋️ Modo: ${effectiveMode.toUpperCase()}
+📅 Frecuencia: ${frequency} días/semana
+${profile?.plan_source ? `📝 Fuente: ${profile.plan_source === 'hank' ? 'Hank' : 'Personalizado'}` : ''}
+
+${description}
+${scheduleInfo ? `\n📅 Tu horario:\n${scheduleInfo}` : ''}`,
+      data: {
+        level,
+        declaredMode,
+        effectiveMode,
+        frequency,
+        currentDay: profile?.training_current_day || 0,
+        routineNames: profile?.training_routine_names || {},
+        externalSchedule,
+        gymExercisesCount: gymExercises,
+        planSource: profile?.plan_source || null,
+        isExperienced,
+      },
+    };
+  } catch (error) {
+    console.error('trainingGetStatus error:', error);
+    return { success: false, message: 'Error al obtener el estado de entrenamiento.' };
+  }
+}
+
+/**
+ * Configura el modo de entrenamiento externo
+ * Para usuarios que entrenan por su cuenta sin usar el módulo GYM
+ */
+export async function trainingSetExternalMode(
+  userId: string,
+  params: {
+    enabled: boolean;
+    frequency?: number;
+  }
+): Promise<HankToolResult> {
+  try {
+    const { enabled, frequency } = params;
+
+    // Validar frecuencia
+    if (enabled && frequency !== undefined && (frequency < 1 || frequency > 7)) {
+      return { success: false, message: 'La frecuencia debe ser entre 1 y 7 días por semana.' };
+    }
+
+    // Actualizar perfil
+    const { error } = await supabase
+      .from('user_profiles')
+      .update({
+        training_mode: enabled ? 'external' : 'none',
+        training_days_per_week: enabled ? frequency || null : null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('user_id', userId);
+
+    if (error) {
+      console.error('trainingSetExternalMode error:', error);
+      return { success: false, message: 'Error al configurar el modo de entrenamiento.' };
+    }
+
+    if (enabled) {
+      return {
+        success: true,
+        message: `✅ Modo externo activado${frequency ? ` (${frequency} días/semana)` : ''}.
+
+${frequency ? '¿Quieres decirme qué músculos trabajas cada día? Ejemplo: "Lunes pecho, Martes espalda, Jueves piernas"' : '¿Cuántos días entrenas a la semana?'}`,
+        data: { mode: 'external', frequency },
+      };
+    } else {
+      return {
+        success: true,
+        message: `✅ Modo externo desactivado. Puedes usar el módulo GYM para gestionar ejercicios.`,
+        data: { mode: 'none' },
+      };
+    }
+  } catch (error) {
+    console.error('trainingSetExternalMode error:', error);
+    return { success: false, message: 'Error al configurar el modo de entrenamiento.' };
+  }
+}
+
+/**
+ * Configura el horario de entrenamiento externo (días y músculos)
+ */
+export async function trainingSetExternalSchedule(
+  userId: string,
+  schedule: Record<string, string> // {"Lunes": "Pecho y Tríceps", "Martes": "Espalda"}
+): Promise<HankToolResult> {
+  try {
+    if (!schedule || Object.keys(schedule).length === 0) {
+      return { success: false, message: 'Debes especificar al menos un día de entrenamiento.' };
+    }
+
+    const frequency = Object.keys(schedule).length;
+
+    // Actualizar perfil
+    const { error } = await supabase
+      .from('user_profiles')
+      .update({
+        training_mode: 'external',
+        external_schedule: schedule,
+        training_days_per_week: frequency,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('user_id', userId);
+
+    if (error) {
+      console.error('trainingSetExternalSchedule error:', error);
+      return { success: false, message: 'Error al guardar el horario.' };
+    }
+
+    const scheduleInfo = Object.entries(schedule)
+      .map(([day, muscle]) => `• ${day}: ${muscle}`)
+      .join('\n');
+
+    return {
+      success: true,
+      message: `✅ ¡Horario guardado!
+
+📅 ${frequency} días de entrenamiento:
+${scheduleInfo}
+
+Ahora tengo en cuenta tu rutina cuando hablemos de entrenamiento. 💪`,
+      data: { frequency, schedule },
+    };
+  } catch (error) {
+    console.error('trainingSetExternalSchedule error:', error);
+    return { success: false, message: 'Error al guardar el horario.' };
+  }
+}
+
+// ============================================================================
+// NOTA: Las funciones customPlan* fueron eliminadas.
+// El "plan personalizado" ahora usa las MISMAS tablas que el módulo GYM:
+// - profiles.training_routine_names para nombres de días
+// - profiles.training_frequency para frecuencia
+// - profiles.plan_source para saber si es "hank" o "custom"
+// - user_exercise_config para ejercicios
+//
+// Esto evita duplicación y simplifica la arquitectura.
+// Los usuarios pueden crear/editar su plan con las herramientas GYM existentes:
+// - TRAINING_DESIGN_PLAN / TRAINING_RESTRUCTURE para diseñar
+// - TRAINING_ADD_DAY / TRAINING_REMOVE_DAY para días
+// - GYM_ADD_EXERCISE / GYM_REMOVE_EXERCISE para ejercicios
+// ============================================================================
+
+// ============================================================================
 // SYNC TOOLS: Obtener Estado Completo del Plan
 // ============================================================================
 export async function getFullPlanStatus(userId: string): Promise<HankToolResult> {
@@ -8602,4 +8834,51 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     parameters: {},
     requiredParams: [],
   },
+  // ============================================================================
+  // EXTERNAL TRAINING TOOLS - Para usuarios que no usan el módulo GYM
+  // ============================================================================
+  {
+    name: 'TRAINING_GET_STATUS',
+    description:
+      'Obtiene el estado de entrenamiento del usuario: detecta si usa módulo GYM, entrenamiento externo, plan personalizado, o nada. IMPORTANTE: Usa esto PRIMERO cuando el usuario hable de entrenamiento y no estés seguro de su configuración actual. Ideal para usuarios intermedios/avanzados que no usan el módulo GYM.',
+    parameters: {},
+    requiredParams: [],
+  },
+  {
+    name: 'TRAINING_SET_EXTERNAL_MODE',
+    description:
+      'Configura el modo de entrenamiento externo para usuarios que entrenan por su cuenta sin usar el módulo GYM. Usa cuando el usuario diga "entreno por mi cuenta", "ya tengo mi rutina", "no quiero usar el módulo de ejercicios", "solo quiero que sepas mi frecuencia".',
+    parameters: {
+      enabled: {
+        type: 'boolean',
+        description: 'true para activar modo externo, false para usar módulo GYM',
+        required: true,
+      },
+      frequency: {
+        type: 'number',
+        description: 'Días de entrenamiento por semana (1-7)',
+        required: false,
+      },
+    },
+    requiredParams: ['enabled'],
+  },
+  {
+    name: 'TRAINING_SET_EXTERNAL_SCHEDULE',
+    description:
+      'Guarda el horario de entrenamiento simple para usuarios que no usan el módulo GYM. Usa cuando el usuario diga "lunes pecho, martes espalda", "entreno espalda los martes", "mi rutina es así: [días y músculos]".',
+    parameters: {
+      schedule: {
+        type: 'object',
+        description:
+          'Objeto con días y grupos musculares. Ej: {"Lunes": "Pecho y Tríceps", "Martes": "Espalda y Bíceps", "Jueves": "Piernas"}',
+        required: true,
+      },
+    },
+    requiredParams: ['schedule'],
+  },
+  // ============================================================================
+  // NOTA: CUSTOM_PLAN_* tools fueron removidas.
+  // El plan personalizado ahora usa las mismas tablas que el módulo GYM.
+  // Usuarios usan TRAINING_DESIGN_PLAN, TRAINING_ADD_DAY, GYM_ADD_EXERCISE, etc.
+  // ============================================================================
 ];
