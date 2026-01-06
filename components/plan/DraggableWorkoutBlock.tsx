@@ -172,6 +172,10 @@ const WebDraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
     }, 400);
   };
 
+  // Ref para rastrear si estamos en modo scroll simulado
+  const isScrollingRef = useRef(false);
+  const lastScrollYRef = useRef(0);
+
   const handlePointerMove = (e: React.PointerEvent) => {
     // Si estamos arrastrando, manejar el movimiento aquí directamente
     if (isDraggingRef.current) {
@@ -199,11 +203,40 @@ const WebDraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
       if (deltaY > 10) {
         clearTimeout(longPressTimerRef.current);
         longPressTimerRef.current = null;
+        // Activar modo scroll simulado
+        isScrollingRef.current = true;
+        lastScrollYRef.current = e.clientY;
+      }
+    }
+
+    // Si estamos en modo scroll simulado, hacer scroll del contenedor padre
+    if (isScrollingRef.current) {
+      const scrollDelta = lastScrollYRef.current - e.clientY;
+      lastScrollYRef.current = e.clientY;
+
+      // Buscar el ScrollView padre y hacer scroll
+      const scrollableParent = containerRef.current?.closest('[data-scroll-container]') as HTMLElement;
+      if (scrollableParent) {
+        scrollableParent.scrollTop += scrollDelta;
+      } else {
+        // Fallback: buscar cualquier contenedor con overflow scroll
+        let parent = containerRef.current?.parentElement;
+        while (parent) {
+          const style = window.getComputedStyle(parent);
+          if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
+            parent.scrollTop += scrollDelta;
+            break;
+          }
+          parent = parent.parentElement;
+        }
       }
     }
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
+    // Reset scroll mode
+    isScrollingRef.current = false;
+
     // Release pointer capture del contenedor
     if (containerRef.current && pointerIdRef.current !== null) {
       try {
@@ -259,8 +292,8 @@ const WebDraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
         cursor: isDragging ? 'grabbing' : 'default',
         userSelect: 'none',
         position: 'relative',
-        // Solo bloquear gestos cuando estamos arrastrando activamente
-        touchAction: isDragging ? 'none' : 'pan-y',
+        // Usar touch-action: none para tener control total, pero cancelar long-press si detectamos scroll
+        touchAction: 'none',
         boxShadow: isDragging ? '0 8px 30px rgba(220, 38, 38, 0.4)' : 'none',
         transition: isDragging ? 'none' : 'transform 0.2s ease-out, box-shadow 0.2s ease-out',
       }}
