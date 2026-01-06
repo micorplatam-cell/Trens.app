@@ -6753,7 +6753,7 @@ export async function trainingRemoveExternalDay(
     }
 
     const currentSchedule = profile.external_schedule || {};
-    
+
     // Buscar el día de forma case-insensitive
     const dayNameLower = dayName.toLowerCase();
     const matchingKey = Object.keys(currentSchedule).find(
@@ -6784,10 +6784,7 @@ export async function trainingRemoveExternalDay(
       updateData.training_mode = 'none';
     }
 
-    const { error } = await supabase
-      .from('user_profiles')
-      .update(updateData)
-      .eq('user_id', userId);
+    const { error } = await supabase.from('user_profiles').update(updateData).eq('user_id', userId);
 
     if (error) {
       console.error('trainingRemoveExternalDay error:', error);
@@ -8974,8 +8971,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     parameters: {
       dayName: {
         type: 'string',
-        description:
-          'Nombre del día a eliminar (Lunes, Martes, Miércoles, etc.)',
+        description: 'Nombre del día a eliminar (Lunes, Martes, Miércoles, etc.)',
         required: true,
       },
     },

@@ -197,23 +197,33 @@ export const TodayCards: React.FC<TodayCardsProps> = ({ userId }) => {
       const externalSchedule = userProfile?.external_schedule || {};
 
       // =====================================================================
-      // 1A. SI ES MODO PERSONALIZADO - Mostrar horario del usuario
+      // 1A. SI ES MODO PERSONALIZADO - Usa el sistema rotativo de TRENS
       // =====================================================================
       if (trainingMode === 'external' && Object.keys(externalSchedule).length > 0) {
-        // Buscar qué entrena hoy según su horario personalizado
-        // Normalizar: buscar case-insensitive ("lunes" === "Lunes")
-        const todayNameLower = todayName.toLowerCase();
-        const scheduleEntry = Object.entries(externalSchedule).find(
-          ([dayKey]) => dayKey.toLowerCase() === todayNameLower
-        );
-        const todayTraining = scheduleEntry ? String(scheduleEntry[1]) : null;
+        // TRENS usa sistema ROTATIVO: training_current_day (0, 1, 2...)
+        // NO basado en día de la semana (Lunes, Martes)
+        // El external_schedule se convierte a días rotativos
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('training_current_day')
+          .eq('id', userId)
+          .single();
 
-        console.warn(`🏋️ ADN [PERSONALIZADO]: ${todayName} → ${todayTraining || 'DESCANSO'}`);
-        console.warn('   Schedule keys:', Object.keys(externalSchedule));
+        const currentDayIndex = profileData?.training_current_day ?? 0;
+        const scheduleEntries = Object.entries(externalSchedule);
+        const totalDays = scheduleEntries.length;
+
+        // Obtener el día de entrenamiento actual (rotativo)
+        const safeIndex = currentDayIndex % totalDays;
+        const [dayName, muscleGroup] = scheduleEntries[safeIndex] || ['', ''];
+        const todayTraining = muscleGroup ? String(muscleGroup) : null;
+
+        console.warn(`🏋️ ADN [PERSONALIZADO]: Día ${safeIndex + 1}/${totalDays} → ${dayName}: ${todayTraining || 'DESCANSO'}`);
+        console.warn('   Schedule:', scheduleEntries.map(([d, m]) => `${d}:${m}`).join(', '));
 
         if (todayTraining) {
           setWorkout({
-            routineName: todayTraining,
+            routineName: `${dayName}: ${todayTraining}`,
             exercises: [], // Modo personalizado - ejercicios pendientes de configurar
             isRestDay: false,
             isExternalMode: true,

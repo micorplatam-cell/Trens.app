@@ -589,28 +589,32 @@ function PlanScreen() {
       const todayName = dayNames[new Date().getDay()];
 
       // ===========================================================================
-      // MODO PERSONALIZADO: Usuario entrena por su cuenta
+      // MODO PERSONALIZADO: Usa el sistema rotativo de TRENS
       // ===========================================================================
       if (trainingMode === 'external' && Object.keys(externalSchedule).length > 0) {
-        // Normalizar: buscar case-insensitive ("lunes" === "Lunes")
-        const todayNameLower = todayName.toLowerCase();
-        const scheduleEntry = Object.entries(externalSchedule).find(
-          ([dayKey]) => dayKey.toLowerCase() === todayNameLower
-        );
-        const todayMuscle = scheduleEntry ? String(scheduleEntry[1]) : null;
+        // TRENS usa sistema ROTATIVO: training_current_day (0, 1, 2...)
+        // NO basado en día de la semana (Lunes, Martes)
+        const currentDayIndex = profileData?.training_current_day ?? 0;
+        const scheduleEntries = Object.entries(externalSchedule);
+        const totalDays = scheduleEntries.length;
+
+        // Obtener el día de entrenamiento actual (rotativo)
+        const safeIndex = currentDayIndex % totalDays;
+        const [dayName, muscleGroup] = scheduleEntries[safeIndex] || ['', ''];
+        const todayMuscle = muscleGroup ? String(muscleGroup) : null;
         setIsExternalMode(true);
 
-        console.warn(`🏋️ PLAN [PERSONALIZADO]: ${todayName} → ${todayMuscle || 'DESCANSO'}`);
-        console.warn('   Schedule keys:', Object.keys(externalSchedule));
+        console.warn(`🏋️ PLAN [PERSONALIZADO]: Día ${safeIndex + 1}/${totalDays} → ${dayName}: ${todayMuscle || 'DESCANSO'}`);
+        console.warn('   Schedule:', scheduleEntries.map(([d, m]) => `${d}:${m}`).join(', '));
 
         if (todayMuscle) {
-          setTodayRoutine(todayMuscle);
-          setTodayExercises([]); // Modo externo no tiene ejercicios detallados
-          console.warn(`🏋️ PLAN [EXTERNO]: ${todayName} → ${todayMuscle}`);
+          setTodayRoutine(`${dayName}: ${todayMuscle}`);
+          setTodayExercises([]); // Modo personalizado - ejercicios pendientes de agregar
+          console.warn(`🏋️ PLAN [PERSONALIZADO]: Mostrando ${dayName}: ${todayMuscle}`);
         } else {
           setTodayRoutine('DESCANSO');
           setTodayExercises([]);
-          console.warn('🏋️ PLAN [EXTERNO]: Hoy es descanso');
+          console.warn('🏋️ PLAN [PERSONALIZADO]: Sin entrenamiento configurado');
         }
       } else {
         // ===========================================================================
