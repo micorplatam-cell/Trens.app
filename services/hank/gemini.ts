@@ -548,6 +548,8 @@ Ejemplos de cuándo NO usar herramientas (responde directamente):
 • Deporte: ${context.sportMode || 'BODYBUILDING'}
 • Nivel: ${context.userLevel}
 • Día: ${context.currentTrainingDay + 1}
+${context.estimatedWorkoutTime ? `• Hora estimada entrenamiento: ~${context.estimatedWorkoutTime}${context.isFastedTraining ? ' (EN AYUNAS)' : ''}` : ''}
+${context.workoutTimeDescription ? `• Contexto: ${context.workoutTimeDescription}` : ''}
 
 ${getUserPlanSection(context)}
 
@@ -835,6 +837,10 @@ export interface GeminiContext {
   sportMode: string | null;
   userLevel: string;
   currentTrainingDay: number;
+  // Workout time estimation from PLAN
+  estimatedWorkoutTime?: string | null; // HH:MM format
+  isFastedTraining?: boolean; // True if training before any meals
+  workoutTimeDescription?: string; // "Después de Desayuno, antes de Almuerzo"
   activeAsset: {
     name: string;
     type: string;

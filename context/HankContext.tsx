@@ -167,6 +167,9 @@ const defaultScreenContext: ScreenContext = {
   viewMode: null,
   currentExerciseIndex: null,
   currentTrainingDay: 0,
+  estimatedWorkoutTime: null,
+  isFastedTraining: false,
+  workoutTimeDescription: '',
 };
 
 // Plan Builder default state
@@ -1493,6 +1496,10 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
       sportMode: sportMode,
       userLevel: userProfile.level,
       currentTrainingDay: realTrainingDay,
+      // Workout time estimation from PLAN
+      estimatedWorkoutTime: screenContext.estimatedWorkoutTime,
+      isFastedTraining: screenContext.isFastedTraining,
+      workoutTimeDescription: screenContext.workoutTimeDescription,
       activeAsset: activeAsset
         ? {
             name: activeAsset.name,

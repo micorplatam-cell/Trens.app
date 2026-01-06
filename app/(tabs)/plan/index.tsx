@@ -115,6 +115,10 @@ interface WorkoutBlockData {
     videoUrl?: string;
   }[];
   isExternalMode?: boolean; // True si usa modo personalizado (sin ejercicios detallados)
+  // Workout time estimation
+  estimatedTime?: string | null; // HH:MM format
+  isFasted?: boolean; // True si entrenamiento en ayunas
+  timeDescription?: string; // "Después de Desayuno, antes de Almuerzo"
 }
 
 interface TimelineItem {
@@ -178,6 +182,98 @@ const parseTimeToSQL = (timeStr: string): string | null => {
   }
 
   return null;
+};
+
+/**
+ * Calcula la hora estimada del entrenamiento basándose en la posición del bloque
+ * y las comidas del timeline.
+ *
+ * Lógica:
+ * - Si el bloque está al principio (posición 0) o no hay comidas antes: ENTRENAMIENTO EN AYUNAS
+ * - Si hay una comida después del bloque: El entrenamiento es ~2 horas antes de esa comida
+ * - Si hay una comida antes del bloque: El entrenamiento es ~1.5 horas después de esa comida
+ *
+ * @returns { estimatedTime: string | null, isFasted: boolean, description: string }
+ */
+interface WorkoutTimeEstimate {
+  estimatedTime: string | null; // Formato HH:MM
+  isFasted: boolean;
+  description: string; // "En ayunas", "Antes de Almuerzo", "Después de Desayuno"
+}
+
+const calculateWorkoutTime = (
+  workoutIndex: number,
+  meals: { time: string; name: string }[]
+): WorkoutTimeEstimate => {
+  // Ordenar comidas por hora
+  const sortedMeals = [...meals]
+    .filter((m) => m.time)
+    .sort((a, b) => a.time.localeCompare(b.time));
+
+  if (sortedMeals.length === 0) {
+    return {
+      estimatedTime: null,
+      isFasted: true,
+      description: 'Sin comidas configuradas',
+    };
+  }
+
+  // Contar cuántas comidas hay antes del workout
+  const mealsBeforeWorkout = sortedMeals.slice(0, workoutIndex);
+  const mealsAfterWorkout = sortedMeals.slice(workoutIndex);
+
+  // Si no hay comidas antes del bloque de entrenamiento = ENTRENAMIENTO EN AYUNAS
+  if (mealsBeforeWorkout.length === 0) {
+    // Estimar hora: 2 horas antes de la primera comida, o 6:00 AM si no hay referencia
+    if (mealsAfterWorkout.length > 0) {
+      const firstMeal = mealsAfterWorkout[0];
+      const [hours, minutes] = firstMeal.time.split(':').map(Number);
+      const totalMinutes = hours * 60 + minutes;
+      const workoutMinutes = Math.max(totalMinutes - 120, 5 * 60); // 2 horas antes, mínimo 5:00 AM
+      const workoutHours = Math.floor(workoutMinutes / 60);
+      const workoutMins = workoutMinutes % 60;
+      const estimatedTime = `${workoutHours.toString().padStart(2, '0')}:${workoutMins.toString().padStart(2, '0')}`;
+
+      return {
+        estimatedTime,
+        isFasted: true,
+        description: `En ayunas (antes de ${firstMeal.name})`,
+      };
+    }
+
+    return {
+      estimatedTime: '06:00',
+      isFasted: true,
+      description: 'En ayunas',
+    };
+  }
+
+  // Si hay comidas antes = calcular tiempo después de la última comida anterior
+  const lastMealBefore = mealsBeforeWorkout[mealsBeforeWorkout.length - 1];
+  const [hours, minutes] = lastMealBefore.time.split(':').map(Number);
+  const totalMinutes = hours * 60 + minutes;
+
+  // Entrenamiento aproximadamente 1.5-2 horas después de la última comida
+  const workoutMinutes = totalMinutes + 90; // 1.5 horas después
+  const workoutHours = Math.floor(workoutMinutes / 60);
+  const workoutMins = workoutMinutes % 60;
+  const estimatedTime = `${(workoutHours % 24).toString().padStart(2, '0')}:${workoutMins.toString().padStart(2, '0')}`;
+
+  // Si hay comida después, ajustar descripción
+  if (mealsAfterWorkout.length > 0) {
+    const nextMeal = mealsAfterWorkout[0];
+    return {
+      estimatedTime,
+      isFasted: false,
+      description: `Después de ${lastMealBefore.name}, antes de ${nextMeal.name}`,
+    };
+  }
+
+  return {
+    estimatedTime,
+    isFasted: false,
+    description: `Después de ${lastMealBefore.name}`,
+  };
 };
 
 // ============================================================================
@@ -276,6 +372,12 @@ function PlanScreen() {
   const [isDraggingWorkout, setIsDraggingWorkout] = useState(false);
   const [dragTargetIndex, setDragTargetIndex] = useState<number | null>(null);
 
+  // Workout time estimation - calcula dinámicamente basándose en posición del bloque
+  const [workoutTimeEstimate, setWorkoutTimeEstimate] = useState<WorkoutTimeEstimate>({
+    estimatedTime: null,
+    isFasted: false,
+    description: '',
+  });
   // Ref para auto-scroll al elemento actual
   const scrollViewRef = useRef<ScrollView>(null);
   const itemLayouts = useRef<{ y: number; height: number }[]>([]);
@@ -778,6 +880,30 @@ function PlanScreen() {
       fetchData();
     }
   }, [refreshTrigger, fetchData]);
+
+  // Calcular hora estimada del entrenamiento cuando cambia posición o comidas
+  useEffect(() => {
+    // Mapear meals a formato simple para el cálculo
+    const mealTimes = meals.map((m) => ({ time: m.time, name: m.name }));
+    const estimate = calculateWorkoutTime(workoutPosIndex, mealTimes);
+    setWorkoutTimeEstimate(estimate);
+
+    // Loggear para debug
+    console.log(
+      `🏋️ PLAN: Workout estimado @ ${estimate.estimatedTime || 'N/A'} - ${estimate.description}${estimate.isFasted ? ' (AYUNAS)' : ''}`
+    );
+
+    // Sincronizar con contexto de Hank para que tenga acceso a esta info
+    setScreenContext({
+      module: 'plan',
+      viewMode: null,
+      currentExerciseIndex: null,
+      currentTrainingDay: 0,
+      estimatedWorkoutTime: estimate.estimatedTime,
+      isFastedTraining: estimate.isFasted,
+      workoutTimeDescription: estimate.description,
+    });
+  }, [workoutPosIndex, meals, setScreenContext]);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -1587,6 +1713,24 @@ function PlanScreen() {
           error ? `Error: ${error.message}` : 'OK'
         );
       }
+
+      // Calcular y guardar hora estimada del entrenamiento en user_profiles
+      // Esto permite que Hank y otros módulos sepan cuándo entrena el usuario
+      const mealTimes = meals.map((m) => ({ time: m.time, name: m.name }));
+      const estimate = calculateWorkoutTime(newIndex, mealTimes);
+
+      await supabase
+        .from('user_profiles')
+        .update({
+          estimated_workout_time: estimate.estimatedTime,
+          is_fasted_training: estimate.isFasted,
+          workout_time_description: estimate.description,
+        })
+        .eq('user_id', user.id);
+
+      console.log(
+        `🏋️ PLAN: Hora estimada guardada: ${estimate.estimatedTime} - ${estimate.description}`
+      );
     }
   };
 
@@ -1649,6 +1793,10 @@ function PlanScreen() {
       postStack,
       exercises: todayExercises,
       isExternalMode: isExternalMode, // Indica si es modo personalizado
+      // Workout time estimation
+      estimatedTime: workoutTimeEstimate.estimatedTime,
+      isFasted: workoutTimeEstimate.isFasted,
+      timeDescription: workoutTimeEstimate.description,
     };
 
     const safeIndex = Math.min(Math.max(0, workoutPosIndex), timeline.length);

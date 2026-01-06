@@ -38,6 +38,10 @@ interface WorkoutBlockData {
   preStack: StackItem[];
   postStack: StackItem[];
   exercises?: Exercise[];
+  // Workout time estimation
+  estimatedTime?: string | null;
+  isFasted?: boolean;
+  timeDescription?: string;
 }
 
 interface DraggableWorkoutBlockProps {

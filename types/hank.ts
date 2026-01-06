@@ -184,6 +184,10 @@ export interface ScreenContext {
   viewMode: string | null;
   currentExerciseIndex: number | null;
   currentTrainingDay?: number; // Día de entrenamiento seleccionado (0-indexed)
+  // Workout time estimation from PLAN
+  estimatedWorkoutTime?: string | null; // HH:MM format
+  isFastedTraining?: boolean; // True if training before any meals
+  workoutTimeDescription?: string; // "Después de Desayuno, antes de Almuerzo"
 }
 
 export interface ActiveAsset {

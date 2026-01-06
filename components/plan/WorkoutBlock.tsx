@@ -56,6 +56,10 @@ interface WorkoutBlockData {
   postStack: StackItem[];
   exercises?: Exercise[];
   isExternalMode?: boolean; // True si usa modo personalizado (sin ejercicios detallados)
+  // Workout time estimation
+  estimatedTime?: string | null;
+  isFasted?: boolean;
+  timeDescription?: string;
 }
 
 interface WorkoutBlockProps {
@@ -404,6 +408,25 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
           {/* ROUTINE - Slider de ejercicios */}
           {/* ============================================ */}
           <View className="my-4 py-4 border-y border-red-500/20 bg-[#0a0505] -mx-4 px-4">
+            {/* Workout time estimation - muestra hora aproximada */}
+            {data.estimatedTime && (
+              <View className="flex-row items-center justify-between mb-2 px-1">
+                <View className="flex-row items-center gap-2">
+                  <Text className="text-zinc-500 text-xs font-mono">
+                    ⏰ ~{data.estimatedTime}
+                  </Text>
+                  {data.isFasted && (
+                    <View className="bg-yellow-500/20 px-2 py-0.5 rounded">
+                      <Text className="text-yellow-500 text-[10px] font-bold">EN AYUNAS</Text>
+                    </View>
+                  )}
+                </View>
+                <Text className="text-zinc-600 text-[10px] font-mono">
+                  {data.timeDescription}
+                </Text>
+              </View>
+            )}
+
             {/* Header con nombre de rutina y contador */}
             <View className="flex-row items-center justify-between mb-3 px-1">
               <View className="flex-row items-center gap-2">
