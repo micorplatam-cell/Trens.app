@@ -11,16 +11,16 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Openpay Config
-const OPENPAY_PRIVATE_KEY = 'sk_302bd1805afd4602965076e5441514cb';
-const OPENPAY_MERCHANT_ID = 'mudi9kij0xb5xk54urc6';
+// Openpay Config (desde variables de entorno)
+const OPENPAY_PRIVATE_KEY = Deno.env.get('OPENPAY_PRIVATE_KEY') || '';
+const OPENPAY_MERCHANT_ID = Deno.env.get('OPENPAY_MERCHANT_ID') || '';
 const OPENPAY_API_URL = 'https://api.openpay.pe/v1';
 
-// Base64 pre-calculado de "sk_302bd1805afd4602965076e5441514cb:"
-const OPENPAY_AUTH_HEADER = 'Basic c2tfMzAyYmQxODA1YWZkNDYwMjk2NTA3NmU1NDQxNTE0Y2I6';
-
-// Helper para obtener el header de autorización
-const getOpenpayAuth = (): string => OPENPAY_AUTH_HEADER;
+// Helper para generar el header de autorización dinámicamente
+const getOpenpayAuth = (): string => {
+  const credentials = btoa(`${OPENPAY_PRIVATE_KEY}:`);
+  return `Basic ${credentials}`;
+};
 
 type Action = 'list-payments' | 'get-stats' | 'get-chart-data' | 'sync-openpay' | 'refund';
 

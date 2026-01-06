@@ -11,9 +11,9 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Configuración de Openpay
-const OPENPAY_PRIVATE_KEY = 'sk_302bd1805afd4602965076e5441514cb';
-const OPENPAY_MERCHANT_ID = 'mudi9kij0xb5xk54urc6';
+// Configuración de Openpay (desde variables de entorno)
+const OPENPAY_PRIVATE_KEY = Deno.env.get('OPENPAY_PRIVATE_KEY') || '';
+const OPENPAY_MERCHANT_ID = Deno.env.get('OPENPAY_MERCHANT_ID') || '';
 
 // Tipos de eventos de Openpay
 type OpenpayEventType =
