@@ -8,8 +8,9 @@ import {
   FlatList,
   ViewToken,
   RefreshControl,
-  Alert,
 } from 'react-native';
+import { PWAGuard } from '../../../components/auth/PWAGuard';
+import { Alert } from '../../../lib/alert';
 import { useFocusEffect, router } from 'expo-router';
 import { Lock } from 'lucide-react-native';
 import { Image } from 'expo-image';
@@ -530,7 +531,7 @@ const FeedVideoItem = memo(
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
-export default function FeedScreen() {
+function FeedScreenContent() {
   const {
     user,
     spotifyPremium,
@@ -974,5 +975,13 @@ export default function FeedScreen() {
         initialNumToRender={2}
       />
     </View>
+  );
+}
+
+export default function FeedScreen() {
+  return (
+    <PWAGuard moduleName="FEED">
+      <FeedScreenContent />
+    </PWAGuard>
   );
 }

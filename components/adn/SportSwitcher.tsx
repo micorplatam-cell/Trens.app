@@ -14,7 +14,7 @@ import {
 import * as Haptics from 'expo-haptics';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { useSport, Sport } from '../../context/SportContext';
-import { Alert } from 'react-native';
+import { Alert } from '../../lib/alert';
 
 // Deportes disponibles actualmente (los demás están "próximamente")
 const AVAILABLE_SPORTS = ['GYM', 'SURF'];

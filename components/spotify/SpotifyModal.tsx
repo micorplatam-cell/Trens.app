@@ -9,7 +9,6 @@ import {
   TextInput,
   ActivityIndicator,
   Dimensions,
-  Alert,
   PanResponder,
   NativeSyntheticEvent,
   NativeScrollEvent,
@@ -17,6 +16,7 @@ import {
   ScrollView,
   Animated as RNAnimated,
 } from 'react-native';
+import { Alert } from '../../lib/alert';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import Slider from '@react-native-community/slider';

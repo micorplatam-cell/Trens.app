@@ -7,7 +7,7 @@ import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 import * as Crypto from 'expo-crypto';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Alert } from 'react-native';
+import { Alert } from '../../lib/alert';
 
 // IMPORTANTE: Debe ejecutarse a nivel global para interceptar el callback de OAuth
 // Esto permite que WebBrowser.openAuthSessionAsync reciba la respuesta

@@ -12,10 +12,11 @@ import {
   AppState,
   TextInput,
   RefreshControl,
-  Alert,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import { PWAGuard } from '../../../components/auth/PWAGuard';
+import { Alert } from '../../../lib/alert';
 import { Image } from 'expo-image';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useIsFocused } from '@react-navigation/native';
@@ -390,7 +391,7 @@ const SwipeableSeriesRow: React.FC<SwipeableSeriesRowProps> = ({ children, onDel
 // ============================================================================
 // TAB 4 ROUTER - Renderiza el contenido correcto según el deporte activo
 // ============================================================================
-export default function Tab4Router() {
+function Tab4RouterContent() {
   const { activeSport } = useSport();
   const sportCode = activeSport?.code || 'GYM';
 
@@ -405,6 +406,14 @@ export default function Tab4Router() {
     default:
       return <GymScreen />;
   }
+}
+
+export default function Tab4Router() {
+  return (
+    <PWAGuard moduleName="GYM">
+      <Tab4RouterContent />
+    </PWAGuard>
+  );
 }
 
 // ============================================================================

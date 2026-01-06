@@ -5,12 +5,12 @@ import {
   ScrollView,
   TextInput,
   TouchableOpacity,
-  Alert,
   RefreshControl,
   Modal,
   Image,
   ActivityIndicator,
 } from 'react-native';
+import { Alert } from '../../../lib/alert';
 import {
   Search,
   Plus,

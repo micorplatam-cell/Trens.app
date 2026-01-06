@@ -1,6 +1,7 @@
 import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
 import * as Sharing from 'expo-sharing';
 import { RotateCcw, Zap, ZapOff, Music, Lock } from 'lucide-react-native';
+import { PWAGuard } from '../../../components/auth/PWAGuard';
 import * as Haptics from 'expo-haptics';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { CameraView, useCameraPermissions, FlashMode } from 'expo-camera';
@@ -53,7 +54,7 @@ interface SpotifyMetadata {
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
-export default function ProScreen() {
+function ProScreenContent() {
   const { user, isPro, spotifyPremium, spotifyConnected } = useUserRoleContext();
   const { context: proContext, clearContext } = useProContext();
   const { registerHandlers, setRecordingState, setSpotifyState, setExerciseState } =
@@ -805,5 +806,13 @@ export default function ProScreen() {
         )}
       </View>
     </GestureHandlerRootView>
+  );
+}
+
+export default function ProScreen() {
+  return (
+    <PWAGuard moduleName="PRO">
+      <ProScreenContent />
+    </PWAGuard>
   );
 }

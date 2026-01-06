@@ -1,14 +1,6 @@
 import React from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  Modal,
-  Image,
-  ScrollView,
-  Dimensions,
-  Alert,
-} from 'react-native';
+import { View, Text, TouchableOpacity, Modal, Image, ScrollView, Dimensions } from 'react-native';
+import { Alert } from '../../lib/alert';
 import {
   X,
   Trash2,

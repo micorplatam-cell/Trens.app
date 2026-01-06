@@ -10,10 +10,11 @@ import {
   ActivityIndicator,
   Modal,
   Dimensions,
-  Alert,
   Share,
   TextInput,
 } from 'react-native';
+import { PWAGuard } from '../../../components/auth/PWAGuard';
+import { Alert } from '../../../lib/alert';
 import { router, useFocusEffect } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
@@ -157,7 +158,7 @@ const VideoThumbnail = ({ videoUrl, size }: { videoUrl: string; size: number }) 
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
-export default function AdnScreen() {
+function AdnScreenContent() {
   const { user, isPro, isAuthenticated, spotifyPremium } = useUserRoleContext();
   const { refreshTrigger, setScreenContext } = useHank();
   const { canSave } = useSaveGuard();
@@ -2009,5 +2010,13 @@ export default function AdnScreen() {
         </View>
       </Modal>
     </View>
+  );
+}
+
+export default function AdnScreen() {
+  return (
+    <PWAGuard moduleName="ADN">
+      <AdnScreenContent />
+    </PWAGuard>
   );
 }

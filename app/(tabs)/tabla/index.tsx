@@ -12,8 +12,8 @@ import {
   RefreshControl,
   Modal,
   TextInput,
-  Alert,
 } from 'react-native';
+import { Alert } from '../../../lib/alert';
 import { Image } from 'expo-image';
 import {
   Plus,

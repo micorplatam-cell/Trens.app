@@ -4,7 +4,9 @@
 // ============================================================================
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { View, Text, ScrollView, Pressable, Alert, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, Pressable, RefreshControl } from 'react-native';
+import { PWAGuard } from '../../../components/auth/PWAGuard';
+import { Alert } from '../../../lib/alert';
 import Animated, { useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { Plus, Pill, Sparkles } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
@@ -277,7 +279,7 @@ const calculateWorkoutTime = (
 // ============================================================================
 // TAB 5 ROUTER - Renderiza el contenido correcto según el deporte activo
 // ============================================================================
-export default function Tab5Router() {
+function Tab5RouterContent() {
   const { activeSport } = useSport();
   const sportCode = activeSport?.code || 'GYM';
 
@@ -292,6 +294,14 @@ export default function Tab5Router() {
     default:
       return <PlanScreen />;
   }
+}
+
+export default function Tab5Router() {
+  return (
+    <PWAGuard moduleName="PLAN">
+      <Tab5RouterContent />
+    </PWAGuard>
+  );
 }
 
 // ============================================================================

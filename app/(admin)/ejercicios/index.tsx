@@ -6,11 +6,11 @@ import {
   TextInput,
   TouchableOpacity,
   Image,
-  Alert,
   RefreshControl,
   Modal,
   ActivityIndicator,
 } from 'react-native';
+import { Alert } from '../../../lib/alert';
 
 import {
   Search,

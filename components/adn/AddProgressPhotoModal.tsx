@@ -7,8 +7,8 @@ import {
   TextInput,
   Image,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
+import { Alert } from '../../lib/alert';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X, Camera, Image as ImageIcon, Upload } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';

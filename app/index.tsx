@@ -1,13 +1,43 @@
 import { Redirect } from 'expo-router';
 import type { Href } from 'expo-router';
 import { useUserRoleContext } from '../context/UserRoleContext';
-import { View, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator, Platform } from 'react-native';
+import { useEffect, useState } from 'react';
+import { isPWA } from '../lib/pwaDetection';
+import LandingPage from './(web)/landing';
 
 export default function Index() {
-  const { loading, isPro } = useUserRoleContext();
+  const { loading, isPro, isAuthenticated } = useUserRoleContext();
+  const [isStandalone, setIsStandalone] = useState<boolean | null>(null);
+  const [checkingPWA, setCheckingPWA] = useState(true);
 
-  // Mientras carga la sesión, mostrar loading
-  if (loading) {
+  // Detectar si estamos en PWA (solo en web)
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      // Pequeño delay para asegurar que window está listo
+      const timer = setTimeout(() => {
+        const pwaStatus = isPWA();
+        setIsStandalone(pwaStatus);
+        setCheckingPWA(false);
+
+        // Debug en consola
+        console.log('[TRENS] PWA Detection:', {
+          isPWA: pwaStatus,
+          isAuthenticated,
+          isPro,
+          userAgent: navigator.userAgent.substring(0, 50),
+        });
+      }, 100);
+      return () => clearTimeout(timer);
+    } else {
+      // En nativo siempre es "standalone"
+      setIsStandalone(true);
+      setCheckingPWA(false);
+    }
+  }, [isAuthenticated, isPro]);
+
+  // Mientras carga la sesión o detecta PWA, mostrar loading
+  if (loading || checkingPWA) {
     return (
       <View className="flex-1 bg-black items-center justify-center">
         <ActivityIndicator size="large" color="#DC2626" />
@@ -15,6 +45,33 @@ export default function Index() {
     );
   }
 
+  // ============================================================================
+  // WEB: Lógica de redirección según PWA vs Browser
+  // ============================================================================
+  if (Platform.OS === 'web') {
+    // Si NO está en modo PWA (standalone)
+    if (!isStandalone) {
+      // Si está autenticado, permitir acceso (clientes en efectivo)
+      if (isAuthenticated) {
+        const defaultRoute = isPro ? '/(tabs)/adn' : '/(tabs)/feed';
+        return <Redirect href={defaultRoute as Href} />;
+      }
+      // Si NO está autenticado, mostrar landing DIRECTAMENTE en /
+      return <LandingPage />;
+    }
+
+    // En PWA: Si no está autenticado, ir a login
+    if (!isAuthenticated) {
+      return <Redirect href={'/(auth)/login' as Href} />;
+    }
+
+    // En PWA autenticado: ir a la app
+    const defaultRoute = isPro ? '/(tabs)/adn' : '/(tabs)/feed';
+    return <Redirect href={defaultRoute as Href} />;
+  }
+
+  // ============================================================================
+  // NATIVO: Comportamiento original
   // TRENS NO pide login para usar la app
   // El contenido público es accesible sin cuenta
   // ============================================================================
