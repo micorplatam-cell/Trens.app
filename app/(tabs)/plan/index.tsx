@@ -589,11 +589,19 @@ function PlanScreen() {
       const todayName = dayNames[new Date().getDay()];
 
       // ===========================================================================
-      // MODO EXTERNO: Usuario entrena por su cuenta, no usa módulo GYM
+      // MODO PERSONALIZADO: Usuario entrena por su cuenta
       // ===========================================================================
       if (trainingMode === 'external' && Object.keys(externalSchedule).length > 0) {
-        const todayMuscle = externalSchedule[todayName] || null;
+        // Normalizar: buscar case-insensitive ("lunes" === "Lunes")
+        const todayNameLower = todayName.toLowerCase();
+        const scheduleEntry = Object.entries(externalSchedule).find(
+          ([dayKey]) => dayKey.toLowerCase() === todayNameLower
+        );
+        const todayMuscle = scheduleEntry ? String(scheduleEntry[1]) : null;
         setIsExternalMode(true);
+
+        console.warn(`🏋️ PLAN [PERSONALIZADO]: ${todayName} → ${todayMuscle || 'DESCANSO'}`);
+        console.warn('   Schedule keys:', Object.keys(externalSchedule));
 
         if (todayMuscle) {
           setTodayRoutine(todayMuscle);

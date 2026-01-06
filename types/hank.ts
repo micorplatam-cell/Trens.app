@@ -82,9 +82,10 @@ export type HankToolName =
   | 'TRAINING_REMOVE_DAY'
   | 'TRAINING_SET_FREQUENCY'
   | 'TRAINING_SET_CURRENT_DAY'
-  // EXTERNAL TRAINING Tools (Usuarios que no usan módulo GYM)
+  // PERSONALIZED TRAINING Tools (Usuarios con plan personalizado)
   | 'TRAINING_SET_EXTERNAL_MODE'
   | 'TRAINING_SET_EXTERNAL_SCHEDULE'
+  | 'TRAINING_REMOVE_EXTERNAL_DAY'
   | 'TRAINING_GET_STATUS'
   // SYNC Tools (Sincronización completa)
   | 'GET_FULL_PLAN_STATUS'

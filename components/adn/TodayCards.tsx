@@ -201,7 +201,15 @@ export const TodayCards: React.FC<TodayCardsProps> = ({ userId }) => {
       // =====================================================================
       if (trainingMode === 'external' && Object.keys(externalSchedule).length > 0) {
         // Buscar qué entrena hoy según su horario personalizado
-        const todayTraining = externalSchedule[todayName] || null;
+        // Normalizar: buscar case-insensitive ("lunes" === "Lunes")
+        const todayNameLower = todayName.toLowerCase();
+        const scheduleEntry = Object.entries(externalSchedule).find(
+          ([dayKey]) => dayKey.toLowerCase() === todayNameLower
+        );
+        const todayTraining = scheduleEntry ? String(scheduleEntry[1]) : null;
+
+        console.warn(`🏋️ ADN [PERSONALIZADO]: ${todayName} → ${todayTraining || 'DESCANSO'}`);
+        console.warn('   Schedule keys:', Object.keys(externalSchedule));
 
         if (todayTraining) {
           setWorkout({
@@ -544,7 +552,9 @@ export const TodayCards: React.FC<TodayCardsProps> = ({ userId }) => {
             )}
             {!workout?.isRestDay && workout?.isExternalMode && (
               <View className="px-2 py-1 rounded-md" style={{ backgroundColor: '#a855f720' }}>
-                <Text className="text-purple-400 text-[10px] font-mono font-bold">⚡ PERSONALIZADO</Text>
+                <Text className="text-purple-400 text-[10px] font-mono font-bold">
+                  ⚡ PERSONALIZADO
+                </Text>
               </View>
             )}
             <ChevronRight size={14} color="#52525b" />

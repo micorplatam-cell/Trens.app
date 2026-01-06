@@ -95,9 +95,10 @@ const isWriteTool = (toolName: string): boolean => {
     'TRAINING_RENAME_DAY',
     'TRAINING_ADD_DAY',
     'TRAINING_REMOVE_DAY',
-    // TRAINING - Modo externo
+    // TRAINING - Modo personalizado
     'TRAINING_SET_EXTERNAL_MODE',
     'TRAINING_SET_EXTERNAL_SCHEDULE',
+    'TRAINING_REMOVE_EXTERNAL_DAY',
     // SYNC - Sincronizar datos
     'SYNC_NUTRITION_MACROS',
     'AUTO_ADJUST_ALL',

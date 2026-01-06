@@ -422,7 +422,9 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
               )}
               {data.isExternalMode && data.routineName !== 'DESCANSO' && (
                 <View className="bg-purple-500/20 px-2 py-1 rounded-lg">
-                  <Text className="text-purple-400 text-xs font-mono font-bold">⚡ PERSONALIZADO</Text>
+                  <Text className="text-purple-400 text-xs font-mono font-bold">
+                    ⚡ PERSONALIZADO
+                  </Text>
                 </View>
               )}
             </View>

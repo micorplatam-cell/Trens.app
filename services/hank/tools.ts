@@ -6729,6 +6729,97 @@ Ahora tengo en cuenta tu rutina cuando hablemos de entrenamiento. 💪`,
   }
 }
 
+/**
+ * Elimina un día del plan de entrenamiento personalizado
+ */
+export async function trainingRemoveExternalDay(
+  userId: string,
+  dayName: string
+): Promise<HankToolResult> {
+  try {
+    if (!dayName) {
+      return { success: false, message: 'Debes especificar qué día quieres eliminar.' };
+    }
+
+    // Obtener el schedule actual
+    const { data: profile, error: fetchError } = await supabase
+      .from('user_profiles')
+      .select('external_schedule')
+      .eq('user_id', userId)
+      .single();
+
+    if (fetchError || !profile) {
+      return { success: false, message: 'No encontré tu plan de entrenamiento.' };
+    }
+
+    const currentSchedule = profile.external_schedule || {};
+    
+    // Buscar el día de forma case-insensitive
+    const dayNameLower = dayName.toLowerCase();
+    const matchingKey = Object.keys(currentSchedule).find(
+      (key) => key.toLowerCase() === dayNameLower
+    );
+
+    if (!matchingKey) {
+      return {
+        success: false,
+        message: `No tienes "${dayName}" en tu plan. Tus días son: ${Object.keys(currentSchedule).join(', ')}`,
+      };
+    }
+
+    // Eliminar el día
+    const newSchedule = { ...currentSchedule };
+    delete newSchedule[matchingKey];
+    const newFrequency = Object.keys(newSchedule).length;
+
+    // Actualizar en Supabase
+    const updateData: Record<string, any> = {
+      external_schedule: newSchedule,
+      training_days_per_week: newFrequency,
+      updated_at: new Date().toISOString(),
+    };
+
+    // Si no quedan días, desactivar modo personalizado
+    if (newFrequency === 0) {
+      updateData.training_mode = 'none';
+    }
+
+    const { error } = await supabase
+      .from('user_profiles')
+      .update(updateData)
+      .eq('user_id', userId);
+
+    if (error) {
+      console.error('trainingRemoveExternalDay error:', error);
+      return { success: false, message: 'Error al eliminar el día.' };
+    }
+
+    if (newFrequency === 0) {
+      return {
+        success: true,
+        message: `✅ ¡Eliminado! Ya no tienes días de entrenamiento configurados. Puedo ayudarte a crear un nuevo plan cuando quieras.`,
+        data: { removedDay: matchingKey, remainingDays: 0 },
+      };
+    }
+
+    const remainingDays = Object.entries(newSchedule)
+      .map(([day, muscle]) => `• ${day}: ${muscle}`)
+      .join('\n');
+
+    return {
+      success: true,
+      message: `✅ ¡Eliminado "${matchingKey}"!
+
+📅 Tu plan ahora tiene ${newFrequency} día${newFrequency > 1 ? 's' : ''}:
+${remainingDays}`,
+      data: { removedDay: matchingKey, remainingDays: newFrequency, schedule: newSchedule },
+    };
+  } catch (error) {
+    console.error('trainingRemoveExternalDay error:', error);
+    return { success: false, message: 'Error al eliminar el día.' };
+  }
+}
+
 // ============================================================================
 // NOTA: Las funciones customPlan* fueron eliminadas.
 // El "plan personalizado" ahora usa las MISMAS tablas que el módulo GYM:
@@ -8875,6 +8966,20 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       },
     },
     requiredParams: ['schedule'],
+  },
+  {
+    name: 'TRAINING_REMOVE_EXTERNAL_DAY',
+    description:
+      'Elimina un día del plan de entrenamiento personalizado. Usa cuando el usuario diga "elimina el lunes", "quita el día de piernas", "ya no entreno los martes".',
+    parameters: {
+      dayName: {
+        type: 'string',
+        description:
+          'Nombre del día a eliminar (Lunes, Martes, Miércoles, etc.)',
+        required: true,
+      },
+    },
+    requiredParams: ['dayName'],
   },
   // ============================================================================
   // NOTA: CUSTOM_PLAN_* tools fueron removidas.

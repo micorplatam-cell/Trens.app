@@ -66,10 +66,11 @@ import {
   trainingRenameDay,
   trainingAddDay,
   trainingRemoveDay,
-  // External Training Tools (Modo externo para usuarios experimentados)
+  // External Training Tools (Modo personalizado para usuarios experimentados)
   trainingGetStatus,
   trainingSetExternalMode,
   trainingSetExternalSchedule,
+  trainingRemoveExternalDay,
   // Sync Tools
   getFullPlanStatus,
   syncNutritionMacros,
@@ -895,6 +896,10 @@ Cuando termines, di **"ejecuta el plan"** y lo guardaré todo.`,
               userId,
               p.schedule as Record<string, string>
             );
+            break;
+
+          case 'TRAINING_REMOVE_EXTERNAL_DAY':
+            result = await trainingRemoveExternalDay(userId, p.dayName as string);
             break;
 
           // =========================================================================

@@ -1846,13 +1846,11 @@ function GymScreen() {
 
         // SINCRONIZAR: Crear días de entrenamiento basados en el horario personalizado
         // Esto permite que el usuario agregue ejercicios a sus días personalizados
-        const personalizedDays = Object.entries(extSchedule).map(
-          ([dayName, muscleGroup], idx) => ({
-            id: String(idx + 1),
-            muscleGroups: `${dayName}: ${muscleGroup}`,
-            exercises: [],
-          })
-        );
+        const personalizedDays = Object.entries(extSchedule).map(([dayName, muscleGroup], idx) => ({
+          id: String(idx + 1),
+          muscleGroups: `${dayName}: ${muscleGroup}`,
+          exercises: [],
+        }));
 
         // Actualizar profiles con los días sincronizados
         const routineNamesFromSchedule: Record<string, string> = {};
@@ -4461,6 +4459,57 @@ function GymScreen() {
                         setSelectedDayIndex(index);
                         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                       }}
+                      onLongPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                        Alert.alert(
+                          '🗑️ Eliminar día',
+                          `¿Eliminar "${dayName}: ${muscleGroup}" de tu plan personalizado?`,
+                          [
+                            { text: 'Cancelar', style: 'cancel' },
+                            {
+                              text: 'Eliminar',
+                              style: 'destructive',
+                              onPress: async () => {
+                                // Eliminar el día del external_schedule
+                                const newSchedule = { ...externalSchedule };
+                                delete newSchedule[dayName];
+
+                                // Actualizar en Supabase
+                                if (user) {
+                                  await supabase
+                                    .from('user_profiles')
+                                    .update({
+                                      external_schedule: newSchedule,
+                                      training_days_per_week: Object.keys(newSchedule).length,
+                                    })
+                                    .eq('user_id', user.id);
+
+                                  // Actualizar estado local
+                                  setExternalSchedule(newSchedule);
+
+                                  // Si no quedan días, desactivar modo personalizado
+                                  if (Object.keys(newSchedule).length === 0) {
+                                    await supabase
+                                      .from('user_profiles')
+                                      .update({ training_mode: 'none' })
+                                      .eq('user_id', user.id);
+                                    setIsExternalMode(false);
+                                  }
+
+                                  // Ajustar índice seleccionado
+                                  const newIndex = Math.max(
+                                    0,
+                                    Math.min(selectedDayIndex, Object.keys(newSchedule).length - 1)
+                                  );
+                                  setSelectedDayIndex(newIndex);
+                                }
+
+                                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                              },
+                            },
+                          ]
+                        );
+                      }}
                       className="mr-2.5 px-4 py-2.5 rounded-xl"
                       style={
                         isActive
@@ -4699,7 +4748,7 @@ function GymScreen() {
 
               {/* Mensaje para modo PERSONALIZADO */}
               {isExternalMode && (
-                <TouchableOpacity 
+                <TouchableOpacity
                   onPress={() => setHankModalVisible(true)}
                   className="px-4 py-2.5 rounded-xl bg-purple-900/30 border border-purple-500/30"
                 >
