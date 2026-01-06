@@ -152,13 +152,16 @@ const WebDraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
   }, [isDragging, currentIndex, totalItems, itemHeight, onDragEnd, onDragCancel, onPositionChange]);
 
   const handlePointerDown = (e: React.PointerEvent) => {
-    // Capture pointer to receive events even when moving outside
-    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    // Guardar referencia al elemento y pointerId para capturar después del long-press
+    const target = e.target as HTMLElement;
+    const pointerId = e.pointerId;
 
     startYRef.current = e.clientY;
 
     // Long press detection (400ms)
     longPressTimerRef.current = setTimeout(() => {
+      // Capturar pointer SOLO después del long-press para permitir scroll normal
+      target.setPointerCapture?.(pointerId);
       isDraggingRef.current = true;
       setIsDragging(true);
       setScale(0.95);
@@ -170,7 +173,7 @@ const WebDraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
 
   const handlePointerMove = (e: React.PointerEvent) => {
     if (longPressTimerRef.current && !isDraggingRef.current) {
-      // If moved too much before long press, cancel it
+      // If moved too much before long press, cancel it (user is scrolling)
       const deltaY = Math.abs(e.clientY - startYRef.current);
       if (deltaY > 10) {
         clearTimeout(longPressTimerRef.current);
@@ -212,10 +215,11 @@ const WebDraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
         transform: `translateY(${translateY}px) scale(${scale})`,
         zIndex: isDragging ? 100 : 1,
         opacity: isDragging ? 0.95 : 1,
-        cursor: isDragging ? 'grabbing' : 'grab',
+        cursor: isDragging ? 'grabbing' : 'default',
         userSelect: 'none',
         position: 'relative',
-        touchAction: 'none', // Prevent browser gestures like scroll
+        // Solo bloquear gestos cuando estamos arrastrando activamente
+        touchAction: isDragging ? 'none' : 'pan-y',
         boxShadow: isDragging ? '0 8px 30px rgba(220, 38, 38, 0.4)' : 'none',
         transition: isDragging ? 'none' : 'transform 0.2s ease-out, box-shadow 0.2s ease-out',
       }}
