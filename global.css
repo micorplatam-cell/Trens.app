@@ -3,9 +3,9 @@
 @tailwind utilities;
 
 /* ============================================
-   TRENS GLOBAL STYLES - SAVAGE MODE
+   TRENS GLOBAL STYLES - SAVAGE MODE PREMIUM
    NativeWind handles all styling via Tailwind.
-   CSS custom properties don't work in React Native.
+   Enhanced with premium visual effects.
    ============================================ */
 
 /* ============================================
@@ -19,12 +19,15 @@
     -moz-text-size-adjust: 100%;
     text-size-adjust: 100%;
     overscroll-behavior: none;
+    scroll-behavior: smooth;
   }
 
   body {
     touch-action: pan-x pan-y;
     overscroll-behavior: none;
     -webkit-overflow-scrolling: touch;
+    background-color: #000000;
+    color: #ffffff;
   }
 
   * {
@@ -76,6 +79,232 @@
   }
 }
 
+/* ============================================
+   PREMIUM VISUAL EFFECTS
+   ============================================ */
+@layer utilities {
+  /* Blur utilities for glow effects */
+  .blur-2xl {
+    filter: blur(40px);
+  }
+  
+  .blur-3xl {
+    filter: blur(64px);
+  }
+
+  /* Premium backdrop blur */
+  .backdrop-blur-xl {
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+  }
+
+  .backdrop-blur-2xl {
+    backdrop-filter: blur(40px);
+    -webkit-backdrop-filter: blur(40px);
+  }
+
+  /* Glass morphism effect */
+  .glass {
+    background: rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .glass-strong {
+    background: rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(30px);
+    -webkit-backdrop-filter: blur(30px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+  }
+
+  /* Fire glow effect */
+  .glow-fire {
+    box-shadow: 
+      0 0 20px rgba(220, 38, 38, 0.4),
+      0 0 40px rgba(220, 38, 38, 0.2),
+      0 0 60px rgba(220, 38, 38, 0.1);
+  }
+
+  .glow-fire-intense {
+    box-shadow: 
+      0 0 30px rgba(220, 38, 38, 0.6),
+      0 0 60px rgba(220, 38, 38, 0.4),
+      0 0 90px rgba(220, 38, 38, 0.2);
+  }
+
+  /* Text glow */
+  .text-glow-fire {
+    text-shadow: 
+      0 0 10px rgba(220, 38, 38, 0.8),
+      0 0 20px rgba(220, 38, 38, 0.6),
+      0 0 30px rgba(220, 38, 38, 0.4);
+  }
+
+  /* Gradient text (WebKit) */
+  .text-gradient-fire {
+    background: linear-gradient(135deg, #DC2626 0%, #F97316 50%, #FBBF24 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Premium border gradient */
+  .border-gradient-fire {
+    border: 2px solid transparent;
+    background: 
+      linear-gradient(#000, #000) padding-box,
+      linear-gradient(135deg, #DC2626, #F97316, #FBBF24) border-box;
+  }
+
+  /* Animated gradient background */
+  .bg-gradient-animated {
+    background: linear-gradient(
+      135deg,
+      #000000 0%,
+      #0a0505 25%,
+      #0f0808 50%,
+      #0a0505 75%,
+      #000000 100%
+    );
+    background-size: 400% 400%;
+    animation: gradient-shift 15s ease infinite;
+  }
+
+  /* Pulse animation for buttons */
+  .animate-pulse-glow {
+    animation: pulse-glow 2s ease-in-out infinite;
+  }
+
+  /* Shimmer effect */
+  .shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .shimmer::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.1),
+      transparent
+    );
+    animation: shimmer 2s infinite;
+  }
+
+  /* Hover scale effect */
+  .hover-scale {
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+  }
+
+  .hover-scale:hover {
+    transform: scale(1.02);
+  }
+
+  /* Card hover effect */
+  .card-hover {
+    transition: all 0.3s ease;
+  }
+
+  .card-hover:hover {
+    transform: translateY(-4px);
+    box-shadow: 
+      0 10px 40px rgba(220, 38, 38, 0.15),
+      0 0 0 1px rgba(220, 38, 38, 0.2);
+  }
+}
+
+/* ============================================
+   KEYFRAME ANIMATIONS
+   ============================================ */
+@keyframes gradient-shift {
+  0%, 100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(220, 38, 38, 0.4);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 40px rgba(220, 38, 38, 0.6);
+    transform: scale(1.02);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    left: -100%;
+  }
+  100% {
+    left: 100%;
+  }
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes glow-pulse {
+  0%, 100% {
+    opacity: 0.4;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.1);
+  }
+}
+
+/* ============================================
+   CUSTOM SCROLLBAR (WebKit)
+   ============================================ */
+@media screen {
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #0a0a0a;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #27272a;
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #3f3f46;
+  }
+
+  /* Hide scrollbar for cleaner look */
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
 /* Fix for React Native Web ScrollView in modals */
 @media screen {
   .r-1niwhzg,
@@ -83,4 +312,18 @@
     overflow-y: auto !important;
   }
 }
+
+/* ============================================
+   SELECTION STYLES
+   ============================================ */
+::selection {
+  background: rgba(220, 38, 38, 0.4);
+  color: #ffffff;
+}
+
+::-moz-selection {
+  background: rgba(220, 38, 38, 0.4);
+  color: #ffffff;
+}
+
 /* Build timestamp: 1767567531 */
