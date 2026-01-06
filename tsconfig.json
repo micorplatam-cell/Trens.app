@@ -3,17 +3,6 @@
   "compilerOptions": {
     "strict": true
   },
-  "include": [
-    "**/*.ts",
-    "**/*.tsx",
-    ".expo/types/**/*.ts",
-    "expo-env.d.ts",
-    "nativewind-env.d.ts"
-  ],
-  "exclude": [
-    "node_modules",
-    "supabase/functions",
-    "mcp-server",
-    "cloudflare-worker"
-  ]
+  "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.ts", "expo-env.d.ts", "nativewind-env.d.ts"],
+  "exclude": ["node_modules", "supabase/functions", "mcp-server", "cloudflare-worker"]
 }
