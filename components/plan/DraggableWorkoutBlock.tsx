@@ -215,7 +215,9 @@ const WebDraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
       lastScrollYRef.current = e.clientY;
 
       // Buscar el ScrollView padre y hacer scroll
-      const scrollableParent = containerRef.current?.closest('[data-scroll-container]') as HTMLElement;
+      const scrollableParent = containerRef.current?.closest(
+        '[data-scroll-container]'
+      ) as HTMLElement;
       if (scrollableParent) {
         scrollableParent.scrollTop += scrollDelta;
       } else {
