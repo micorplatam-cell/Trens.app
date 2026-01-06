@@ -114,7 +114,7 @@ interface WorkoutBlockData {
     imageUrl?: string;
     videoUrl?: string;
   }[];
-  isExternalMode?: boolean; // True si usa horario externo (no módulo GYM)
+  isExternalMode?: boolean; // True si usa modo personalizado (sin ejercicios detallados)
 }
 
 interface TimelineItem {
@@ -226,7 +226,7 @@ function PlanScreen() {
   const [stackItems, setStackItems] = useState<StackItem[]>([]);
   const [workoutPosIndex, setWorkoutPosIndex] = useState(2);
   const [todayRoutine, setTodayRoutine] = useState<string>('SIN RUTINA');
-  const [isExternalMode, setIsExternalMode] = useState(false); // Modo entrenamiento externo
+  const [isExternalMode, setIsExternalMode] = useState(false); // Modo entrenamiento personalizado
   const [todayExercises, setTodayExercises] = useState<
     {
       id: string;
@@ -640,107 +640,110 @@ function PlanScreen() {
             video_url
           )
         `
-        )
-        .eq('user_id', user.id)
-        .order('display_order', { ascending: true, nullsFirst: false })
-        .order('created_at', { ascending: true });
+          )
+          .eq('user_id', user.id)
+          .order('display_order', { ascending: true, nullsFirst: false })
+          .order('created_at', { ascending: true });
 
-      // Mapear al formato simplificado
-      const exercisesData =
-        userConfigs?.map((item: any) => {
-          const exercise = item.exercises;
-          return {
-            id: item.id,
-            name: exercise?.name || 'UNNAMED',
-            media_url:
-              item.custom_media_url || exercise?.default_media_url || exercise?.thumbnail_url || '',
-            video_url: exercise?.video_url || '',
-            training_days: item.training_days || [0],
-          };
-        }) || [];
+        // Mapear al formato simplificado
+        const exercisesData =
+          userConfigs?.map((item: any) => {
+            const exercise = item.exercises;
+            return {
+              id: item.id,
+              name: exercise?.name || 'UNNAMED',
+              media_url:
+                item.custom_media_url ||
+                exercise?.default_media_url ||
+                exercise?.thumbnail_url ||
+                '',
+              video_url: exercise?.video_url || '',
+              training_days: item.training_days || [0],
+            };
+          }) || [];
 
-      console.warn(`🏋️ PLAN: Total ejercicios encontrados: ${exercisesData.length}`);
-      if (exercisesError) {
-        console.error('Error fetching exercises:', exercisesError);
-      }
+        console.warn(`🏋️ PLAN: Total ejercicios encontrados: ${exercisesData.length}`);
+        if (exercisesError) {
+          console.error('Error fetching exercises:', exercisesError);
+        }
 
-      // Log detallado de ejercicios y sus días
-      if (exercisesData.length > 0) {
-        console.warn(
-          '🏋️ PLAN: Ejercicios con días:',
-          exercisesData
-            .map((e: any) => `${e.name}: [${(e.training_days || [0]).join(',')}]`)
-            .join(' | ')
-        );
-      }
+        // Log detallado de ejercicios y sus días
+        if (exercisesData.length > 0) {
+          console.warn(
+            '🏋️ PLAN: Ejercicios con días:',
+            exercisesData
+              .map((e: any) => `${e.name}: [${(e.training_days || [0]).join(',')}]`)
+              .join(' | ')
+          );
+        }
 
-      // Filtrar por día de entrenamiento
-      const todayExercisesFiltered = exercisesData.filter((item: any) => {
-        const itemDays = item.training_days || [0];
-        return itemDays.includes(currentTrainingDay);
-      });
-
-      console.warn(
-        `🏋️ PLAN: Ejercicios para día ${currentTrainingDay}: ${todayExercisesFiltered.length}`
-      );
-
-      // Si no hay ejercicios para el día actual = DESCANSO
-      // (igual que ADN - no mostrar todos los ejercicios)
-
-      if (todayExercisesFiltered.length > 0) {
-        // Usar nombre de rutina guardado de la base de datos
-        const savedRoutineName = routineNames[String(currentTrainingDay)];
-
-        // Si no hay nombre guardado, usar 'ENTRENAMIENTO' simple
-        const finalRoutineName = savedRoutineName || 'ENTRENAMIENTO';
-
-        setTodayRoutine(finalRoutineName);
-
-        // Helper para verificar si es video
-        const isVideoUrl = (url: string) => {
-          if (!url) return false;
-          const videoExtensions = ['.mp4', '.mov', '.avi', '.webm', '.m4v'];
-          return videoExtensions.some((ext) => url.toLowerCase().includes(ext));
-        };
-
-        // Formatear ejercicios para el slider
-        const formattedExercises = todayExercisesFiltered.map((item: any, idx: number) => {
-          const mediaUrl = item.media_url || '';
-          const explicitVideoUrl = item.video_url || '';
-
-          // Priorizar video_url explícito, luego verificar si media_url es video
-          let imageUrl: string | undefined = undefined;
-          let videoUrl: string | undefined = undefined;
-
-          if (explicitVideoUrl) {
-            // Tiene video_url explícito
-            videoUrl = explicitVideoUrl;
-            imageUrl = mediaUrl || undefined; // media_url como thumbnail
-          } else if (isVideoUrl(mediaUrl)) {
-            // media_url es un video
-            videoUrl = mediaUrl;
-          } else {
-            // Es imagen
-            imageUrl = mediaUrl || undefined;
-          }
-
-          return {
-            id: item.id || `ex-${idx}`,
-            name: item.name,
-            imageUrl,
-            videoUrl,
-          };
+        // Filtrar por día de entrenamiento
+        const todayExercisesFiltered = exercisesData.filter((item: any) => {
+          const itemDays = item.training_days || [0];
+          return itemDays.includes(currentTrainingDay);
         });
 
-        console.warn('🏋️ Rutina:', finalRoutineName);
-        console.warn('🏋️ Ejercicios formateados:', formattedExercises.length);
-        setTodayExercises(formattedExercises);
-      } else {
-        // No hay ejercicios para hoy - día de descanso
-        console.warn('🏋️ Sin ejercicios para hoy - DESCANSO');
-        setTodayRoutine('DESCANSO');
-        setTodayExercises([]);
-      }
+        console.warn(
+          `🏋️ PLAN: Ejercicios para día ${currentTrainingDay}: ${todayExercisesFiltered.length}`
+        );
+
+        // Si no hay ejercicios para el día actual = DESCANSO
+        // (igual que ADN - no mostrar todos los ejercicios)
+
+        if (todayExercisesFiltered.length > 0) {
+          // Usar nombre de rutina guardado de la base de datos
+          const savedRoutineName = routineNames[String(currentTrainingDay)];
+
+          // Si no hay nombre guardado, usar 'ENTRENAMIENTO' simple
+          const finalRoutineName = savedRoutineName || 'ENTRENAMIENTO';
+
+          setTodayRoutine(finalRoutineName);
+
+          // Helper para verificar si es video
+          const isVideoUrl = (url: string) => {
+            if (!url) return false;
+            const videoExtensions = ['.mp4', '.mov', '.avi', '.webm', '.m4v'];
+            return videoExtensions.some((ext) => url.toLowerCase().includes(ext));
+          };
+
+          // Formatear ejercicios para el slider
+          const formattedExercises = todayExercisesFiltered.map((item: any, idx: number) => {
+            const mediaUrl = item.media_url || '';
+            const explicitVideoUrl = item.video_url || '';
+
+            // Priorizar video_url explícito, luego verificar si media_url es video
+            let imageUrl: string | undefined = undefined;
+            let videoUrl: string | undefined = undefined;
+
+            if (explicitVideoUrl) {
+              // Tiene video_url explícito
+              videoUrl = explicitVideoUrl;
+              imageUrl = mediaUrl || undefined; // media_url como thumbnail
+            } else if (isVideoUrl(mediaUrl)) {
+              // media_url es un video
+              videoUrl = mediaUrl;
+            } else {
+              // Es imagen
+              imageUrl = mediaUrl || undefined;
+            }
+
+            return {
+              id: item.id || `ex-${idx}`,
+              name: item.name,
+              imageUrl,
+              videoUrl,
+            };
+          });
+
+          console.warn('🏋️ Rutina:', finalRoutineName);
+          console.warn('🏋️ Ejercicios formateados:', formattedExercises.length);
+          setTodayExercises(formattedExercises);
+        } else {
+          // No hay ejercicios para hoy - día de descanso
+          console.warn('🏋️ Sin ejercicios para hoy - DESCANSO');
+          setTodayRoutine('DESCANSO');
+          setTodayExercises([]);
+        }
       } // Fin del else (modo GYM MODULE)
     } catch (error) {
       console.error('Error fetching plan data:', error);
@@ -1631,7 +1634,7 @@ function PlanScreen() {
       preStack,
       postStack,
       exercises: todayExercises,
-      isExternalMode: isExternalMode, // Indica si es modo externo
+      isExternalMode: isExternalMode, // Indica si es modo personalizado
     };
 
     const safeIndex = Math.min(Math.max(0, workoutPosIndex), timeline.length);

@@ -31,7 +31,7 @@ interface TodayWorkout {
   routineName: string;
   exercises: Exercise[];
   isRestDay: boolean;
-  isExternalMode?: boolean; // True si es modo externo (no usa módulo GYM)
+  isExternalMode?: boolean; // True si es modo personalizado (sin ejercicios detallados)
 }
 
 interface MealItem {
@@ -185,7 +185,7 @@ export const TodayCards: React.FC<TodayCardsProps> = ({ userId }) => {
       const todayName = dayNames[today];
 
       // =====================================================================
-      // 0. DETECT TRAINING MODE - Verificar si usa módulo GYM o modo externo
+      // 0. DETECT TRAINING MODE - Verificar si usa módulo GYM o modo personalizado
       // =====================================================================
       const { data: userProfile } = await supabase
         .from('user_profiles')
@@ -197,16 +197,16 @@ export const TodayCards: React.FC<TodayCardsProps> = ({ userId }) => {
       const externalSchedule = userProfile?.external_schedule || {};
 
       // =====================================================================
-      // 1A. SI ES MODO EXTERNO - Mostrar horario simple del usuario
+      // 1A. SI ES MODO PERSONALIZADO - Mostrar horario del usuario
       // =====================================================================
       if (trainingMode === 'external' && Object.keys(externalSchedule).length > 0) {
-        // Buscar qué entrena hoy según su external_schedule
+        // Buscar qué entrena hoy según su horario personalizado
         const todayTraining = externalSchedule[todayName] || null;
 
         if (todayTraining) {
           setWorkout({
             routineName: todayTraining,
-            exercises: [], // Modo externo no tiene ejercicios
+            exercises: [], // Modo personalizado - ejercicios pendientes de configurar
             isRestDay: false,
             isExternalMode: true,
           });
@@ -235,8 +235,8 @@ export const TodayCards: React.FC<TodayCardsProps> = ({ userId }) => {
         // Fetch ejercicios del día actual con su media
         const { data: exerciseConfigs } = await supabase
           .from('user_exercise_config')
-        .select(
-          `
+          .select(
+            `
           id,
           training_days,
           custom_media_url,
@@ -248,62 +248,62 @@ export const TodayCards: React.FC<TodayCardsProps> = ({ userId }) => {
             video_url
           )
         `
-        )
-        .eq('user_id', userId)
-        .order('display_order', { ascending: true });
+          )
+          .eq('user_id', userId)
+          .order('display_order', { ascending: true });
 
-      // Filtrar ejercicios del día actual (misma lógica que PLAN)
-      const todayExercises: Exercise[] = [];
+        // Filtrar ejercicios del día actual (misma lógica que PLAN)
+        const todayExercises: Exercise[] = [];
 
-      // Helper para verificar si es video
-      const isVideoUrl = (url: string) => {
-        if (!url) return false;
-        const videoExtensions = ['.mp4', '.mov', '.avi', '.webm', '.m4v'];
-        return videoExtensions.some((ext) => url.toLowerCase().includes(ext));
-      };
+        // Helper para verificar si es video
+        const isVideoUrl = (url: string) => {
+          if (!url) return false;
+          const videoExtensions = ['.mp4', '.mov', '.avi', '.webm', '.m4v'];
+          return videoExtensions.some((ext) => url.toLowerCase().includes(ext));
+        };
 
-      exerciseConfigs?.forEach((config: any) => {
-        const days = config.training_days || [0];
-        if (days.includes(currentTrainingDay) && config.exercises) {
-          const ex = config.exercises;
+        exerciseConfigs?.forEach((config: any) => {
+          const days = config.training_days || [0];
+          if (days.includes(currentTrainingDay) && config.exercises) {
+            const ex = config.exercises;
 
-          // Mapear igual que PLAN
-          const mediaUrl =
-            config.custom_media_url || ex.default_media_url || ex.thumbnail_url || '';
-          const explicitVideoUrl = ex.video_url || '';
+            // Mapear igual que PLAN
+            const mediaUrl =
+              config.custom_media_url || ex.default_media_url || ex.thumbnail_url || '';
+            const explicitVideoUrl = ex.video_url || '';
 
-          // Priorizar video_url explícito, luego verificar si media_url es video
-          let imageUrl: string | undefined = undefined;
-          let videoUrl: string | undefined = undefined;
+            // Priorizar video_url explícito, luego verificar si media_url es video
+            let imageUrl: string | undefined = undefined;
+            let videoUrl: string | undefined = undefined;
 
-          if (explicitVideoUrl) {
-            // Tiene video_url explícito
-            videoUrl = explicitVideoUrl;
-            imageUrl = mediaUrl || undefined; // media_url como thumbnail
-          } else if (isVideoUrl(mediaUrl)) {
-            // media_url es un video
-            videoUrl = mediaUrl;
-          } else {
-            // Es imagen
-            imageUrl = mediaUrl || undefined;
+            if (explicitVideoUrl) {
+              // Tiene video_url explícito
+              videoUrl = explicitVideoUrl;
+              imageUrl = mediaUrl || undefined; // media_url como thumbnail
+            } else if (isVideoUrl(mediaUrl)) {
+              // media_url es un video
+              videoUrl = mediaUrl;
+            } else {
+              // Es imagen
+              imageUrl = mediaUrl || undefined;
+            }
+
+            todayExercises.push({
+              id: config.id,
+              name: ex.name,
+              imageUrl,
+              videoUrl,
+            });
           }
+        });
 
-          todayExercises.push({
-            id: config.id,
-            name: ex.name,
-            imageUrl,
-            videoUrl,
-          });
-        }
-      });
-
-      const isRestDay = todayExercises.length === 0;
-      setWorkout({
-        routineName: isRestDay ? 'DESCANSO' : routineName,
-        exercises: todayExercises,
-        isRestDay,
-        isExternalMode: false,
-      });
+        const isRestDay = todayExercises.length === 0;
+        setWorkout({
+          routineName: isRestDay ? 'DESCANSO' : routineName,
+          exercises: todayExercises,
+          isRestDay,
+          isExternalMode: false,
+        });
       } // Fin del else (modo GYM MODULE)
 
       // =====================================================================
@@ -543,10 +543,8 @@ export const TodayCards: React.FC<TodayCardsProps> = ({ userId }) => {
               </View>
             )}
             {!workout?.isRestDay && workout?.isExternalMode && (
-              <View className="px-2 py-1 rounded-md" style={{ backgroundColor: '#3b82f620' }}>
-                <Text className="text-blue-400 text-[10px] font-mono font-bold">
-                  🎯 EXTERNO
-                </Text>
+              <View className="px-2 py-1 rounded-md" style={{ backgroundColor: '#a855f720' }}>
+                <Text className="text-purple-400 text-[10px] font-mono font-bold">⚡ PERSONALIZADO</Text>
               </View>
             )}
             <ChevronRight size={14} color="#52525b" />
@@ -554,24 +552,27 @@ export const TodayCards: React.FC<TodayCardsProps> = ({ userId }) => {
         </View>
 
         {/* Slider de Ejercicios (solo en modo GYM) */}
-        {!workout?.isRestDay && !workout?.isExternalMode && workout?.exercises && workout.exercises.length > 0 && (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            className="pb-3"
-            contentContainerStyle={{ paddingHorizontal: 16 }}
-          >
-            {workout.exercises.map((ex) => (
-              <ExerciseMiniCard key={ex.id} exercise={ex} />
-            ))}
-          </ScrollView>
-        )}
+        {!workout?.isRestDay &&
+          !workout?.isExternalMode &&
+          workout?.exercises &&
+          workout.exercises.length > 0 && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              className="pb-3"
+              contentContainerStyle={{ paddingHorizontal: 16 }}
+            >
+              {workout.exercises.map((ex) => (
+                <ExerciseMiniCard key={ex.id} exercise={ex} />
+              ))}
+            </ScrollView>
+          )}
 
-        {/* Modo externo - Mensaje motivacional */}
+        {/* Modo personalizado - Opción de expandir plan */}
         {!workout?.isRestDay && workout?.isExternalMode && (
           <View className="px-4 pb-3">
             <Text className="text-zinc-400 text-xs font-mono">
-              💪 Entrenas por tu cuenta • Habla con Hank para detallar
+              ⚡ Toca para agregar ejercicios a tu rutina
             </Text>
           </View>
         )}

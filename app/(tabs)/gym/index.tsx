@@ -1839,10 +1839,47 @@ function GymScreen() {
       const extSchedule = userProfileData?.external_schedule || {};
 
       if (trainingMode === 'external' && Object.keys(extSchedule).length > 0) {
-        // MODO EXTERNO: Usuario entrena por su cuenta
+        // MODO PERSONALIZADO: Usuario tiene su propio horario, puede agregar ejercicios
         setIsExternalMode(true);
         setExternalSchedule(extSchedule);
-        console.warn('🏋️ GYM [EXTERNO]: Horario cargado:', extSchedule);
+        console.warn('🏋️ GYM [PERSONALIZADO]: Horario cargado:', extSchedule);
+
+        // SINCRONIZAR: Crear días de entrenamiento basados en el horario personalizado
+        // Esto permite que el usuario agregue ejercicios a sus días personalizados
+        const personalizedDays = Object.entries(extSchedule).map(
+          ([dayName, muscleGroup], idx) => ({
+            id: String(idx + 1),
+            muscleGroups: `${dayName}: ${muscleGroup}`,
+            exercises: [],
+          })
+        );
+
+        // Actualizar profiles con los días sincronizados
+        const routineNamesFromSchedule: Record<string, string> = {};
+        Object.entries(extSchedule).forEach(([dayName, muscleGroup], idx) => {
+          routineNamesFromSchedule[String(idx)] = `${dayName}: ${muscleGroup}`;
+        });
+
+        // Sincronizar con profiles para que los ejercicios funcionen
+        await supabase
+          .from('profiles')
+          .update({
+            training_frequency: personalizedDays.length,
+            training_routine_names: routineNamesFromSchedule,
+          })
+          .eq('id', user.id);
+
+        setTrainingProgram((prev) => ({
+          ...prev,
+          frequency: personalizedDays.length,
+          days: personalizedDays,
+        }));
+
+        console.warn(
+          '🏋️ GYM [PERSONALIZADO]: Sincronizados',
+          personalizedDays.length,
+          'días de entrenamiento'
+        );
       } else {
         setIsExternalMode(false);
         setExternalSchedule({});
@@ -4342,8 +4379,8 @@ function GymScreen() {
                     ESTRUCTURA
                   </Text>
                   <Text className="text-zinc-500 text-[10px] uppercase tracking-widest font-mono">
-                    {isExternalMode 
-                      ? `🎯 EXTERNO • ${Object.keys(externalSchedule).length} DÍAS`
+                    {isExternalMode
+                      ? `⚡ PERSONALIZADO • ${Object.keys(externalSchedule).length} DÍAS`
                       : `${trainingProgram.days.length} DÍAS • ${exercises.length} EJERCICIOS`}
                   </Text>
                 </View>
@@ -4405,238 +4442,271 @@ function GymScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* DAYS SELECTOR - Horizontal Pills (MODO GYM o EXTERNO) */}
+          {/* DAYS SELECTOR - Horizontal Pills (MODO GYM o PERSONALIZADO) */}
           <View className="mb-2">
             <Text className="text-zinc-600 text-[10px] font-mono mb-2 uppercase tracking-wider">
-              {isExternalMode ? 'Tu horario de entrenamiento externo' : 'Selecciona el día a configurar'}
+              {isExternalMode
+                ? 'Selecciona un día para agregar ejercicios'
+                : 'Selecciona el día a configurar'}
             </Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} className="-mx-4 px-4">
-              {/* MODO EXTERNO: Mostrar días del external_schedule */}
-              {isExternalMode && Object.entries(externalSchedule).map(([dayName, muscleGroup], index) => (
-                <View
-                  key={dayName}
-                  className="mr-2 px-4 py-2.5 rounded-xl"
-                  style={{
-                    backgroundColor: '#1e3a5f',
-                    borderWidth: 1,
-                    borderColor: '#3b82f6',
-                  }}
-                >
-                  <View className="flex-row items-center gap-2">
-                    <View
-                      className="w-6 h-6 rounded-lg items-center justify-center"
-                      style={{ backgroundColor: 'rgba(59,130,246,0.3)' }}
+              {/* MODO PERSONALIZADO: Días seleccionables */}
+              {isExternalMode &&
+                Object.entries(externalSchedule).map(([dayName, muscleGroup], index) => {
+                  const isActive = selectedDayIndex === index;
+                  return (
+                    <TouchableOpacity
+                      key={dayName}
+                      onPress={() => {
+                        setSelectedDayIndex(index);
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                      }}
+                      className="mr-2.5 px-4 py-2.5 rounded-xl"
+                      style={
+                        isActive
+                          ? {
+                              backgroundColor: '#a855f7',
+                              shadowColor: '#a855f7',
+                              shadowOffset: { width: 0, height: 4 },
+                              shadowOpacity: 0.5,
+                              shadowRadius: 12,
+                            }
+                          : {
+                              backgroundColor: '#1a0a2e',
+                              borderWidth: 1,
+                              borderColor: '#a855f750',
+                            }
+                      }
                     >
-                      <Text className="text-blue-400 font-bold text-xs font-mono">
-                        {index + 1}
-                      </Text>
-                    </View>
-                    <View>
-                      <Text className="text-blue-300 font-bold text-[10px] uppercase tracking-wide">
-                        {dayName}
-                      </Text>
-                      <Text className="text-white font-bold text-xs uppercase" numberOfLines={1}>
-                        {muscleGroup}
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-              ))}
-              
+                      <View className="flex-row items-center gap-2">
+                        <View
+                          className="w-6 h-6 rounded-lg items-center justify-center"
+                          style={{
+                            backgroundColor: isActive ? 'rgba(0,0,0,0.3)' : 'rgba(168,85,247,0.2)',
+                          }}
+                        >
+                          <Text
+                            className={`font-bold text-xs font-mono ${isActive ? 'text-white' : 'text-purple-400'}`}
+                          >
+                            {index + 1}
+                          </Text>
+                        </View>
+                        <View>
+                          <Text
+                            className={`font-bold text-[10px] uppercase tracking-wide ${isActive ? 'text-white' : 'text-purple-300'}`}
+                          >
+                            {dayName}
+                          </Text>
+                          <Text
+                            className={`font-bold text-xs uppercase ${isActive ? 'text-white' : 'text-zinc-300'}`}
+                            numberOfLines={1}
+                          >
+                            {muscleGroup}
+                          </Text>
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+
               {/* MODO GYM MODULE: Mostrar días del trainingProgram */}
-              {!isExternalMode && trainingProgram.days.map((day, index) => {
-                const isActive = selectedDayIndex === index;
-                const isCurrent = trainingProgram.currentDayIndex === index;
+              {!isExternalMode &&
+                trainingProgram.days.map((day, index) => {
+                  const isActive = selectedDayIndex === index;
+                  const isCurrent = trainingProgram.currentDayIndex === index;
 
-                return (
-                  <TouchableOpacity
-                    key={day.id}
-                    onPress={() => {
-                      setSelectedDayIndex(index);
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                    }}
-                    onLongPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-                      Alert.alert(
-                        '🗑️ Eliminar día',
-                        `¿Eliminar "${day.muscleGroups}" y todos sus ejercicios?`,
-                        [
-                          { text: 'Cancelar', style: 'cancel' },
-                          {
-                            text: 'Eliminar',
-                            style: 'destructive',
-                            onPress: async () => {
-                              const deletedDayIndex = index;
+                  return (
+                    <TouchableOpacity
+                      key={day.id}
+                      onPress={() => {
+                        setSelectedDayIndex(index);
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                      }}
+                      onLongPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                        Alert.alert(
+                          '🗑️ Eliminar día',
+                          `¿Eliminar "${day.muscleGroups}" y todos sus ejercicios?`,
+                          [
+                            { text: 'Cancelar', style: 'cancel' },
+                            {
+                              text: 'Eliminar',
+                              style: 'destructive',
+                              onPress: async () => {
+                                const deletedDayIndex = index;
 
-                              // Eliminar el día seleccionado
-                              const updatedDays = trainingProgram.days.filter(
-                                (_, i) => i !== deletedDayIndex
-                              );
-                              const newSelectedIndex =
-                                updatedDays.length > 0
-                                  ? Math.min(selectedDayIndex, updatedDays.length - 1)
-                                  : 0;
-
-                              setTrainingProgram((prev) => ({
-                                ...prev,
-                                frequency: updatedDays.length,
-                                days: updatedDays.map((d, i) => ({ ...d, id: String(i + 1) })),
-                                currentDayIndex:
+                                // Eliminar el día seleccionado
+                                const updatedDays = trainingProgram.days.filter(
+                                  (_, i) => i !== deletedDayIndex
+                                );
+                                const newSelectedIndex =
                                   updatedDays.length > 0
-                                    ? Math.min(prev.currentDayIndex, updatedDays.length - 1)
-                                    : 0,
-                              }));
-                              setSelectedDayIndex(newSelectedIndex);
+                                    ? Math.min(selectedDayIndex, updatedDays.length - 1)
+                                    : 0;
 
-                              // Actualizar en Supabase
-                              if (user) {
-                                // Reconstruir los nombres de rutina
-                                const updatedNames: Record<string, string> = {};
-                                updatedDays.forEach((d, i) => {
-                                  updatedNames[String(i)] = d.muscleGroups;
-                                });
+                                setTrainingProgram((prev) => ({
+                                  ...prev,
+                                  frequency: updatedDays.length,
+                                  days: updatedDays.map((d, i) => ({ ...d, id: String(i + 1) })),
+                                  currentDayIndex:
+                                    updatedDays.length > 0
+                                      ? Math.min(prev.currentDayIndex, updatedDays.length - 1)
+                                      : 0,
+                                }));
+                                setSelectedDayIndex(newSelectedIndex);
 
-                                await supabase
-                                  .from('profiles')
-                                  .update({
-                                    training_frequency: updatedDays.length,
-                                    training_current_day:
-                                      updatedDays.length > 0
-                                        ? Math.min(
-                                            trainingProgram.currentDayIndex,
-                                            updatedDays.length - 1
-                                          )
-                                        : 0,
-                                    training_routine_names: updatedNames,
-                                  })
-                                  .eq('id', user.id);
+                                // Actualizar en Supabase
+                                if (user) {
+                                  // Reconstruir los nombres de rutina
+                                  const updatedNames: Record<string, string> = {};
+                                  updatedDays.forEach((d, i) => {
+                                    updatedNames[String(i)] = d.muscleGroups;
+                                  });
 
-                                // Actualizar training_days de todos los ejercicios del usuario
-                                const { data: userExercises } = await supabase
-                                  .from('user_exercise_config')
-                                  .select('id, training_days, config')
-                                  .eq('user_id', user.id);
+                                  await supabase
+                                    .from('profiles')
+                                    .update({
+                                      training_frequency: updatedDays.length,
+                                      training_current_day:
+                                        updatedDays.length > 0
+                                          ? Math.min(
+                                              trainingProgram.currentDayIndex,
+                                              updatedDays.length - 1
+                                            )
+                                          : 0,
+                                      training_routine_names: updatedNames,
+                                    })
+                                    .eq('id', user.id);
 
-                                if (userExercises) {
-                                  for (const ex of userExercises) {
-                                    const currentDays: number[] = ex.training_days || [];
-                                    // Remover el día eliminado y reindexar días mayores
-                                    const newDays = currentDays
-                                      .filter((d: number) => d !== deletedDayIndex)
-                                      .map((d: number) => (d > deletedDayIndex ? d - 1 : d));
+                                  // Actualizar training_days de todos los ejercicios del usuario
+                                  const { data: userExercises } = await supabase
+                                    .from('user_exercise_config')
+                                    .select('id, training_days, config')
+                                    .eq('user_id', user.id);
 
-                                    // También limpiar series_by_day en config
-                                    const config = ex.config || {};
-                                    const seriesByDay =
-                                      (config.series_by_day as Record<string, unknown>) || {};
-                                    const newSeriesByDay: Record<string, unknown> = {};
+                                  if (userExercises) {
+                                    for (const ex of userExercises) {
+                                      const currentDays: number[] = ex.training_days || [];
+                                      // Remover el día eliminado y reindexar días mayores
+                                      const newDays = currentDays
+                                        .filter((d: number) => d !== deletedDayIndex)
+                                        .map((d: number) => (d > deletedDayIndex ? d - 1 : d));
 
-                                    Object.entries(seriesByDay).forEach(([dayKey, series]) => {
-                                      const dayNum = parseInt(dayKey);
-                                      if (dayNum !== deletedDayIndex) {
-                                        const newKey =
-                                          dayNum > deletedDayIndex ? String(dayNum - 1) : dayKey;
-                                        newSeriesByDay[newKey] = series;
-                                      }
-                                    });
+                                      // También limpiar series_by_day en config
+                                      const config = ex.config || {};
+                                      const seriesByDay =
+                                        (config.series_by_day as Record<string, unknown>) || {};
+                                      const newSeriesByDay: Record<string, unknown> = {};
 
-                                    await supabase
-                                      .from('user_exercise_config')
-                                      .update({
-                                        training_days: newDays,
-                                        config: { ...config, series_by_day: newSeriesByDay },
-                                      })
-                                      .eq('id', ex.id);
+                                      Object.entries(seriesByDay).forEach(([dayKey, series]) => {
+                                        const dayNum = parseInt(dayKey);
+                                        if (dayNum !== deletedDayIndex) {
+                                          const newKey =
+                                            dayNum > deletedDayIndex ? String(dayNum - 1) : dayKey;
+                                          newSeriesByDay[newKey] = series;
+                                        }
+                                      });
+
+                                      await supabase
+                                        .from('user_exercise_config')
+                                        .update({
+                                          training_days: newDays,
+                                          config: { ...config, series_by_day: newSeriesByDay },
+                                        })
+                                        .eq('id', ex.id);
+                                    }
                                   }
                                 }
-                              }
-                              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-                              loadExercises(newSelectedIndex);
+                                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                                loadExercises(newSelectedIndex);
+                              },
                             },
-                          },
-                        ]
-                      );
-                    }}
-                    className="mr-2.5 px-4 py-2.5 rounded-xl"
-                    style={
-                      isActive
-                        ? {
-                            backgroundColor: '#F97316',
-                            shadowColor: '#F97316',
-                            shadowOffset: { width: 0, height: 4 },
-                            shadowOpacity: 0.5,
-                            shadowRadius: 12,
-                          }
-                        : {
-                            backgroundColor: '#18181b',
-                            borderWidth: 1,
-                            borderColor: '#27272a',
-                          }
-                    }
-                  >
-                    <View className="flex-row items-center gap-2">
-                      {/* Day Number Badge */}
-                      <View
-                        className="w-6 h-6 rounded-lg items-center justify-center"
-                        style={{
-                          backgroundColor: isActive ? 'rgba(0,0,0,0.3)' : '#27272a',
-                        }}
-                      >
-                        <Text
-                          className={`font-bold text-xs font-mono ${isActive ? 'text-white' : 'text-zinc-500'}`}
+                          ]
+                        );
+                      }}
+                      className="mr-2.5 px-4 py-2.5 rounded-xl"
+                      style={
+                        isActive
+                          ? {
+                              backgroundColor: '#F97316',
+                              shadowColor: '#F97316',
+                              shadowOffset: { width: 0, height: 4 },
+                              shadowOpacity: 0.5,
+                              shadowRadius: 12,
+                            }
+                          : {
+                              backgroundColor: '#18181b',
+                              borderWidth: 1,
+                              borderColor: '#27272a',
+                            }
+                      }
+                    >
+                      <View className="flex-row items-center gap-2">
+                        {/* Day Number Badge */}
+                        <View
+                          className="w-6 h-6 rounded-lg items-center justify-center"
+                          style={{
+                            backgroundColor: isActive ? 'rgba(0,0,0,0.3)' : '#27272a',
+                          }}
                         >
-                          {index + 1}
-                        </Text>
-                      </View>
-                      <View>
-                        <Text
-                          className={`font-bold text-xs uppercase tracking-wide ${
-                            isActive ? 'text-black' : 'text-zinc-300'
-                          }`}
-                          numberOfLines={1}
-                        >
-                          {day.muscleGroups}
-                        </Text>
-                        {isCurrent && (
                           <Text
-                            className={`text-[8px] font-mono ${isActive ? 'text-black/60' : 'text-green-500'}`}
+                            className={`font-bold text-xs font-mono ${isActive ? 'text-white' : 'text-zinc-500'}`}
                           >
-                            • HOY
+                            {index + 1}
                           </Text>
-                        )}
+                        </View>
+                        <View>
+                          <Text
+                            className={`font-bold text-xs uppercase tracking-wide ${
+                              isActive ? 'text-black' : 'text-zinc-300'
+                            }`}
+                            numberOfLines={1}
+                          >
+                            {day.muscleGroups}
+                          </Text>
+                          {isCurrent && (
+                            <Text
+                              className={`text-[8px] font-mono ${isActive ? 'text-black/60' : 'text-green-500'}`}
+                            >
+                              • HOY
+                            </Text>
+                          )}
+                        </View>
                       </View>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
+                    </TouchableOpacity>
+                  );
+                })}
 
-              {/* BOTÓN AGREGAR DÍA - Solo en modo GYM */}
+              {/* BOTÓN AGREGAR DÍA - En modo GYM y PERSONALIZADO */}
               {!isExternalMode && (
-              <TouchableOpacity
-                onPress={() => {
-                  if (trainingProgram.days.length >= 7) {
-                    Alert.alert('Límite alcanzado', 'Máximo 7 días de entrenamiento');
-                    return;
-                  }
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                  setSelectedMuscleGroups([]);
-                  setAddDayModalVisible(true);
-                }}
-                className="px-4 py-2.5 rounded-xl border-2 border-dashed border-zinc-700 items-center justify-center flex-row gap-2"
-                style={{ minWidth: 60 }}
-              >
-                <Plus size={16} color="#F97316" />
-                <Text className="text-fire-orange font-bold text-xs">NUEVO</Text>
-              </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => {
+                    if (trainingProgram.days.length >= 7) {
+                      Alert.alert('Límite alcanzado', 'Máximo 7 días de entrenamiento');
+                      return;
+                    }
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                    setSelectedMuscleGroups([]);
+                    setAddDayModalVisible(true);
+                  }}
+                  className="px-4 py-2.5 rounded-xl border-2 border-dashed border-zinc-700 items-center justify-center flex-row gap-2"
+                  style={{ minWidth: 60 }}
+                >
+                  <Plus size={16} color="#F97316" />
+                  <Text className="text-fire-orange font-bold text-xs">NUEVO</Text>
+                </TouchableOpacity>
               )}
-              
-              {/* Mensaje para modo EXTERNO */}
+
+              {/* Mensaje para modo PERSONALIZADO */}
               {isExternalMode && (
-                <View className="px-4 py-2.5 rounded-xl bg-blue-900/30 border border-blue-500/30">
-                  <Text className="text-blue-400 text-[10px] font-mono">
-                    💡 Habla con Hank para editar
+                <TouchableOpacity 
+                  onPress={() => setHankModalVisible(true)}
+                  className="px-4 py-2.5 rounded-xl bg-purple-900/30 border border-purple-500/30"
+                >
+                  <Text className="text-purple-400 text-[10px] font-mono">
+                    ✨ Editar días con Hank
                   </Text>
-                </View>
+                </TouchableOpacity>
               )}
             </ScrollView>
           </View>

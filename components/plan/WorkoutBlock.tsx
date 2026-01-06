@@ -55,7 +55,7 @@ interface WorkoutBlockData {
   preStack: StackItem[];
   postStack: StackItem[];
   exercises?: Exercise[];
-  isExternalMode?: boolean; // True si usa horario externo (no módulo GYM)
+  isExternalMode?: boolean; // True si usa modo personalizado (sin ejercicios detallados)
 }
 
 interface WorkoutBlockProps {
@@ -412,7 +412,7 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
                   {data.routineName || 'DÍA DE DESCANSO'}
                 </Text>
               </View>
-              {/* Badge: Ejercicios (modo GYM) o Externo */}
+              {/* Badge: Ejercicios (modo GYM) o Personalizado */}
               {hasExercises && !data.isExternalMode && (
                 <View className="bg-red-500/20 px-2 py-1 rounded-lg">
                   <Text className="text-red-500 text-xs font-mono font-bold">
@@ -421,10 +421,8 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
                 </View>
               )}
               {data.isExternalMode && data.routineName !== 'DESCANSO' && (
-                <View className="bg-blue-500/20 px-2 py-1 rounded-lg">
-                  <Text className="text-blue-400 text-xs font-mono font-bold">
-                    🎯 EXTERNO
-                  </Text>
+                <View className="bg-purple-500/20 px-2 py-1 rounded-lg">
+                  <Text className="text-purple-400 text-xs font-mono font-bold">⚡ PERSONALIZADO</Text>
                 </View>
               )}
             </View>
@@ -442,16 +440,16 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
                 ))}
               </ScrollView>
             ) : data.isExternalMode && data.routineName !== 'DESCANSO' ? (
-              /* Modo EXTERNO: Mensaje motivacional */
+              /* Modo PERSONALIZADO: Invitar a agregar ejercicios */
               <View className="items-center py-4">
                 <Text className="text-zinc-400 text-xs font-mono text-center">
-                  💪 Entrenas por tu cuenta hoy
+                  ⚡ Tu entrenamiento personalizado
                 </Text>
                 <Pressable onPress={onPressRoutine} className="mt-2 active:opacity-70">
-                  <View className="flex-row items-center gap-2 bg-blue-500/10 px-4 py-2 rounded-full">
-                    <Dumbbell size={14} color="#3b82f6" />
-                    <Text className="text-blue-400 text-xs font-medium">
-                      Agregar ejercicios detallados
+                  <View className="flex-row items-center gap-2 bg-purple-500/10 px-4 py-2 rounded-full">
+                    <Dumbbell size={14} color="#a855f7" />
+                    <Text className="text-purple-400 text-xs font-medium">
+                      Agregar ejercicios a mi rutina
                     </Text>
                   </View>
                 </Pressable>
