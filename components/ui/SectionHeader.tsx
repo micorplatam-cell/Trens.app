@@ -28,10 +28,7 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
   const alignClass = align === 'center' ? 'items-center' : 'items-start';
 
   return (
-    <Animated.View 
-      entering={FadeInUp.delay(delay).duration(600)}
-      className={`${alignClass} mb-8`}
-    >
+    <Animated.View entering={FadeInUp.delay(delay).duration(600)} className={`${alignClass} mb-8`}>
       {/* Tag with gradient */}
       {tag && (
         <View className="flex-row items-center gap-2 mb-3">
@@ -51,7 +48,7 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
       )}
 
       {/* Title */}
-      <Text 
+      <Text
         className={`text-white text-3xl md:text-4xl font-bold ${align === 'center' ? 'text-center' : 'text-left'} leading-tight`}
         style={{
           textShadowColor: 'rgba(220, 38, 38, 0.3)',
@@ -64,7 +61,7 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
 
       {/* Subtitle */}
       {subtitle && (
-        <Text 
+        <Text
           className={`text-zinc-400 text-base mt-3 ${align === 'center' ? 'text-center' : 'text-left'} max-w-xl leading-relaxed`}
         >
           {subtitle}

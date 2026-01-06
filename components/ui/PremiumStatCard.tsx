@@ -80,10 +80,7 @@ export function PremiumStatCard({
   React.useEffect(() => {
     if (animated) {
       glowOpacity.value = withRepeat(
-        withSequence(
-          withTiming(0.4, { duration: 2000 }),
-          withTiming(0.15, { duration: 2000 })
-        ),
+        withSequence(withTiming(0.4, { duration: 2000 }), withTiming(0.15, { duration: 2000 })),
         -1,
         true
       );
@@ -95,10 +92,7 @@ export function PremiumStatCard({
   }));
 
   return (
-    <Animated.View
-      entering={FadeInUp.delay(delay).duration(500).springify()}
-      className="relative"
-    >
+    <Animated.View entering={FadeInUp.delay(delay).duration(500).springify()} className="relative">
       {/* Glow effect */}
       {animated && (
         <Animated.View
@@ -162,18 +156,13 @@ export function PremiumStatCard({
             {value}
           </Text>
           {unit && (
-            <Text
-              style={{ fontSize: sizeConfig.valueSize * 0.5 }}
-              className="text-zinc-500 ml-1"
-            >
+            <Text style={{ fontSize: sizeConfig.valueSize * 0.5 }} className="text-zinc-500 ml-1">
               {unit}
             </Text>
           )}
         </View>
 
-        {subtext && (
-          <Text className="text-zinc-600 text-xs mt-1">{subtext}</Text>
-        )}
+        {subtext && <Text className="text-zinc-600 text-xs mt-1">{subtext}</Text>}
       </LinearGradient>
     </Animated.View>
   );

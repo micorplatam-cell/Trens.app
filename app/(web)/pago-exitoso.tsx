@@ -56,16 +56,16 @@ const PREMIUM = {
 // ============================================================================
 // GLOW ORB COMPONENT
 // ============================================================================
-const GlowOrb = ({ 
-  color = PREMIUM.success, 
-  size = 300, 
-  top = '20%', 
+const GlowOrb = ({
+  color = PREMIUM.success,
+  size = 300,
+  top = '20%',
   left = '50%',
-  delay = 0 
-}: { 
-  color?: string; 
-  size?: number; 
-  top?: string; 
+  delay = 0,
+}: {
+  color?: string;
+  size?: number;
+  top?: string;
   left?: string;
   delay?: number;
 }) => {
@@ -132,7 +132,10 @@ const ConfettiParticle = ({ delay = 0, left = 50 }: { delay?: number; left?: num
       delay,
       withRepeat(
         withSequence(
-          withTiming(SCREEN_HEIGHT * 0.8, { duration: 4000 + Math.random() * 2000, easing: Easing.in(Easing.quad) }),
+          withTiming(SCREEN_HEIGHT * 0.8, {
+            duration: 4000 + Math.random() * 2000,
+            easing: Easing.in(Easing.quad),
+          }),
           withTiming(-50, { duration: 0 })
         ),
         -1
@@ -141,20 +144,14 @@ const ConfettiParticle = ({ delay = 0, left = 50 }: { delay?: number; left?: num
     translateX.value = withDelay(
       delay,
       withRepeat(
-        withSequence(
-          withTiming(30, { duration: 800 }),
-          withTiming(-30, { duration: 800 })
-        ),
+        withSequence(withTiming(30, { duration: 800 }), withTiming(-30, { duration: 800 })),
         -1,
         true
       )
     );
     rotation.value = withDelay(
       delay,
-      withRepeat(
-        withTiming(360, { duration: 2000, easing: Easing.linear }),
-        -1
-      )
+      withRepeat(withTiming(360, { duration: 2000, easing: Easing.linear }), -1)
     );
     opacity.value = withDelay(
       delay,
@@ -336,15 +333,15 @@ export default function PagoExitosoScreen() {
         <GlowOrb color={PREMIUM.success} size={500} top="5%" left="30%" delay={0} />
         <GlowOrb color={PREMIUM.successDark} size={350} top="60%" left="70%" delay={1000} />
         <GlowOrb color={PREMIUM.fireRed} size={250} top="80%" left="20%" delay={2000} />
-        
+
         {/* Confetti */}
         {[...Array(20)].map((_, i) => (
-          <ConfettiParticle key={i} delay={i * 200} left={5 + (i * 4.5)} />
+          <ConfettiParticle key={i} delay={i * 200} left={5 + i * 4.5} />
         ))}
       </View>
 
       {/* Grid Pattern */}
-      <View 
+      <View
         style={{
           position: 'absolute',
           top: 0,
@@ -352,9 +349,10 @@ export default function PagoExitosoScreen() {
           right: 0,
           bottom: 0,
           opacity: 0.02,
-          backgroundImage: Platform.OS === 'web' 
-            ? 'linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)'
-            : undefined,
+          backgroundImage:
+            Platform.OS === 'web'
+              ? 'linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)'
+              : undefined,
           backgroundSize: Platform.OS === 'web' ? '40px 40px' : undefined,
         }}
       />
@@ -396,8 +394,11 @@ export default function PagoExitosoScreen() {
         </Animated.View>
 
         {/* Success Text */}
-        <Animated.View entering={FadeInDown.delay(300).duration(600)} className="items-center mb-10">
-          <Text 
+        <Animated.View
+          entering={FadeInDown.delay(300).duration(600)}
+          className="items-center mb-10"
+        >
+          <Text
             className="text-white text-4xl font-bold text-center mb-3"
             style={{
               textShadowColor: PREMIUM.glowGreen,
@@ -417,10 +418,7 @@ export default function PagoExitosoScreen() {
         </Animated.View>
 
         {/* Install Card */}
-        <Animated.View
-          entering={FadeInUp.delay(500).duration(700)}
-          className="w-full max-w-md"
-        >
+        <Animated.View entering={FadeInUp.delay(500).duration(700)} className="w-full max-w-md">
           <View className="relative">
             {/* Card glow */}
             <View
@@ -436,7 +434,7 @@ export default function PagoExitosoScreen() {
               }}
               className="blur-3xl"
             />
-            
+
             <View className="bg-zinc-900/60 backdrop-blur-xl border border-zinc-800/50 rounded-[32px] p-8 overflow-hidden">
               {/* Inner gradient */}
               <LinearGradient
@@ -462,9 +460,7 @@ export default function PagoExitosoScreen() {
                 </Animated.View>
               </View>
 
-              <Text className="text-white text-2xl font-bold text-center mb-2">
-                Instala la app
-              </Text>
+              <Text className="text-white text-2xl font-bold text-center mb-2">Instala la app</Text>
               <Text className="text-zinc-400 text-center mb-8">
                 Para acceder a tu cuenta, necesitas instalar TRENS en tu dispositivo
               </Text>
@@ -525,7 +521,12 @@ export default function PagoExitosoScreen() {
                     </View>
 
                     {instructions.steps.map((step, index) => (
-                      <InstructionStep key={index} number={index + 1} text={step} delay={600 + index * 100} />
+                      <InstructionStep
+                        key={index}
+                        number={index + 1}
+                        text={step}
+                        delay={600 + index * 100}
+                      />
                     ))}
                   </View>
 
@@ -584,7 +585,7 @@ export default function PagoExitosoScreen() {
             >
               <Dumbbell size={20} color="white" />
             </LinearGradient>
-            <Text 
+            <Text
               className="text-white text-xl font-bold"
               style={{
                 textShadowColor: 'rgba(220, 38, 38, 0.3)',
@@ -595,7 +596,9 @@ export default function PagoExitosoScreen() {
               TRENS
             </Text>
           </View>
-          <Text className="text-zinc-600 text-xs mt-2 tracking-widest">HIGH PERFORMANCE FITNESS</Text>
+          <Text className="text-zinc-600 text-xs mt-2 tracking-widest">
+            HIGH PERFORMANCE FITNESS
+          </Text>
         </Animated.View>
       </View>
     </ScrollView>

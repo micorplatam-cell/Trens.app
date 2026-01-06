@@ -1,8 +1,27 @@
 import { View, Text, ScrollView, TouchableOpacity, Linking } from 'react-native';
 import { useRouter, Link } from 'expo-router';
-import { ArrowLeft, Mail, Globe, MapPin, Shield, Dumbbell, MessageCircle, Clock, ChevronRight, Flame } from 'lucide-react-native';
+import {
+  ArrowLeft,
+  Mail,
+  Globe,
+  MapPin,
+  Shield,
+  Dumbbell,
+  MessageCircle,
+  Clock,
+  ChevronRight,
+  Flame,
+} from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import Animated, { FadeInDown, FadeInUp, useSharedValue, useAnimatedStyle, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
+import Animated, {
+  FadeInDown,
+  FadeInUp,
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import React from 'react';
 
@@ -57,20 +76,17 @@ const ContactCard = ({ icon, title, subtitle, onPress, delay }: ContactCardProps
 export default function ContactScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  
+
   const pulseScale = useSharedValue(1);
-  
+
   React.useEffect(() => {
     pulseScale.value = withRepeat(
-      withSequence(
-        withTiming(1.1, { duration: 1500 }),
-        withTiming(1, { duration: 1500 })
-      ),
+      withSequence(withTiming(1.1, { duration: 1500 }), withTiming(1, { duration: 1500 })),
       -1,
       true
     );
   }, []);
-  
+
   const pulseStyle = useAnimatedStyle(() => ({
     transform: [{ scale: pulseScale.value }],
   }));
@@ -201,10 +217,10 @@ export default function ContactScreen() {
               <Text className="text-white text-lg font-bold ml-2">Sobre TRENS</Text>
             </View>
             <Text className="text-zinc-400 text-base leading-7">
-              TRENS es una aplicación de fitness diseñada para atletas y entusiastas del entrenamiento
-              de alto rendimiento. Nuestra misión es proporcionar herramientas profesionales para el
-              seguimiento del progreso, planes de entrenamiento personalizados y conexión con coaches
-              certificados.
+              TRENS es una aplicación de fitness diseñada para atletas y entusiastas del
+              entrenamiento de alto rendimiento. Nuestra misión es proporcionar herramientas
+              profesionales para el seguimiento del progreso, planes de entrenamiento personalizados
+              y conexión con coaches certificados.
             </Text>
           </View>
         </Animated.View>
@@ -213,13 +229,17 @@ export default function ContactScreen() {
         <Animated.View entering={FadeInUp.delay(150).duration(400)} className="mb-6">
           <View className="flex-row items-center gap-2 bg-green-950/30 border border-green-500/20 rounded-full px-4 py-2 self-start">
             <Clock size={14} color={PREMIUM.dragonGreen} />
-            <Text className="text-green-400 text-sm font-medium">Respondemos en menos de 24 horas</Text>
+            <Text className="text-green-400 text-sm font-medium">
+              Respondemos en menos de 24 horas
+            </Text>
           </View>
         </Animated.View>
 
         {/* Contact Methods */}
         <Animated.View entering={FadeInUp.delay(200).duration(400)} className="mb-2">
-          <Text className="text-zinc-500 text-xs font-bold uppercase tracking-wider mb-4">Contáctanos</Text>
+          <Text className="text-zinc-500 text-xs font-bold uppercase tracking-wider mb-4">
+            Contáctanos
+          </Text>
         </Animated.View>
 
         <ContactCard
@@ -262,7 +282,10 @@ export default function ContactScreen() {
         </Animated.View>
 
         {/* Legal Links */}
-        <Animated.View entering={FadeInUp.delay(450).duration(400)} className="flex-row justify-center gap-8 mb-8">
+        <Animated.View
+          entering={FadeInUp.delay(450).duration(400)}
+          className="flex-row justify-center gap-8 mb-8"
+        >
           <Link href={'/privacy' as any} asChild>
             <TouchableOpacity className="px-4 py-2">
               <Text className="text-zinc-400 text-sm font-medium">Privacidad</Text>
@@ -277,7 +300,10 @@ export default function ContactScreen() {
         </Animated.View>
 
         {/* Footer */}
-        <Animated.View entering={FadeInUp.delay(500).duration(400)} className="py-8 border-t border-zinc-800/50">
+        <Animated.View
+          entering={FadeInUp.delay(500).duration(400)}
+          className="py-8 border-t border-zinc-800/50"
+        >
           <Text className="text-zinc-600 text-xs text-center">
             © 2026 TRENS - Todos los derechos reservados
           </Text>

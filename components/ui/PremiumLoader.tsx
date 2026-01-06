@@ -48,11 +48,7 @@ export function PremiumLoader({
         -1,
         true
       );
-      glowOpacity.value = withRepeat(
-        withTiming(0.6, { duration: 600 }),
-        -1,
-        true
-      );
+      glowOpacity.value = withRepeat(withTiming(0.6, { duration: 600 }), -1, true);
     } else if (variant === 'pulse') {
       // Pulse animation
       scaleValue.value = withRepeat(
@@ -71,10 +67,7 @@ export function PremiumLoader({
   }, [variant]);
 
   const iconStyle = useAnimatedStyle(() => ({
-    transform: [
-      { scale: scaleValue.value },
-      { rotate: `${rotateValue.value}deg` },
-    ],
+    transform: [{ scale: scaleValue.value }, { rotate: `${rotateValue.value}deg` }],
   }));
 
   const glowStyle = useAnimatedStyle(() => ({
@@ -93,10 +86,7 @@ export function PremiumLoader({
   };
 
   return (
-    <Animated.View
-      entering={FadeIn.duration(300)}
-      className="items-center justify-center py-10"
-    >
+    <Animated.View entering={FadeIn.duration(300)} className="items-center justify-center py-10">
       {/* Glow */}
       <Animated.View
         style={[
@@ -121,17 +111,12 @@ export function PremiumLoader({
         }}
         className="bg-zinc-900/80 border border-zinc-800/50 items-center justify-center mb-4"
       >
-        <Animated.View style={iconStyle}>
-          {getIcon()}
-        </Animated.View>
+        <Animated.View style={iconStyle}>{getIcon()}</Animated.View>
       </View>
 
       {/* Text */}
       {text && (
-        <Text
-          style={{ fontSize: config.text }}
-          className="text-zinc-500 font-medium"
-        >
+        <Text style={{ fontSize: config.text }} className="text-zinc-500 font-medium">
           {text}
         </Text>
       )}

@@ -97,23 +97,23 @@ const PREMIUM_COLORS = {
   blackPure: '#000000',
   blackSoft: '#0A0A0A',
   blackCard: '#0D0D0D',
-  
+
   // Fire Gradient
   fireRed: '#DC2626',
   fireOrange: '#F97316',
   fireYellow: '#FBBF24',
   fireEmber: '#EF4444',
-  
+
   // Glow Effects
   glowRed: 'rgba(220, 38, 38, 0.6)',
   glowOrange: 'rgba(249, 115, 22, 0.5)',
   glowSoft: 'rgba(220, 38, 38, 0.2)',
-  
+
   // Glass
   glassBorder: 'rgba(255, 255, 255, 0.08)',
   glassBackground: 'rgba(255, 255, 255, 0.03)',
   glassBorderHover: 'rgba(220, 38, 38, 0.3)',
-  
+
   // Text
   textPrimary: '#FFFFFF',
   textSecondary: '#A1A1AA',
@@ -136,7 +136,10 @@ const FloatingParticle = ({ delay = 0, left = 50 }: { delay?: number; left?: num
       delay,
       withRepeat(
         withSequence(
-          withTiming(-SCREEN_HEIGHT * 0.8, { duration: 8000 + Math.random() * 4000, easing: Easing.linear }),
+          withTiming(-SCREEN_HEIGHT * 0.8, {
+            duration: 8000 + Math.random() * 4000,
+            easing: Easing.linear,
+          }),
           withTiming(0, { duration: 0 })
         ),
         -1
@@ -206,16 +209,16 @@ const FloatingParticle = ({ delay = 0, left = 50 }: { delay?: number; left?: num
 // ============================================================================
 // PREMIUM GLOW ORB (Ambient Light Effect)
 // ============================================================================
-const GlowOrb = ({ 
-  color = PREMIUM_COLORS.fireRed, 
-  size = 400, 
-  top = '20%', 
+const GlowOrb = ({
+  color = PREMIUM_COLORS.fireRed,
+  size = 400,
+  top = '20%',
   left = '50%',
-  delay = 0 
-}: { 
-  color?: string; 
-  size?: number; 
-  top?: string; 
+  delay = 0,
+}: {
+  color?: string;
+  size?: number;
+  top?: string;
   left?: string;
   delay?: number;
 }) => {
@@ -266,12 +269,15 @@ const GlowOrb = ({
       className="blur-3xl"
     >
       <Animated.View
-        style={[{
-          width: size,
-          height: size,
-          borderRadius: size / 2,
-          backgroundColor: color,
-        }, orbStyle]}
+        style={[
+          {
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            backgroundColor: color,
+          },
+          orbStyle,
+        ]}
       />
     </View>
   );
@@ -295,7 +301,7 @@ const PremiumFeatureCard = ({
 }) => {
   const borderOpacity = useSharedValue(0.1);
   const glowOpacity = useSharedValue(0);
-  
+
   useEffect(() => {
     // Subtle border animation
     borderOpacity.value = withDelay(
@@ -338,7 +344,7 @@ const PremiumFeatureCard = ({
             borderRadius: 24,
           }}
         />
-        
+
         {/* Icon with glow */}
         <View className="relative mb-5">
           <LinearGradient
@@ -357,7 +363,7 @@ const PremiumFeatureCard = ({
             <Icon size={28} color="white" strokeWidth={2} />
           </LinearGradient>
         </View>
-        
+
         <Text className="text-white font-bold text-xl mb-3 tracking-tight">{title}</Text>
         <Text className="text-zinc-400 text-base leading-relaxed">{description}</Text>
       </Animated.View>
@@ -369,7 +375,7 @@ const PremiumFeatureCard = ({
 // PRICING FEATURE ROW WITH ANIMATION
 // ============================================================================
 const PricingFeature = ({ text, delay = 0 }: { text: string; delay?: number }) => (
-  <Animated.View 
+  <Animated.View
     entering={FadeInLeft.delay(delay).duration(500)}
     className="flex-row items-center gap-3 py-3"
   >
@@ -407,10 +413,7 @@ const AnimatedLogo = () => {
       true
     );
     glowOpacity.value = withRepeat(
-      withSequence(
-        withTiming(0.8, { duration: 2000 }),
-        withTiming(0.4, { duration: 2000 })
-      ),
+      withSequence(withTiming(0.8, { duration: 2000 }), withTiming(0.4, { duration: 2000 })),
       -1,
       true
     );
@@ -430,7 +433,7 @@ const AnimatedLogo = () => {
     <View className="items-center justify-center relative">
       {/* Outer glow */}
       <Animated.View style={glowStyle} className="blur-2xl" />
-      
+
       {/* Main logo container */}
       <LinearGradient
         colors={[PREMIUM_COLORS.fireRed, '#B91C1C']}
@@ -454,23 +457,24 @@ const AnimatedLogo = () => {
 // ============================================================================
 // STAT COUNTER COMPONENT
 // ============================================================================
-const StatCounter = ({ 
-  value, 
-  label, 
+const StatCounter = ({
+  value,
+  label,
   suffix = '',
-  delay = 0 
-}: { 
-  value: string; 
-  label: string; 
+  delay = 0,
+}: {
+  value: string;
+  label: string;
   suffix?: string;
   delay?: number;
 }) => (
-  <Animated.View 
+  <Animated.View
     entering={ZoomIn.delay(delay).duration(600).springify()}
     className="items-center px-6"
   >
     <Text className="text-white text-4xl md:text-5xl font-bold">
-      {value}<Text className="text-red-500">{suffix}</Text>
+      {value}
+      <Text className="text-red-500">{suffix}</Text>
     </Text>
     <Text className="text-zinc-500 text-sm uppercase tracking-widest mt-2">{label}</Text>
   </Animated.View>
@@ -496,7 +500,12 @@ const TestimonialCard = ({
   >
     <View className="flex-row items-center mb-4">
       {[1, 2, 3, 4, 5].map((i) => (
-        <Star key={i} size={16} color={PREMIUM_COLORS.fireYellow} fill={PREMIUM_COLORS.fireYellow} />
+        <Star
+          key={i}
+          size={16}
+          color={PREMIUM_COLORS.fireYellow}
+          fill={PREMIUM_COLORS.fireYellow}
+        />
       ))}
     </View>
     <Text className="text-zinc-300 text-base leading-relaxed mb-4 italic">"{text}"</Text>
@@ -740,14 +749,10 @@ export default function LandingPage() {
         <GlowOrb color={PREMIUM_COLORS.fireRed} size={600} top="10%" left="30%" delay={0} />
         <GlowOrb color={PREMIUM_COLORS.fireOrange} size={400} top="60%" left="70%" delay={1000} />
         <GlowOrb color="#B91C1C" size={300} top="80%" left="20%" delay={2000} />
-        
+
         {/* Floating Particles */}
         {[...Array(20)].map((_, i) => (
-          <FloatingParticle 
-            key={i} 
-            delay={i * 400} 
-            left={5 + (i * 4.5)} 
-          />
+          <FloatingParticle key={i} delay={i * 400} left={5 + i * 4.5} />
         ))}
 
         {/* Main gradient overlay */}
@@ -765,7 +770,7 @@ export default function LandingPage() {
         />
 
         {/* Grid Pattern Overlay */}
-        <View 
+        <View
           style={{
             position: 'absolute',
             top: 0,
@@ -773,16 +778,17 @@ export default function LandingPage() {
             right: 0,
             bottom: 0,
             opacity: 0.03,
-            backgroundImage: Platform.OS === 'web' 
-              ? 'linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)'
-              : undefined,
+            backgroundImage:
+              Platform.OS === 'web'
+                ? 'linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)'
+                : undefined,
             backgroundSize: Platform.OS === 'web' ? '50px 50px' : undefined,
           }}
         />
 
         {/* Logo with Animation */}
-        <Animated.View 
-          entering={ZoomIn.duration(1000).springify()} 
+        <Animated.View
+          entering={ZoomIn.duration(1000).springify()}
           style={floatStyle}
           className="mb-10"
         >
@@ -791,7 +797,7 @@ export default function LandingPage() {
 
         {/* Brand Name */}
         <Animated.View entering={FadeInDown.delay(300).duration(800)} className="items-center mb-4">
-          <Text 
+          <Text
             className="text-white text-6xl md:text-7xl font-bold tracking-tight"
             style={{
               textShadowColor: PREMIUM_COLORS.fireRed,
@@ -804,10 +810,7 @@ export default function LandingPage() {
         </Animated.View>
 
         {/* Tagline */}
-        <Animated.View
-          entering={FadeInDown.delay(500).duration(800)}
-          className="items-center mb-6"
-        >
+        <Animated.View entering={FadeInDown.delay(500).duration(800)} className="items-center mb-6">
           <LinearGradient
             colors={[PREMIUM_COLORS.fireRed, PREMIUM_COLORS.fireOrange, PREMIUM_COLORS.fireYellow]}
             start={{ x: 0, y: 0 }}
@@ -830,21 +833,14 @@ export default function LandingPage() {
             <Text style={{ color: PREMIUM_COLORS.fireRed }}>atleta profesional</Text>
           </Text>
           <Text className="text-zinc-400 text-lg md:text-xl text-center mt-6 max-w-2xl leading-relaxed">
-            Graba tus ejercicios, trackea tu progreso, registra tus récords personales 
-            y transforma tu cuerpo con tecnología de élite.
+            Graba tus ejercicios, trackea tu progreso, registra tus récords personales y transforma
+            tu cuerpo con tecnología de élite.
           </Text>
         </Animated.View>
 
         {/* CTA Button with Glow */}
-        <Animated.View 
-          entering={FadeInUp.delay(900).duration(800)}
-          style={pulseStyle}
-        >
-          <TouchableOpacity
-            onPress={scrollToPricing}
-            activeOpacity={0.9}
-            className="relative"
-          >
+        <Animated.View entering={FadeInUp.delay(900).duration(800)} style={pulseStyle}>
+          <TouchableOpacity onPress={scrollToPricing} activeOpacity={0.9} className="relative">
             {/* Button glow */}
             <View
               style={{
@@ -880,10 +876,7 @@ export default function LandingPage() {
         </Animated.View>
 
         {/* Price Badge */}
-        <Animated.View 
-          entering={FadeInUp.delay(1100).duration(800)} 
-          className="mt-8"
-        >
+        <Animated.View entering={FadeInUp.delay(1100).duration(800)} className="mt-8">
           <View className="flex-row items-center gap-2 bg-zinc-900/60 backdrop-blur-xl border border-zinc-800 px-6 py-3 rounded-full">
             <Crown size={18} color={PREMIUM_COLORS.fireYellow} />
             <Text className="text-zinc-400">
@@ -894,18 +887,21 @@ export default function LandingPage() {
         </Animated.View>
 
         {/* Scroll Indicator */}
-        <Animated.View 
-          entering={FadeInUp.delay(1300).duration(800)}
-          className="absolute bottom-10"
-        >
+        <Animated.View entering={FadeInUp.delay(1300).duration(800)} className="absolute bottom-10">
           <View className="items-center">
-            <Text className="text-zinc-600 text-xs uppercase tracking-widest mb-2">Descubre más</Text>
+            <Text className="text-zinc-600 text-xs uppercase tracking-widest mb-2">
+              Descubre más
+            </Text>
             <Animated.View
               style={{
                 ...floatStyle,
               }}
             >
-              <ChevronRight size={24} color="#52525B" style={{ transform: [{ rotate: '90deg' }] }} />
+              <ChevronRight
+                size={24}
+                color="#52525B"
+                style={{ transform: [{ rotate: '90deg' }] }}
+              />
             </Animated.View>
           </View>
         </Animated.View>
@@ -915,7 +911,7 @@ export default function LandingPage() {
       {/* STATS SECTION */}
       {/* ================================================================== */}
       <View className="px-6 py-16 bg-zinc-950/50">
-        <View 
+        <View
           className="flex-row flex-wrap justify-center items-center gap-8 md:gap-16"
           style={{ maxWidth: 1000, alignSelf: 'center' }}
         >
@@ -1028,8 +1024,8 @@ export default function LandingPage() {
           </Text>
         </Animated.View>
 
-        <ScrollView 
-          horizontal 
+        <ScrollView
+          horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={{ paddingHorizontal: 20, gap: 20 }}
         >
@@ -1066,8 +1062,11 @@ export default function LandingPage() {
       <View id="pricing-section" className="px-6 py-24 bg-black relative overflow-hidden">
         {/* Background Effects */}
         <GlowOrb color={PREMIUM_COLORS.fireRed} size={500} top="50%" left="50%" delay={0} />
-        
-        <Animated.View entering={FadeInUp.duration(600)} className="items-center mb-16 relative z-10">
+
+        <Animated.View
+          entering={FadeInUp.duration(600)}
+          className="items-center mb-16 relative z-10"
+        >
           <View className="flex-row items-center gap-3 mb-4">
             <Crown size={20} color={PREMIUM_COLORS.fireYellow} />
             <Text className="text-red-500 font-mono text-sm tracking-[0.3em] uppercase">
@@ -1075,8 +1074,7 @@ export default function LandingPage() {
             </Text>
           </View>
           <Text className="text-white text-4xl md:text-5xl font-bold text-center">
-            Un solo plan,{' '}
-            <Text style={{ color: PREMIUM_COLORS.fireRed }}>todo incluido</Text>
+            Un solo plan, <Text style={{ color: PREMIUM_COLORS.fireRed }}>todo incluido</Text>
           </Text>
         </Animated.View>
 
@@ -1085,7 +1083,7 @@ export default function LandingPage() {
           style={{ maxWidth: 1100, alignSelf: 'center' }}
         >
           {/* Plan Card - Premium Design */}
-          <Animated.View 
+          <Animated.View
             entering={SlideInLeft.delay(200).duration(800).springify()}
             className="flex-1 min-w-[340px] max-w-[420px]"
           >
@@ -1104,7 +1102,7 @@ export default function LandingPage() {
                 }}
                 className="blur-3xl"
               />
-              
+
               <LinearGradient
                 colors={['#1a0808', '#0d0d0d']}
                 className="rounded-[32px] p-8 border-2 border-red-600/50 relative overflow-hidden"
@@ -1144,9 +1142,9 @@ export default function LandingPage() {
                 <View className="flex-row items-baseline mb-2">
                   <Text className="text-zinc-500 text-xl line-through mr-3">S/ 99.90</Text>
                 </View>
-                
+
                 <View className="flex-row items-baseline mb-8">
-                  <Text 
+                  <Text
                     className="text-white text-6xl font-bold"
                     style={{
                       textShadowColor: PREMIUM_COLORS.glowRed,
@@ -1182,7 +1180,7 @@ export default function LandingPage() {
           </Animated.View>
 
           {/* Form Card - Premium Design */}
-          <Animated.View 
+          <Animated.View
             entering={SlideInRight.delay(400).duration(800).springify()}
             className="flex-1 min-w-[340px] max-w-[480px]"
           >
@@ -1215,16 +1213,16 @@ export default function LandingPage() {
 
               {/* Step indicator */}
               <View className="flex-row items-center gap-2 mb-6">
-                <View 
+                <View
                   className={`flex-1 h-1 rounded-full ${step === 'info' ? 'bg-red-600' : 'bg-zinc-700'}`}
                 />
-                <View 
+                <View
                   className={`flex-1 h-1 rounded-full ${step === 'payment' ? 'bg-red-600' : 'bg-zinc-700'}`}
                 />
               </View>
 
               {error && (
-                <Animated.View 
+                <Animated.View
                   entering={FadeInDown.duration(300)}
                   className="bg-red-900/30 border border-red-600/50 rounded-2xl p-4 mb-6"
                 >
@@ -1237,7 +1235,9 @@ export default function LandingPage() {
                   <View data-form-type="registration">
                     {/* Name */}
                     <View className="mb-5">
-                      <Text className="text-zinc-400 text-sm mb-2 font-medium">Nombre completo</Text>
+                      <Text className="text-zinc-400 text-sm mb-2 font-medium">
+                        Nombre completo
+                      </Text>
                       <View className="flex-row items-center bg-zinc-800/50 backdrop-blur rounded-2xl px-4 border border-zinc-700/50">
                         <User size={20} color="#71717a" />
                         <TextInput
@@ -1254,7 +1254,9 @@ export default function LandingPage() {
 
                     {/* Email */}
                     <View className="mb-5">
-                      <Text className="text-zinc-400 text-sm mb-2 font-medium">Correo electrónico</Text>
+                      <Text className="text-zinc-400 text-sm mb-2 font-medium">
+                        Correo electrónico
+                      </Text>
                       <View className="flex-row items-center bg-zinc-800/50 backdrop-blur rounded-2xl px-4 border border-zinc-700/50">
                         <Mail size={20} color="#71717a" />
                         <TextInput
@@ -1309,10 +1311,7 @@ export default function LandingPage() {
                   </View>
 
                   {/* Continue Button */}
-                  <TouchableOpacity
-                    onPress={goToPayment}
-                    activeOpacity={0.9}
-                  >
+                  <TouchableOpacity onPress={goToPayment} activeOpacity={0.9}>
                     <LinearGradient
                       colors={[PREMIUM_COLORS.fireRed, '#B91C1C']}
                       start={{ x: 0, y: 0 }}
@@ -1335,7 +1334,9 @@ export default function LandingPage() {
                   <View data-form-type="payment">
                     {/* Card Number */}
                     <View className="mb-5">
-                      <Text className="text-zinc-400 text-sm mb-2 font-medium">Número de tarjeta</Text>
+                      <Text className="text-zinc-400 text-sm mb-2 font-medium">
+                        Número de tarjeta
+                      </Text>
                       <View className="flex-row items-center bg-zinc-800/50 backdrop-blur rounded-2xl px-4 border border-zinc-700/50">
                         <CreditCard size={20} color="#71717a" />
                         <TextInput
@@ -1358,7 +1359,9 @@ export default function LandingPage() {
 
                     {/* Card Holder */}
                     <View className="mb-5">
-                      <Text className="text-zinc-400 text-sm mb-2 font-medium">Nombre en la tarjeta</Text>
+                      <Text className="text-zinc-400 text-sm mb-2 font-medium">
+                        Nombre en la tarjeta
+                      </Text>
                       <View className="flex-row items-center bg-zinc-800/50 backdrop-blur rounded-2xl px-4 border border-zinc-700/50">
                         <User size={20} color="#71717a" />
                         <TextInput
@@ -1425,7 +1428,9 @@ export default function LandingPage() {
                     disabled={loading}
                   >
                     <LinearGradient
-                      colors={loading ? ['#3f3f46', '#27272a'] : [PREMIUM_COLORS.fireRed, '#B91C1C']}
+                      colors={
+                        loading ? ['#3f3f46', '#27272a'] : [PREMIUM_COLORS.fireRed, '#B91C1C']
+                      }
                       start={{ x: 0, y: 0 }}
                       end={{ x: 1, y: 1 }}
                       className="py-5 rounded-2xl flex-row items-center justify-center gap-3"
@@ -1468,11 +1473,8 @@ export default function LandingPage() {
       {/* ================================================================== */}
       <View className="px-6 py-20 bg-zinc-950 relative overflow-hidden">
         <GlowOrb color={PREMIUM_COLORS.fireRed} size={600} top="50%" left="50%" delay={0} />
-        
-        <Animated.View 
-          entering={FadeInUp.duration(800)}
-          className="items-center relative z-10"
-        >
+
+        <Animated.View entering={FadeInUp.duration(800)} className="items-center relative z-10">
           <Flame size={48} color={PREMIUM_COLORS.fireRed} fill={PREMIUM_COLORS.fireRed} />
           <Text className="text-white text-4xl md:text-5xl font-bold text-center mt-6 mb-4">
             ¿Listo para entrenar?
@@ -1480,11 +1482,8 @@ export default function LandingPage() {
           <Text className="text-zinc-400 text-lg text-center mb-8 max-w-xl">
             Únete a miles de atletas que ya transformaron su entrenamiento con TRENS.
           </Text>
-          
-          <TouchableOpacity
-            onPress={scrollToPricing}
-            activeOpacity={0.9}
-          >
+
+          <TouchableOpacity onPress={scrollToPricing} activeOpacity={0.9}>
             <LinearGradient
               colors={[PREMIUM_COLORS.fireRed, '#B91C1C']}
               start={{ x: 0, y: 0 }}
@@ -1508,10 +1507,7 @@ export default function LandingPage() {
       {/* FOOTER - PREMIUM */}
       {/* ================================================================== */}
       <View className="px-6 py-16 bg-black border-t border-zinc-900">
-        <View 
-          className="max-w-5xl self-center w-full"
-          style={{ alignSelf: 'center' }}
-        >
+        <View className="max-w-5xl self-center w-full" style={{ alignSelf: 'center' }}>
           {/* Logo and Social */}
           <View className="items-center mb-12">
             <View className="flex-row items-center gap-3 mb-4">
@@ -1521,7 +1517,7 @@ export default function LandingPage() {
               >
                 <Dumbbell size={24} color="white" />
               </LinearGradient>
-              <Text 
+              <Text
                 className="text-white text-3xl font-bold"
                 style={{
                   textShadowColor: PREMIUM_COLORS.glowSoft,
@@ -1532,9 +1528,7 @@ export default function LandingPage() {
                 TRENS
               </Text>
             </View>
-            <Text className="text-zinc-500 text-sm tracking-widest">
-              HIGH PERFORMANCE FITNESS
-            </Text>
+            <Text className="text-zinc-500 text-sm tracking-widest">HIGH PERFORMANCE FITNESS</Text>
           </View>
 
           {/* Links */}
@@ -1555,9 +1549,7 @@ export default function LandingPage() {
             </Link>
             <Link href="/contact" asChild>
               <TouchableOpacity className="py-2">
-                <Text className="text-zinc-400 hover:text-white transition-colors">
-                  Contacto
-                </Text>
+                <Text className="text-zinc-400 hover:text-white transition-colors">Contacto</Text>
               </TouchableOpacity>
             </Link>
           </View>

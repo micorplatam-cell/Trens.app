@@ -12,7 +12,17 @@ import { Link, useRouter } from 'expo-router';
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
 import * as Haptics from 'expo-haptics';
-import { Shield, Lock, Mail, Eye, EyeOff, Dumbbell, Flame, ArrowRight, Sparkles } from 'lucide-react-native';
+import {
+  Shield,
+  Lock,
+  Mail,
+  Eye,
+  EyeOff,
+  Dumbbell,
+  Flame,
+  ArrowRight,
+  Sparkles,
+} from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
   useSharedValue,
@@ -66,16 +76,16 @@ const WebFormWrapper = React.memo(
 // ============================================================================
 // ANIMATED GLOW ORB
 // ============================================================================
-const GlowOrb = ({ 
-  color = PREMIUM.fireRed, 
-  size = 300, 
-  top = '20%', 
+const GlowOrb = ({
+  color = PREMIUM.fireRed,
+  size = 300,
+  top = '20%',
   left = '50%',
-  delay = 0 
-}: { 
-  color?: string; 
-  size?: number; 
-  top?: string; 
+  delay = 0,
+}: {
+  color?: string;
+  size?: number;
+  top?: string;
   left?: string;
   delay?: number;
 }) => {
@@ -126,12 +136,15 @@ const GlowOrb = ({
       className="blur-3xl"
     >
       <Animated.View
-        style={[{
-          width: size,
-          height: size,
-          borderRadius: size / 2,
-          backgroundColor: color,
-        }, orbStyle]}
+        style={[
+          {
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            backgroundColor: color,
+          },
+          orbStyle,
+        ]}
       />
     </View>
   );
@@ -154,10 +167,7 @@ const AnimatedLogo = () => {
       true
     );
     glowOpacity.value = withRepeat(
-      withSequence(
-        withTiming(0.7, { duration: 2000 }),
-        withTiming(0.3, { duration: 2000 })
-      ),
+      withSequence(withTiming(0.7, { duration: 2000 }), withTiming(0.3, { duration: 2000 })),
       -1,
       true
     );
@@ -288,9 +298,9 @@ export default function LoginScreen() {
         <GlowOrb color={PREMIUM.fireRed} size={500} top="5%" left="30%" delay={0} />
         <GlowOrb color={PREMIUM.fireOrange} size={350} top="70%" left="70%" delay={1000} />
         <GlowOrb color="#B91C1C" size={250} top="90%" left="20%" delay={2000} />
-        
+
         {/* Grid pattern */}
-        <View 
+        <View
           style={{
             position: 'absolute',
             top: 0,
@@ -298,9 +308,10 @@ export default function LoginScreen() {
             right: 0,
             bottom: 0,
             opacity: 0.02,
-            backgroundImage: Platform.OS === 'web' 
-              ? 'linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)'
-              : undefined,
+            backgroundImage:
+              Platform.OS === 'web'
+                ? 'linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)'
+                : undefined,
             backgroundSize: Platform.OS === 'web' ? '40px 40px' : undefined,
           }}
         />
@@ -308,8 +319,8 @@ export default function LoginScreen() {
 
       <View className="flex-1 justify-center px-6 relative z-10">
         {/* Logo with Animation */}
-        <Animated.View 
-          entering={ZoomIn.duration(800).springify()} 
+        <Animated.View
+          entering={ZoomIn.duration(800).springify()}
           style={floatStyle}
           className="items-center mb-8"
         >
@@ -317,11 +328,8 @@ export default function LoginScreen() {
         </Animated.View>
 
         {/* Brand */}
-        <Animated.View 
-          entering={FadeInDown.delay(200).duration(600)} 
-          className="items-center mb-4"
-        >
-          <Text 
+        <Animated.View entering={FadeInDown.delay(200).duration(600)} className="items-center mb-4">
+          <Text
             className="text-white text-5xl font-bold tracking-tight"
             style={{
               textShadowColor: PREMIUM.glowRed,
@@ -334,10 +342,7 @@ export default function LoginScreen() {
         </Animated.View>
 
         {/* Tagline */}
-        <Animated.View 
-          entering={FadeInDown.delay(300).duration(600)} 
-          className="items-center mb-8"
-        >
+        <Animated.View entering={FadeInDown.delay(300).duration(600)} className="items-center mb-8">
           <LinearGradient
             colors={[PREMIUM.fireRed, PREMIUM.fireOrange]}
             start={{ x: 0, y: 0 }}
@@ -351,7 +356,7 @@ export default function LoginScreen() {
         </Animated.View>
 
         {/* Security Badge */}
-        <Animated.View 
+        <Animated.View
           entering={FadeInDown.delay(400).duration(600)}
           className="flex-row items-center justify-center mb-6 py-2 px-4 bg-zinc-900/30 backdrop-blur-xl rounded-full self-center border border-zinc-800/50"
         >
@@ -361,7 +366,7 @@ export default function LoginScreen() {
 
         {/* Error Message */}
         {error && (
-          <Animated.View 
+          <Animated.View
             entering={FadeInDown.duration(300)}
             className="bg-red-900/20 border border-red-600/50 backdrop-blur-xl rounded-2xl p-4 mb-6"
           >
@@ -374,7 +379,9 @@ export default function LoginScreen() {
           <WebFormWrapper onSubmit={handleLogin}>
             {/* Email Input */}
             <View>
-              <Text className="text-zinc-500 text-xs mb-2.5 tracking-[0.2em] font-medium uppercase">Email</Text>
+              <Text className="text-zinc-500 text-xs mb-2.5 tracking-[0.2em] font-medium uppercase">
+                Email
+              </Text>
               <View className="flex-row items-center bg-zinc-900/50 backdrop-blur-xl rounded-2xl px-4 border border-zinc-800/50">
                 <Mail size={18} color="#71717a" />
                 <TextInput
@@ -400,7 +407,9 @@ export default function LoginScreen() {
 
             {/* Password Input */}
             <View>
-              <Text className="text-zinc-500 text-xs mb-2.5 tracking-[0.2em] font-medium uppercase">Contraseña</Text>
+              <Text className="text-zinc-500 text-xs mb-2.5 tracking-[0.2em] font-medium uppercase">
+                Contraseña
+              </Text>
               <View className="flex-row items-center bg-zinc-900/50 backdrop-blur-xl rounded-2xl px-4 border border-zinc-800/50">
                 <Lock size={18} color="#71717a" />
                 <TextInput
@@ -465,7 +474,7 @@ export default function LoginScreen() {
         </Animated.View>
 
         {/* Links */}
-        <Animated.View 
+        <Animated.View
           entering={FadeInUp.delay(700).duration(600)}
           className="mt-8 items-center gap-4"
         >
@@ -479,7 +488,7 @@ export default function LoginScreen() {
         </Animated.View>
 
         {/* Legal Links */}
-        <Animated.View 
+        <Animated.View
           entering={FadeInUp.delay(800).duration(600)}
           className="flex-row justify-center gap-4 mt-6"
         >
@@ -503,7 +512,7 @@ export default function LoginScreen() {
         </Animated.View>
 
         {/* Footer */}
-        <Animated.View 
+        <Animated.View
           entering={FadeInUp.delay(900).duration(600)}
           className="mt-auto pb-6 items-center"
         >
@@ -514,9 +523,7 @@ export default function LoginScreen() {
           <Text className="text-zinc-700 text-xs text-center">
             © 2026 TRENS - High Performance Fitness
           </Text>
-          <Text className="text-zinc-800 text-xs text-center mt-1">
-            soporte@trens.app
-          </Text>
+          <Text className="text-zinc-800 text-xs text-center mt-1">soporte@trens.app</Text>
         </Animated.View>
       </View>
     </KeyboardAvoidingView>

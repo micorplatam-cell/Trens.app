@@ -41,16 +41,16 @@ const FloatingParticle: React.FC<FloatingParticleProps> = ({
       delay,
       withRepeat(
         withSequence(
-          withTiming(-SCREEN_HEIGHT * 0.8, { 
-            duration: 8000 + Math.random() * 4000, 
-            easing: Easing.linear 
+          withTiming(-SCREEN_HEIGHT * 0.8, {
+            duration: 8000 + Math.random() * 4000,
+            easing: Easing.linear,
           }),
           withTiming(0, { duration: 0 })
         ),
         -1
       )
     );
-    
+
     // Horizontal sway
     translateX.value = withDelay(
       delay,
@@ -63,7 +63,7 @@ const FloatingParticle: React.FC<FloatingParticleProps> = ({
         true
       )
     );
-    
+
     // Fade in/out
     opacity.value = withDelay(
       delay,
@@ -76,7 +76,7 @@ const FloatingParticle: React.FC<FloatingParticleProps> = ({
         -1
       )
     );
-    
+
     // Scale pulse
     scale.value = withDelay(
       delay,
@@ -129,7 +129,7 @@ export const FloatingParticles: React.FC<FloatingParticlesProps> = ({
         <FloatingParticle
           key={i}
           delay={i * 400}
-          left={5 + (i * (90 / count))}
+          left={5 + i * (90 / count)}
           color={color}
           size={3 + Math.random() * 3}
         />

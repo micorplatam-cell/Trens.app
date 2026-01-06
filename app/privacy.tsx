@@ -1,6 +1,17 @@
 import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
 import { Link, useRouter } from 'expo-router';
-import { ArrowLeft, Shield, Eye, Lock, UserCheck, Mail, Dumbbell, Database, Key, FileCheck } from 'lucide-react-native';
+import {
+  ArrowLeft,
+  Shield,
+  Eye,
+  Lock,
+  UserCheck,
+  Mail,
+  Dumbbell,
+  Database,
+  Key,
+  FileCheck,
+} from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,10 +32,7 @@ interface SectionProps {
 }
 
 const Section = ({ number, title, icon, children, delay }: SectionProps) => (
-  <Animated.View
-    entering={FadeInUp.delay(delay).duration(500)}
-    className="mb-8"
-  >
+  <Animated.View entering={FadeInUp.delay(delay).duration(500)} className="mb-8">
     <View className="flex-row items-center gap-3 mb-4">
       <LinearGradient
         colors={[PREMIUM.dragonBlue, '#2563EB']}
@@ -126,7 +134,9 @@ export default function PrivacyScreen() {
             </View>
             <View className="flex-1">
               <Text className="text-white font-bold">Datos protegidos con encriptación</Text>
-              <Text className="text-blue-400/70 text-xs mt-0.5">HTTPS/TLS • Almacenamiento seguro • GDPR Compliant</Text>
+              <Text className="text-blue-400/70 text-xs mt-0.5">
+                HTTPS/TLS • Almacenamiento seguro • GDPR Compliant
+              </Text>
             </View>
           </View>
         </Animated.View>
@@ -139,20 +149,26 @@ export default function PrivacyScreen() {
           </View>
         </Animated.View>
 
-        <Section number="01" title="Información que Recopilamos" icon={<Database size={18} color="white" />} delay={150}>
-          TRENS recopila información que nos proporcionas directamente, incluyendo:{'\n\n'}
-          • Información de cuenta (email, nombre){'\n'}
-          • Datos de entrenamiento y progreso{'\n'}
-          • Fotos de progreso (opcional){'\n'}
-          • Preferencias de entrenamiento
+        <Section
+          number="01"
+          title="Información que Recopilamos"
+          icon={<Database size={18} color="white" />}
+          delay={150}
+        >
+          TRENS recopila información que nos proporcionas directamente, incluyendo:{'\n\n'}•
+          Información de cuenta (email, nombre){'\n'}• Datos de entrenamiento y progreso{'\n'}•
+          Fotos de progreso (opcional){'\n'}• Preferencias de entrenamiento
         </Section>
 
-        <Section number="02" title="Uso de la Información" icon={<Eye size={18} color="white" />} delay={200}>
-          Utilizamos tu información para:{'\n\n'}
-          • Proporcionar y mejorar nuestros servicios{'\n'}
-          • Personalizar tu experiencia de entrenamiento{'\n'}
-          • Comunicarnos contigo sobre tu cuenta{'\n'}
-          • Generar insights de progreso
+        <Section
+          number="02"
+          title="Uso de la Información"
+          icon={<Eye size={18} color="white" />}
+          delay={200}
+        >
+          Utilizamos tu información para:{'\n\n'}• Proporcionar y mejorar nuestros servicios{'\n'}•
+          Personalizar tu experiencia de entrenamiento{'\n'}• Comunicarnos contigo sobre tu cuenta
+          {'\n'}• Generar insights de progreso
         </Section>
 
         <Section number="03" title="Seguridad" icon={<Key size={18} color="white" />} delay={250}>
@@ -161,12 +177,15 @@ export default function PrivacyScreen() {
           almacenamiento seguros con certificación SOC 2.
         </Section>
 
-        <Section number="04" title="Tus Derechos" icon={<UserCheck size={18} color="white" />} delay={300}>
-          Tienes derecho a:{'\n\n'}
-          • Acceder a tu información personal{'\n'}
-          • Solicitar la eliminación de tus datos{'\n'}
-          • Exportar tus datos de entrenamiento{'\n'}
-          • Revocar consentimientos otorgados
+        <Section
+          number="04"
+          title="Tus Derechos"
+          icon={<UserCheck size={18} color="white" />}
+          delay={300}
+        >
+          Tienes derecho a:{'\n\n'}• Acceder a tu información personal{'\n'}• Solicitar la
+          eliminación de tus datos{'\n'}• Exportar tus datos de entrenamiento{'\n'}• Revocar
+          consentimientos otorgados
         </Section>
 
         <Section number="05" title="Contacto" icon={<Mail size={18} color="white" />} delay={350}>
@@ -176,7 +195,10 @@ export default function PrivacyScreen() {
         </Section>
 
         {/* Footer */}
-        <Animated.View entering={FadeInUp.delay(400).duration(500)} className="py-10 border-t border-zinc-800/50 mt-6 items-center">
+        <Animated.View
+          entering={FadeInUp.delay(400).duration(500)}
+          className="py-10 border-t border-zinc-800/50 mt-6 items-center"
+        >
           <LinearGradient
             colors={[PREMIUM.fireRed, PREMIUM.fireOrange]}
             className="w-14 h-14 rounded-2xl items-center justify-center mb-4"
@@ -199,7 +221,9 @@ export default function PrivacyScreen() {
           >
             TRENS
           </Text>
-          <Text className="text-zinc-600 text-xs mt-1 tracking-widest">HIGH PERFORMANCE FITNESS</Text>
+          <Text className="text-zinc-600 text-xs mt-1 tracking-widest">
+            HIGH PERFORMANCE FITNESS
+          </Text>
         </Animated.View>
       </ScrollView>
     </View>

@@ -1,7 +1,12 @@
 import React from 'react';
 import { View, Text } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import Animated, { useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from 'react-native-reanimated';
 import { LucideIcon } from 'lucide-react-native';
 
 interface PremiumBadgeProps {
@@ -77,11 +82,7 @@ export function PremiumBadge({
 
   React.useEffect(() => {
     if (animated) {
-      glowOpacity.value = withRepeat(
-        withTiming(0.6, { duration: 1500 }),
-        -1,
-        true
-      );
+      glowOpacity.value = withRepeat(withTiming(0.6, { duration: 1500 }), -1, true);
     }
   }, [animated]);
 

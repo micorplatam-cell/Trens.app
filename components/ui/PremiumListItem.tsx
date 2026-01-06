@@ -41,17 +41,14 @@ export function PremiumListItem({
 
   return (
     <Animated.View entering={FadeInRight.delay(delay).duration(400)}>
-      <Container
-        onPress={onPress}
-        activeOpacity={0.7}
-        className="flex-row items-center py-4 px-4"
-      >
+      <Container onPress={onPress} activeOpacity={0.7} className="flex-row items-center py-4 px-4">
         {/* Icon */}
         {Icon && (
           <View
             className="w-10 h-10 rounded-xl items-center justify-center mr-4"
             style={{
-              backgroundColor: iconBgColor || (danger ? 'rgba(220, 38, 38, 0.15)' : 'rgba(220, 38, 38, 0.1)'),
+              backgroundColor:
+                iconBgColor || (danger ? 'rgba(220, 38, 38, 0.15)' : 'rgba(220, 38, 38, 0.1)'),
             }}
           >
             <Icon size={20} color={danger ? '#EF4444' : iconColor} />
@@ -66,9 +63,7 @@ export function PremiumListItem({
           >
             {title}
           </Text>
-          {subtitle && (
-            <Text className="text-zinc-500 text-sm mt-0.5">{subtitle}</Text>
-          )}
+          {subtitle && <Text className="text-zinc-500 text-sm mt-0.5">{subtitle}</Text>}
         </View>
 
         {/* Right content */}
@@ -85,9 +80,7 @@ export function PremiumListItem({
         )}
 
         {/* Chevron */}
-        {onPress && showChevron && (
-          <ChevronRight size={20} color="#52525B" />
-        )}
+        {onPress && showChevron && <ChevronRight size={20} color="#52525B" />}
       </Container>
 
       {/* Divider */}

@@ -58,10 +58,7 @@ export function PremiumAvatar({
         false
       );
       glowOpacity.value = withRepeat(
-        withSequence(
-          withTiming(0.7, { duration: 1500 }),
-          withTiming(0.3, { duration: 1500 })
-        ),
+        withSequence(withTiming(0.7, { duration: 1500 }), withTiming(0.3, { duration: 1500 })),
         -1,
         true
       );
@@ -157,10 +154,7 @@ export function PremiumAvatar({
             colors={['#3F3F46', '#27272A']}
             className="flex-1 w-full items-center justify-center"
           >
-            <Text
-              style={{ fontSize: config.text }}
-              className="text-white font-bold"
-            >
+            <Text style={{ fontSize: config.text }} className="text-white font-bold">
               {getInitials()}
             </Text>
           </LinearGradient>

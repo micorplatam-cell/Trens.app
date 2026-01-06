@@ -1,6 +1,15 @@
 import { View, Text, ScrollView, TouchableOpacity, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
-import { ArrowLeft, Dumbbell, FileText, Shield, Scale, Heart, Mail, Globe } from 'lucide-react-native';
+import {
+  ArrowLeft,
+  Dumbbell,
+  FileText,
+  Shield,
+  Scale,
+  Heart,
+  Mail,
+  Globe,
+} from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,10 +29,7 @@ interface SectionProps {
 }
 
 const Section = ({ number, title, icon, children, delay }: SectionProps) => (
-  <Animated.View
-    entering={FadeInUp.delay(delay).duration(500)}
-    className="mb-8"
-  >
+  <Animated.View entering={FadeInUp.delay(delay).duration(500)} className="mb-8">
     <View className="flex-row items-center gap-3 mb-4">
       <LinearGradient
         colors={[PREMIUM.fireRed, PREMIUM.fireOrange]}
@@ -109,48 +115,79 @@ export default function TermsScreen() {
           </View>
         </Animated.View>
 
-        <Section number="01" title="Aceptación de los Términos" icon={<FileText size={18} color="white" />} delay={100}>
-          Al acceder y utilizar la aplicación TRENS ("la App"), aceptas estos Términos de
-          Servicio. Si no estás de acuerdo con alguno de estos términos, no debes utilizar la App.
+        <Section
+          number="01"
+          title="Aceptación de los Términos"
+          icon={<FileText size={18} color="white" />}
+          delay={100}
+        >
+          Al acceder y utilizar la aplicación TRENS ("la App"), aceptas estos Términos de Servicio.
+          Si no estás de acuerdo con alguno de estos términos, no debes utilizar la App.
         </Section>
 
-        <Section number="02" title="Descripción del Servicio" icon={<Dumbbell size={18} color="white" />} delay={150}>
-          TRENS es una aplicación de fitness de alto rendimiento que ofrece:{'\n\n'}
-          • Planes de entrenamiento personalizados{'\n'}
-          • Seguimiento de progreso físico{'\n'}
-          • Biblioteca de ejercicios{'\n'}
-          • Herramientas de registro de récords personales{'\n'}
-          • Conexión con coaches certificados
+        <Section
+          number="02"
+          title="Descripción del Servicio"
+          icon={<Dumbbell size={18} color="white" />}
+          delay={150}
+        >
+          TRENS es una aplicación de fitness de alto rendimiento que ofrece:{'\n\n'}• Planes de
+          entrenamiento personalizados{'\n'}• Seguimiento de progreso físico{'\n'}• Biblioteca de
+          ejercicios{'\n'}• Herramientas de registro de récords personales{'\n'}• Conexión con
+          coaches certificados
         </Section>
 
-        <Section number="03" title="Registro de Cuenta" icon={<Shield size={18} color="white" />} delay={200}>
+        <Section
+          number="03"
+          title="Registro de Cuenta"
+          icon={<Shield size={18} color="white" />}
+          delay={200}
+        >
           Para utilizar TRENS, debes crear una cuenta proporcionando información precisa y
-          actualizada. Eres responsable de mantener la confidencialidad de tu contraseña y de
-          todas las actividades que ocurran bajo tu cuenta.
+          actualizada. Eres responsable de mantener la confidencialidad de tu contraseña y de todas
+          las actividades que ocurran bajo tu cuenta.
         </Section>
 
-        <Section number="04" title="Uso Aceptable" icon={<Scale size={18} color="white" />} delay={250}>
-          Te comprometes a:{'\n\n'}
-          • No utilizar la App para fines ilegales{'\n'}
-          • No intentar acceder a cuentas de otros usuarios{'\n'}
-          • No distribuir malware o código malicioso{'\n'}
-          • No interferir con el funcionamiento de la App{'\n'}
-          • No suplantar la identidad de otras personas
+        <Section
+          number="04"
+          title="Uso Aceptable"
+          icon={<Scale size={18} color="white" />}
+          delay={250}
+        >
+          Te comprometes a:{'\n\n'}• No utilizar la App para fines ilegales{'\n'}• No intentar
+          acceder a cuentas de otros usuarios{'\n'}• No distribuir malware o código malicioso{'\n'}•
+          No interferir con el funcionamiento de la App{'\n'}• No suplantar la identidad de otras
+          personas
         </Section>
 
-        <Section number="05" title="Propiedad Intelectual" icon={<FileText size={18} color="white" />} delay={300}>
+        <Section
+          number="05"
+          title="Propiedad Intelectual"
+          icon={<FileText size={18} color="white" />}
+          delay={300}
+        >
           Todo el contenido de TRENS, incluyendo pero no limitado a logos, diseños, textos,
           gráficos, videos, y software, es propiedad de TRENS o sus licenciantes y está protegido
           por leyes de propiedad intelectual.
         </Section>
 
-        <Section number="06" title="Aviso de Salud" icon={<Heart size={18} color="white" />} delay={350}>
-          TRENS proporciona información de fitness con fines educativos. Antes de comenzar
-          cualquier programa de ejercicios, consulta con un profesional de la salud. No somos
-          responsables de lesiones que puedan ocurrir durante el uso de la App.
+        <Section
+          number="06"
+          title="Aviso de Salud"
+          icon={<Heart size={18} color="white" />}
+          delay={350}
+        >
+          TRENS proporciona información de fitness con fines educativos. Antes de comenzar cualquier
+          programa de ejercicios, consulta con un profesional de la salud. No somos responsables de
+          lesiones que puedan ocurrir durante el uso de la App.
         </Section>
 
-        <Section number="07" title="Modificaciones" icon={<FileText size={18} color="white" />} delay={400}>
+        <Section
+          number="07"
+          title="Modificaciones"
+          icon={<FileText size={18} color="white" />}
+          delay={400}
+        >
           Nos reservamos el derecho de modificar estos términos en cualquier momento. Las
           modificaciones entrarán en vigor inmediatamente después de su publicación en la App.
         </Section>
@@ -162,7 +199,10 @@ export default function TermsScreen() {
         </Section>
 
         {/* Footer */}
-        <Animated.View entering={FadeInUp.delay(500).duration(500)} className="py-10 border-t border-zinc-800/50 mt-6 items-center">
+        <Animated.View
+          entering={FadeInUp.delay(500).duration(500)}
+          className="py-10 border-t border-zinc-800/50 mt-6 items-center"
+        >
           <LinearGradient
             colors={[PREMIUM.fireRed, PREMIUM.fireOrange]}
             className="w-14 h-14 rounded-2xl items-center justify-center mb-4"
@@ -185,7 +225,9 @@ export default function TermsScreen() {
           >
             TRENS
           </Text>
-          <Text className="text-zinc-600 text-xs mt-1 tracking-widest">HIGH PERFORMANCE FITNESS</Text>
+          <Text className="text-zinc-600 text-xs mt-1 tracking-widest">
+            HIGH PERFORMANCE FITNESS
+          </Text>
         </Animated.View>
       </ScrollView>
     </View>

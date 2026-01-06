@@ -47,7 +47,7 @@ export const PremiumInput: React.FC<PremiumInputProps> = ({
   };
 
   const borderStyle = useAnimatedStyle(() => ({
-    borderColor: error 
+    borderColor: error
       ? 'rgba(239, 68, 68, 0.5)'
       : `rgba(220, 38, 38, ${borderOpacity.value * 0.5})`,
   }));
@@ -63,7 +63,7 @@ export const PremiumInput: React.FC<PremiumInputProps> = ({
           {label}
         </Text>
       )}
-      
+
       <AnimatedView
         style={[
           borderStyle,
@@ -78,7 +78,7 @@ export const PremiumInput: React.FC<PremiumInputProps> = ({
         className="flex-row items-center bg-zinc-900/50 backdrop-blur-xl rounded-2xl px-4 border border-zinc-800/50"
       >
         {icon && <View className="mr-2">{icon}</View>}
-        
+
         <TextInput
           {...props}
           secureTextEntry={isPassword && !showPassword}
@@ -93,7 +93,7 @@ export const PremiumInput: React.FC<PremiumInputProps> = ({
           placeholderTextColor="#52525b"
           className="flex-1 text-white py-4 text-base"
         />
-        
+
         {isPassword && (
           <TouchableOpacity onPress={() => setShowPassword(!showPassword)} className="p-2">
             {showPassword ? (
@@ -104,10 +104,8 @@ export const PremiumInput: React.FC<PremiumInputProps> = ({
           </TouchableOpacity>
         )}
       </AnimatedView>
-      
-      {error && (
-        <Text className="text-red-400 text-xs mt-2 ml-1">{error}</Text>
-      )}
+
+      {error && <Text className="text-red-400 text-xs mt-2 ml-1">{error}</Text>}
     </View>
   );
 };

@@ -46,7 +46,8 @@ export function PremiumModal({
     }
   };
 
-  const entering = animation === 'zoom' ? ZoomIn.duration(300).springify() : SlideInUp.duration(400);
+  const entering =
+    animation === 'zoom' ? ZoomIn.duration(300).springify() : SlideInUp.duration(400);
 
   return (
     <Modal transparent visible={visible} animationType="none" onRequestClose={onClose}>
@@ -57,18 +58,10 @@ export function PremiumModal({
         style={{ backgroundColor: 'rgba(0,0,0,0.85)' }}
       >
         {/* Backdrop press */}
-        <TouchableOpacity
-          activeOpacity={1}
-          onPress={onClose}
-          className="absolute inset-0"
-        />
+        <TouchableOpacity activeOpacity={1} onPress={onClose} className="absolute inset-0" />
 
         {/* Modal Content */}
-        <Animated.View
-          entering={entering}
-          style={{ width: getWidth() }}
-          className="relative"
-        >
+        <Animated.View entering={entering} style={{ width: getWidth() }} className="relative">
           {/* Glow effect */}
           <View
             style={{
@@ -131,9 +124,7 @@ export function PremiumModal({
                     {title}
                   </Text>
                 )}
-                {subtitle && (
-                  <Text className="text-zinc-400 text-sm mt-1">{subtitle}</Text>
-                )}
+                {subtitle && <Text className="text-zinc-400 text-sm mt-1">{subtitle}</Text>}
               </View>
             )}
 

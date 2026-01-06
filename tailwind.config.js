@@ -112,27 +112,27 @@ module.exports = {
       // Premium Animations
       animation: {
         'pulse-glow': 'pulse-glow 2s ease-in-out infinite',
-        'float': 'float 3s ease-in-out infinite',
-        'shimmer': 'shimmer 2s linear infinite',
+        float: 'float 3s ease-in-out infinite',
+        shimmer: 'shimmer 2s linear infinite',
         'gradient-shift': 'gradient-shift 15s ease infinite',
-        'glow': 'glow-pulse 2s ease-in-out infinite',
+        glow: 'glow-pulse 2s ease-in-out infinite',
       },
       keyframes: {
         'pulse-glow': {
-          '0%, 100%': { 
+          '0%, 100%': {
             boxShadow: '0 0 20px rgba(220, 38, 38, 0.4)',
             transform: 'scale(1)',
           },
-          '50%': { 
+          '50%': {
             boxShadow: '0 0 40px rgba(220, 38, 38, 0.6)',
             transform: 'scale(1.02)',
           },
         },
-        'float': {
+        float: {
           '0%, 100%': { transform: 'translateY(0)' },
           '50%': { transform: 'translateY(-10px)' },
         },
-        'shimmer': {
+        shimmer: {
           '0%': { left: '-100%' },
           '100%': { left: '100%' },
         },
@@ -147,11 +147,11 @@ module.exports = {
       },
       // Premium transitions
       transitionDuration: {
-        '400': '400ms',
-        '600': '600ms',
+        400: '400ms',
+        600: '600ms',
       },
       transitionTimingFunction: {
-        'premium': 'cubic-bezier(0.4, 0, 0.2, 1)',
+        premium: 'cubic-bezier(0.4, 0, 0.2, 1)',
         'bounce-in': 'cubic-bezier(0.68, -0.55, 0.265, 1.55)',
       },
     },

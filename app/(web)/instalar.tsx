@@ -79,15 +79,7 @@ const GlowOrb = ({
 };
 
 // Animated step component
-const InstallStep = ({
-  number,
-  text,
-  delay,
-}: {
-  number: number;
-  text: string;
-  delay: number;
-}) => (
+const InstallStep = ({ number, text, delay }: { number: number; text: string; delay: number }) => (
   <Animated.View
     entering={FadeInUp.delay(delay).duration(400)}
     className="flex-row items-start gap-4 mb-5"
@@ -207,7 +199,7 @@ export default function InstalarScreen() {
       </View>
 
       {/* Grid Pattern */}
-      <View 
+      <View
         style={{
           position: 'absolute',
           top: 0,
@@ -215,9 +207,10 @@ export default function InstalarScreen() {
           right: 0,
           bottom: 0,
           opacity: 0.02,
-          backgroundImage: Platform.OS === 'web' 
-            ? 'linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)'
-            : undefined,
+          backgroundImage:
+            Platform.OS === 'web'
+              ? 'linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)'
+              : undefined,
           backgroundSize: Platform.OS === 'web' ? '40px 40px' : undefined,
         }}
       />
@@ -258,8 +251,11 @@ export default function InstalarScreen() {
         </Animated.View>
 
         {/* Warning Text */}
-        <Animated.View entering={FadeInDown.delay(200).duration(500)} className="items-center mb-10">
-          <Text 
+        <Animated.View
+          entering={FadeInDown.delay(200).duration(500)}
+          className="items-center mb-10"
+        >
+          <Text
             className="text-white text-3xl font-bold text-center mb-3"
             style={{
               textShadowColor: 'rgba(249, 115, 22, 0.4)',
@@ -275,10 +271,7 @@ export default function InstalarScreen() {
         </Animated.View>
 
         {/* Install Card */}
-        <Animated.View
-          entering={FadeInUp.delay(400).duration(600)}
-          className="w-full max-w-md"
-        >
+        <Animated.View entering={FadeInUp.delay(400).duration(600)} className="w-full max-w-md">
           <View className="relative">
             {/* Card glow */}
             <View
@@ -294,7 +287,7 @@ export default function InstalarScreen() {
               }}
               className="blur-3xl"
             />
-            
+
             <View className="bg-zinc-900/60 backdrop-blur-xl border border-zinc-800/50 rounded-[32px] p-8 overflow-hidden">
               {/* Inner gradient */}
               <LinearGradient
@@ -320,9 +313,7 @@ export default function InstalarScreen() {
                 </Animated.View>
               </View>
 
-              <Text className="text-white text-2xl font-bold text-center mb-2">
-                Instala TRENS
-              </Text>
+              <Text className="text-white text-2xl font-bold text-center mb-2">Instala TRENS</Text>
               <Text className="text-zinc-400 text-center mb-8">
                 Sigue estos pasos para acceder a la app
               </Text>
@@ -383,7 +374,12 @@ export default function InstalarScreen() {
                     </View>
 
                     {instructions.steps.map((step, index) => (
-                      <InstallStep key={index} number={index + 1} text={step} delay={500 + index * 100} />
+                      <InstallStep
+                        key={index}
+                        number={index + 1}
+                        text={step}
+                        delay={500 + index * 100}
+                      />
                     ))}
                   </View>
                 </View>
@@ -448,7 +444,7 @@ export default function InstalarScreen() {
             >
               <Dumbbell size={20} color="white" />
             </LinearGradient>
-            <Text 
+            <Text
               className="text-white text-xl font-bold"
               style={{
                 textShadowColor: 'rgba(220, 38, 38, 0.3)',
@@ -459,7 +455,9 @@ export default function InstalarScreen() {
               TRENS
             </Text>
           </View>
-          <Text className="text-zinc-600 text-xs mt-2 tracking-widest">HIGH PERFORMANCE FITNESS</Text>
+          <Text className="text-zinc-600 text-xs mt-2 tracking-widest">
+            HIGH PERFORMANCE FITNESS
+          </Text>
         </Animated.View>
       </View>
     </ScrollView>

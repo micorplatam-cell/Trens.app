@@ -87,7 +87,7 @@
   .blur-2xl {
     filter: blur(40px);
   }
-  
+
   .blur-3xl {
     filter: blur(64px);
   }
@@ -120,14 +120,14 @@
 
   /* Fire glow effect */
   .glow-fire {
-    box-shadow: 
+    box-shadow:
       0 0 20px rgba(220, 38, 38, 0.4),
       0 0 40px rgba(220, 38, 38, 0.2),
       0 0 60px rgba(220, 38, 38, 0.1);
   }
 
   .glow-fire-intense {
-    box-shadow: 
+    box-shadow:
       0 0 30px rgba(220, 38, 38, 0.6),
       0 0 60px rgba(220, 38, 38, 0.4),
       0 0 90px rgba(220, 38, 38, 0.2);
@@ -135,7 +135,7 @@
 
   /* Text glow */
   .text-glow-fire {
-    text-shadow: 
+    text-shadow:
       0 0 10px rgba(220, 38, 38, 0.8),
       0 0 20px rgba(220, 38, 38, 0.6),
       0 0 30px rgba(220, 38, 38, 0.4);
@@ -143,7 +143,7 @@
 
   /* Gradient text (WebKit) */
   .text-gradient-fire {
-    background: linear-gradient(135deg, #DC2626 0%, #F97316 50%, #FBBF24 100%);
+    background: linear-gradient(135deg, #dc2626 0%, #f97316 50%, #fbbf24 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
@@ -152,9 +152,9 @@
   /* Premium border gradient */
   .border-gradient-fire {
     border: 2px solid transparent;
-    background: 
+    background:
       linear-gradient(#000, #000) padding-box,
-      linear-gradient(135deg, #DC2626, #F97316, #FBBF24) border-box;
+      linear-gradient(135deg, #dc2626, #f97316, #fbbf24) border-box;
   }
 
   /* Animated gradient background */
@@ -189,18 +189,15 @@
     left: -100%;
     width: 100%;
     height: 100%;
-    background: linear-gradient(
-      90deg,
-      transparent,
-      rgba(255, 255, 255, 0.1),
-      transparent
-    );
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
     animation: shimmer 2s infinite;
   }
 
   /* Hover scale effect */
   .hover-scale {
-    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    transition:
+      transform 0.3s ease,
+      box-shadow 0.3s ease;
   }
 
   .hover-scale:hover {
@@ -214,7 +211,7 @@
 
   .card-hover:hover {
     transform: translateY(-4px);
-    box-shadow: 
+    box-shadow:
       0 10px 40px rgba(220, 38, 38, 0.15),
       0 0 0 1px rgba(220, 38, 38, 0.2);
   }
@@ -224,7 +221,8 @@
    KEYFRAME ANIMATIONS
    ============================================ */
 @keyframes gradient-shift {
-  0%, 100% {
+  0%,
+  100% {
     background-position: 0% 50%;
   }
   50% {
@@ -233,7 +231,8 @@
 }
 
 @keyframes pulse-glow {
-  0%, 100% {
+  0%,
+  100% {
     box-shadow: 0 0 20px rgba(220, 38, 38, 0.4);
     transform: scale(1);
   }
@@ -253,7 +252,8 @@
 }
 
 @keyframes float {
-  0%, 100% {
+  0%,
+  100% {
     transform: translateY(0);
   }
   50% {
@@ -262,7 +262,8 @@
 }
 
 @keyframes glow-pulse {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 0.4;
     transform: scale(1);
   }

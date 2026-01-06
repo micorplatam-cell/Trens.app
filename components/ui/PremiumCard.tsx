@@ -88,7 +88,7 @@ export const PremiumCard: React.FC<PremiumCardProps> = ({
           }}
         />
       )}
-      
+
       {children}
     </Animated.View>
   );

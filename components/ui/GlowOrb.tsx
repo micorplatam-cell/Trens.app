@@ -69,13 +69,19 @@ export const GlowOrb: React.FC<GlowOrbProps> = ({
         true
       )
     );
-    
+
     opacity.value = withDelay(
       delay,
       withRepeat(
         withSequence(
-          withTiming(getMaxOpacity(intensity), { duration: 3000, easing: Easing.inOut(Easing.ease) }),
-          withTiming(getInitialOpacity(intensity), { duration: 3000, easing: Easing.inOut(Easing.ease) })
+          withTiming(getMaxOpacity(intensity), {
+            duration: 3000,
+            easing: Easing.inOut(Easing.ease),
+          }),
+          withTiming(getInitialOpacity(intensity), {
+            duration: 3000,
+            easing: Easing.inOut(Easing.ease),
+          })
         ),
         -1,
         true
@@ -102,12 +108,15 @@ export const GlowOrb: React.FC<GlowOrbProps> = ({
       className="blur-3xl pointer-events-none"
     >
       <Animated.View
-        style={[{
-          width: size,
-          height: size,
-          borderRadius: size / 2,
-          backgroundColor: color,
-        }, orbStyle]}
+        style={[
+          {
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            backgroundColor: color,
+          },
+          orbStyle,
+        ]}
       />
     </View>
   );

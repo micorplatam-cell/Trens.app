@@ -32,41 +32,41 @@ export const PREMIUM_COLORS = {
   black: '#000000',
   blackSoft: '#0A0A0A',
   blackCard: '#0D0D0D',
-  
+
   // Fire Gradient
   fireRed: '#DC2626',
   fireRedDark: '#B91C1C',
   fireOrange: '#F97316',
   fireYellow: '#FBBF24',
   fireEmber: '#EF4444',
-  
+
   // Dragon
   dragonGreen: '#22C55E',
   dragonBlue: '#0EA5E9',
-  
+
   // Glow Effects
   glowRed: 'rgba(220, 38, 38, 0.6)',
   glowOrange: 'rgba(249, 115, 22, 0.5)',
   glowSoft: 'rgba(220, 38, 38, 0.2)',
   glowGreen: 'rgba(34, 197, 94, 0.5)',
-  
+
   // Glass
   glassBorder: 'rgba(255, 255, 255, 0.08)',
   glassBackground: 'rgba(255, 255, 255, 0.03)',
   glassBackgroundStrong: 'rgba(255, 255, 255, 0.06)',
   glassBorderHover: 'rgba(220, 38, 38, 0.3)',
-  
+
   // Text
   textPrimary: '#FFFFFF',
   textSecondary: '#A1A1AA',
   textMuted: '#71717A',
   textDark: '#52525B',
-  
+
   // Status
   success: '#22C55E',
   warning: '#FBBF24',
   error: '#EF4444',
-  
+
   // Zinc scale
   zinc: {
     400: '#A1A1AA',
