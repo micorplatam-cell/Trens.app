@@ -604,7 +604,9 @@ function PlanScreen() {
         const todayMuscle = muscleGroup ? String(muscleGroup) : null;
         setIsExternalMode(true);
 
-        console.warn(`🏋️ PLAN [PERSONALIZADO]: Día ${safeIndex + 1}/${totalDays} → ${dayName}: ${todayMuscle || 'DESCANSO'}`);
+        console.warn(
+          `🏋️ PLAN [PERSONALIZADO]: Día ${safeIndex + 1}/${totalDays} → ${dayName}: ${todayMuscle || 'DESCANSO'}`
+        );
         console.warn('   Schedule:', scheduleEntries.map(([d, m]) => `${d}:${m}`).join(', '));
 
         if (todayMuscle) {

@@ -218,7 +218,9 @@ export const TodayCards: React.FC<TodayCardsProps> = ({ userId }) => {
         const [dayName, muscleGroup] = scheduleEntries[safeIndex] || ['', ''];
         const todayTraining = muscleGroup ? String(muscleGroup) : null;
 
-        console.warn(`🏋️ ADN [PERSONALIZADO]: Día ${safeIndex + 1}/${totalDays} → ${dayName}: ${todayTraining || 'DESCANSO'}`);
+        console.warn(
+          `🏋️ ADN [PERSONALIZADO]: Día ${safeIndex + 1}/${totalDays} → ${dayName}: ${todayTraining || 'DESCANSO'}`
+        );
         console.warn('   Schedule:', scheduleEntries.map(([d, m]) => `${d}:${m}`).join(', '));
 
         if (todayTraining) {

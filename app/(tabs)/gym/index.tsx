@@ -1992,6 +1992,26 @@ function GymScreen() {
     }
   };
 
+  // Sincronizar día seleccionado con profiles.training_current_day
+  // Esto permite que ADN y PLAN muestren el día correcto sin entrar a FOCUS
+  const syncSelectedDay = async (dayIndex: number) => {
+    setSelectedDayIndex(dayIndex);
+
+    // Solo sincronizar en modo personalizado
+    if (!isExternalMode || !user) return;
+
+    try {
+      await supabase
+        .from('profiles')
+        .update({ training_current_day: dayIndex })
+        .eq('id', user.id);
+
+      console.log('🔄 GYM: Día sincronizado:', dayIndex);
+    } catch (error) {
+      console.error('Error syncing selected day:', error);
+    }
+  };
+
   // Guardar nombre de rutina en la base de datos
   const saveRoutineName = async (dayIndex: number, newName: string) => {
     // Guard: Verificar si puede guardar
@@ -4456,7 +4476,7 @@ function GymScreen() {
                     <TouchableOpacity
                       key={dayName}
                       onPress={() => {
-                        setSelectedDayIndex(index);
+                        syncSelectedDay(index);
                         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                       }}
                       onLongPress={() => {
@@ -4501,7 +4521,7 @@ function GymScreen() {
                                     0,
                                     Math.min(selectedDayIndex, Object.keys(newSchedule).length - 1)
                                   );
-                                  setSelectedDayIndex(newIndex);
+                                  syncSelectedDay(newIndex);
                                 }
 
                                 Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
