@@ -2001,10 +2001,7 @@ function GymScreen() {
     if (!isExternalMode || !user) return;
 
     try {
-      await supabase
-        .from('profiles')
-        .update({ training_current_day: dayIndex })
-        .eq('id', user.id);
+      await supabase.from('profiles').update({ training_current_day: dayIndex }).eq('id', user.id);
 
       console.log('🔄 GYM: Día sincronizado:', dayIndex);
     } catch (error) {

@@ -83,6 +83,7 @@ const WebDraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
   const lastReportedIndexRef = useRef(currentIndex);
   const isDraggingRef = useRef(false);
   const currentTranslateRef = useRef(0);
+  const pointerIdRef = useRef<number | null>(null); // Guardar pointerId para capture
 
   // Cleanup on unmount
   useEffect(() => {
@@ -152,16 +153,16 @@ const WebDraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
   }, [isDragging, currentIndex, totalItems, itemHeight, onDragEnd, onDragCancel, onPositionChange]);
 
   const handlePointerDown = (e: React.PointerEvent) => {
-    // Guardar referencia al elemento y pointerId para capturar después del long-press
-    const target = e.target as HTMLElement;
-    const pointerId = e.pointerId;
-
+    // Guardar pointerId para usar en capture después del long-press
+    pointerIdRef.current = e.pointerId;
     startYRef.current = e.clientY;
 
     // Long press detection (400ms)
     longPressTimerRef.current = setTimeout(() => {
-      // Capturar pointer SOLO después del long-press para permitir scroll normal
-      target.setPointerCapture?.(pointerId);
+      // Capturar pointer en el contenedor para recibir todos los eventos
+      if (containerRef.current && pointerIdRef.current !== null) {
+        containerRef.current.setPointerCapture(pointerIdRef.current);
+      }
       isDraggingRef.current = true;
       setIsDragging(true);
       setScale(0.95);
@@ -172,8 +173,28 @@ const WebDraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (longPressTimerRef.current && !isDraggingRef.current) {
-      // If moved too much before long press, cancel it (user is scrolling)
+    // Si estamos arrastrando, manejar el movimiento aquí directamente
+    if (isDraggingRef.current) {
+      e.preventDefault();
+      const deltaY = e.clientY - startYRef.current;
+      currentTranslateRef.current = deltaY;
+      setTranslateY(deltaY);
+
+      // Calculate target position
+      const movedPositions = Math.round(deltaY / itemHeight);
+      let targetIndex = currentIndex + movedPositions;
+      targetIndex = Math.max(0, Math.min(totalItems - 1, targetIndex));
+
+      if (targetIndex !== lastReportedIndexRef.current) {
+        lastReportedIndexRef.current = targetIndex;
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        if (onPositionChange) onPositionChange(targetIndex);
+      }
+      return;
+    }
+
+    // Si aún no estamos arrastrando, verificar si debemos cancelar el long-press
+    if (longPressTimerRef.current) {
       const deltaY = Math.abs(e.clientY - startYRef.current);
       if (deltaY > 10) {
         clearTimeout(longPressTimerRef.current);
@@ -183,25 +204,45 @@ const WebDraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
-    // Release pointer capture
-    (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
+    // Release pointer capture del contenedor
+    if (containerRef.current && pointerIdRef.current !== null) {
+      try {
+        containerRef.current.releasePointerCapture(pointerIdRef.current);
+      } catch {
+        // Ignorar error si no hay capture activo
+      }
+    }
+    pointerIdRef.current = null;
 
+    // Cancelar long-press timer si existe
     if (longPressTimerRef.current) {
       clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
+    }
+
+    // Si estábamos arrastrando, finalizar el drag
+    if (isDraggingRef.current) {
+      const movedPositions = Math.round(currentTranslateRef.current / itemHeight);
+      let newIndex = currentIndex + movedPositions;
+      newIndex = Math.max(0, Math.min(totalItems - 1, newIndex));
+
+      // Reset state
+      isDraggingRef.current = false;
+      setIsDragging(false);
+      setTranslateY(0);
+      setScale(1);
+      currentTranslateRef.current = 0;
+
+      if (newIndex !== currentIndex) {
+        onDragEnd(newIndex);
+      } else if (onDragCancel) {
+        onDragCancel();
+      }
     }
   };
 
   const handlePointerCancel = (e: React.PointerEvent) => {
     handlePointerUp(e);
-
-    if (isDraggingRef.current) {
-      isDraggingRef.current = false;
-      setIsDragging(false);
-      setTranslateY(0);
-      setScale(1);
-      if (onDragCancel) onDragCancel();
-    }
   };
 
   return (

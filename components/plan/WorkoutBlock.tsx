@@ -412,18 +412,14 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
             {data.estimatedTime && (
               <View className="flex-row items-center justify-between mb-2 px-1">
                 <View className="flex-row items-center gap-2">
-                  <Text className="text-zinc-500 text-xs font-mono">
-                    ⏰ ~{data.estimatedTime}
-                  </Text>
+                  <Text className="text-zinc-500 text-xs font-mono">⏰ ~{data.estimatedTime}</Text>
                   {data.isFasted && (
                     <View className="bg-yellow-500/20 px-2 py-0.5 rounded">
                       <Text className="text-yellow-500 text-[10px] font-bold">EN AYUNAS</Text>
                     </View>
                   )}
                 </View>
-                <Text className="text-zinc-600 text-[10px] font-mono">
-                  {data.timeDescription}
-                </Text>
+                <Text className="text-zinc-600 text-[10px] font-mono">{data.timeDescription}</Text>
               </View>
             )}
 

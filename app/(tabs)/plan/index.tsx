@@ -206,9 +206,7 @@ const calculateWorkoutTime = (
   meals: { time: string; name: string }[]
 ): WorkoutTimeEstimate => {
   // Ordenar comidas por hora
-  const sortedMeals = [...meals]
-    .filter((m) => m.time)
-    .sort((a, b) => a.time.localeCompare(b.time));
+  const sortedMeals = [...meals].filter((m) => m.time).sort((a, b) => a.time.localeCompare(b.time));
 
   if (sortedMeals.length === 0) {
     return {
