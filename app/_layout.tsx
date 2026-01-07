@@ -12,6 +12,7 @@ import { ProRecordingProvider } from '../context/ProRecordingContext';
 import { UserRoleProvider, useUserRoleContext } from '../context/UserRoleContext';
 import { SaveGuardProvider } from '../context/SaveGuardContext';
 import { useDeepLinkHandler } from '../services/share/deepLinkHandler';
+import { ErrorBoundary } from '../components/ui/ErrorBoundary';
 import * as WebBrowser from 'expo-web-browser';
 import '../global.css';
 
@@ -123,26 +124,28 @@ const SaveGuardWrapper = ({ children }: { children: React.ReactNode }) => {
 
 export default function RootLayout() {
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <UserRoleProvider>
-        <AuthProvider>
-          <SportProvider>
-            <ProContextProvider>
-              <ProRecordingProvider>
-                <SaveGuardWrapper>
-                  <HankWrapper>
-                    <View className="flex-1 bg-savage-black">
-                      <Slot />
-                      {/* Overlays movidos a (tabs)/_layout.tsx donde hay contexto de navegación */}
-                      <StatusBar style="light" />
-                    </View>
-                  </HankWrapper>
-                </SaveGuardWrapper>
-              </ProRecordingProvider>
-            </ProContextProvider>
-          </SportProvider>
-        </AuthProvider>
-      </UserRoleProvider>
-    </GestureHandlerRootView>
+    <ErrorBoundary>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <UserRoleProvider>
+          <AuthProvider>
+            <SportProvider>
+              <ProContextProvider>
+                <ProRecordingProvider>
+                  <SaveGuardWrapper>
+                    <HankWrapper>
+                      <View className="flex-1 bg-savage-black">
+                        <Slot />
+                        {/* Overlays movidos a (tabs)/_layout.tsx donde hay contexto de navegación */}
+                        <StatusBar style="light" />
+                      </View>
+                    </HankWrapper>
+                  </SaveGuardWrapper>
+                </ProRecordingProvider>
+              </ProContextProvider>
+            </SportProvider>
+          </AuthProvider>
+        </UserRoleProvider>
+      </GestureHandlerRootView>
+    </ErrorBoundary>
   );
 }

@@ -500,7 +500,7 @@ const TestimonialCard = ({
   delay?: number;
 }) => {
   const cardWidth = SCREEN_WIDTH < 640 ? SCREEN_WIDTH - 64 : 280;
-  
+
   return (
     <Animated.View
       entering={FadeInUp.delay(delay).duration(700)}
@@ -517,10 +517,7 @@ const TestimonialCard = ({
           />
         ))}
       </View>
-      <Text 
-        className="text-zinc-300 leading-relaxed mb-3 italic"
-        style={{ fontSize: 13 }}
-      >
+      <Text className="text-zinc-300 leading-relaxed mb-3 italic" style={{ fontSize: 13 }}>
         "{text}"
       </Text>
       <View className="flex-row items-center gap-2">
@@ -531,8 +528,12 @@ const TestimonialCard = ({
           <User size={16} color="white" />
         </LinearGradient>
         <View>
-          <Text className="text-white font-bold" style={{ fontSize: 13 }}>{name}</Text>
-          <Text className="text-zinc-500" style={{ fontSize: 11 }}>{role}</Text>
+          <Text className="text-white font-bold" style={{ fontSize: 13 }}>
+            {name}
+          </Text>
+          <Text className="text-zinc-500" style={{ fontSize: 11 }}>
+            {role}
+          </Text>
         </View>
       </View>
     </Animated.View>
@@ -941,7 +942,7 @@ export default function LandingPage() {
       {/* ================================================================== */}
       {/* FEATURES SECTION - PREMIUM */}
       {/* ================================================================== */}
-      <View 
+      <View
         className="bg-black relative overflow-hidden"
         style={{ paddingHorizontal: 16, paddingVertical: SCREEN_WIDTH < 768 ? 48 : 96 }}
       >
@@ -949,14 +950,14 @@ export default function LandingPage() {
         <GlowOrb color={PREMIUM_COLORS.fireRed} size={400} top="20%" left="10%" delay={500} />
         <GlowOrb color={PREMIUM_COLORS.fireOrange} size={300} top="70%" left="80%" delay={1500} />
 
-        <Animated.View 
-          entering={FadeInUp.duration(600)} 
+        <Animated.View
+          entering={FadeInUp.duration(600)}
           className="items-center"
           style={{ marginBottom: SCREEN_WIDTH < 768 ? 32 : 64 }}
         >
           <View className="flex-row items-center gap-3 mb-4">
             <Sparkles size={20} color={PREMIUM_COLORS.fireRed} />
-            <Text 
+            <Text
               className="text-red-500 font-mono tracking-[0.3em] uppercase"
               style={{ fontSize: SCREEN_WIDTH < 640 ? 11 : 14 }}
             >
@@ -964,7 +965,7 @@ export default function LandingPage() {
             </Text>
             <Sparkles size={20} color={PREMIUM_COLORS.fireRed} />
           </View>
-          <Text 
+          <Text
             className="text-white font-bold text-center max-w-2xl leading-tight px-2"
             style={{ fontSize: SCREEN_WIDTH < 640 ? 22 : SCREEN_WIDTH < 768 ? 32 : 40 }}
           >
@@ -1039,25 +1040,25 @@ export default function LandingPage() {
       {/* ================================================================== */}
       {/* TESTIMONIALS SECTION */}
       {/* ================================================================== */}
-      <View 
+      <View
         className="bg-zinc-950 relative overflow-hidden"
         style={{ paddingHorizontal: 16, paddingVertical: SCREEN_WIDTH < 768 ? 48 : 96 }}
       >
-        <Animated.View 
-          entering={FadeInUp.duration(600)} 
+        <Animated.View
+          entering={FadeInUp.duration(600)}
           className="items-center"
           style={{ marginBottom: SCREEN_WIDTH < 768 ? 24 : 48 }}
         >
           <View className="flex-row items-center gap-3 mb-4">
             <Heart size={20} color={PREMIUM_COLORS.fireRed} fill={PREMIUM_COLORS.fireRed} />
-            <Text 
+            <Text
               className="text-red-500 font-mono tracking-[0.3em] uppercase"
               style={{ fontSize: SCREEN_WIDTH < 640 ? 11 : 14 }}
             >
               Testimonios
             </Text>
           </View>
-          <Text 
+          <Text
             className="text-white font-bold text-center px-2"
             style={{ fontSize: SCREEN_WIDTH < 640 ? 20 : SCREEN_WIDTH < 768 ? 28 : 40 }}
           >

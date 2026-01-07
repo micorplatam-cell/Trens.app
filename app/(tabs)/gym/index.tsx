@@ -16,6 +16,7 @@ import {
   Platform,
 } from 'react-native';
 import { PWAGuard } from '../../../components/auth/PWAGuard';
+import { ErrorBoundary } from '../../../components/ui/ErrorBoundary';
 import { Alert } from '../../../lib/alert';
 import { Image } from 'expo-image';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
@@ -410,9 +411,11 @@ function Tab4RouterContent() {
 
 export default function Tab4Router() {
   return (
-    <PWAGuard moduleName="GYM">
-      <Tab4RouterContent />
-    </PWAGuard>
+    <ErrorBoundary>
+      <PWAGuard moduleName="GYM">
+        <Tab4RouterContent />
+      </PWAGuard>
+    </ErrorBoundary>
   );
 }
 
@@ -908,6 +911,7 @@ function GymScreen() {
 
   // Helper: Obtener el ID y nombre del ejercicio activo (considerando alternativas)
   // IMPORTANTE: Devuelve exercise_id (de tabla exercises), NO user_exercise_config.id
+  // BUGFIX: Siempre retornar valores válidos para evitar errores de undefined
   const getActiveExerciseInfo = (exerciseIndex: number = currentExerciseIndex) => {
     const exercise = exercises[exerciseIndex];
     if (!exercise) return { id: '', name: '' };
@@ -917,11 +921,12 @@ function GymScreen() {
     // Si altIndex > 0, estamos en una alternativa
     if (altIndex > 0 && exercise.alternatives && exercise.alternatives[altIndex - 1]) {
       const alt = exercise.alternatives[altIndex - 1];
-      return { id: alt.id, name: alt.name };
+      return { id: alt.id || '', name: alt.name || '' };
     }
 
     // Usar exercise_id (ID real del ejercicio en tabla exercises)
-    return { id: exercise.exercise_id, name: exercise.name };
+    // BUGFIX: Fallback a exercise.id si exercise_id no existe
+    return { id: exercise.exercise_id || exercise.id || '', name: exercise.name || '' };
   };
 
   // Helper: Obtener TODOS los IDs de ejercicios con el mismo nombre (para sincronizar notas/videos)
@@ -2582,9 +2587,10 @@ function GymScreen() {
           } catch (mapError) {
             console.error('💥 ERROR mapeando ejercicio:', item.name, mapError);
             // Retornar un ejercicio válido mínimo para no romper el array
+            // BUGFIX: Usar fallbacks seguros para evitar keys vacíos/duplicados
             return {
-              id: item.id || `error-${index}`,
-              exercise_id: item.exercise_id || '',
+              id: item.id || `error-${index}-${Date.now()}`,
+              exercise_id: item.exercise_id || item.id || `temp-${index}-${Date.now()}`,
               name: item.name || 'ERROR',
               sets: '0x0',
               image_url: '',
@@ -7398,13 +7404,14 @@ function GymScreen() {
         renderItem={({ item, index }) => {
           // Preparar array de ejercicios: principal + alternativas
           // IMPORTANTE: Para notas usamos exercise_id (de tabla exercises)
+          // BUGFIX: Usar fallback seguro para evitar keys vacíos que crashean React Native
           const allVariations = [
             {
-              id: item.exercise_id, // Usar exercise_id para que coincida con las notas guardadas
+              id: item.exercise_id || item.id || `main-${index}`, // Fallback seguro para evitar keys vacíos
               configId: item.id, // Guardar el user_exercise_config.id por si se necesita
-              name: item.name,
-              image_url: item.image_url,
-              videos: item.videos,
+              name: item.name || 'Sin nombre',
+              image_url: item.image_url || '',
+              videos: item.videos || [],
               isMain: true,
             },
             ...(item.alternatives || []).map((alt: ExerciseAlternative) => ({
@@ -7414,6 +7421,8 @@ function GymScreen() {
           ];
 
           const activeAltIndex = activeAlternatives[index] || 0;
+          // BUGFIX: Validar que initialScrollIndex no exceda el número de elementos
+          const safeInitialIndex = Math.min(activeAltIndex, Math.max(0, allVariations.length - 1));
 
           return (
             <View style={{ width: SCREEN_WIDTH, height: CONTENT_HEIGHT }} className="bg-black">
@@ -7424,7 +7433,7 @@ function GymScreen() {
                 keyExtractor={(variation) => variation.id}
                 pagingEnabled
                 showsHorizontalScrollIndicator={false}
-                initialScrollIndex={activeAltIndex}
+                initialScrollIndex={safeInitialIndex}
                 getItemLayout={(_, idx) => ({
                   length: SCREEN_WIDTH,
                   offset: SCREEN_WIDTH * idx,
@@ -7800,7 +7809,7 @@ function GymScreen() {
                       Siguiente:
                     </Text>
                     <Text className="text-white text-xs font-bold flex-1" numberOfLines={1}>
-                      {exercises[index + 1].name}
+                      {exercises[index + 1]?.name || 'Siguiente ejercicio'}
                     </Text>
                   </View>
                 </View>

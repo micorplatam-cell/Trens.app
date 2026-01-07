@@ -58,10 +58,23 @@ export function PWAGuard({ children, moduleName = 'este módulo' }: PWAGuardProp
       return;
     }
 
+    // BUGFIX: Timeout de seguridad para evitar pantalla negra indefinida
+    const timeout = setTimeout(() => {
+      if (isAllowed === null) {
+        console.warn('⚠️ PWAGuard timeout - allowing access to prevent black screen');
+        setIsAllowed(true); // Fallback: permitir acceso si tarda demasiado
+      }
+    }, 3000);
+
     // On web, check if PWA
     const checkPWA = () => {
-      const pwaInstalled = isPWA();
-      setIsAllowed(pwaInstalled);
+      try {
+        const pwaInstalled = isPWA();
+        setIsAllowed(pwaInstalled);
+      } catch (error) {
+        console.error('PWAGuard check failed:', error);
+        setIsAllowed(true); // En caso de error, permitir acceso
+      }
     };
 
     checkPWA();
@@ -75,9 +88,10 @@ export function PWAGuard({ children, moduleName = 'este módulo' }: PWAGuardProp
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => {
+      clearTimeout(timeout);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, []);
+  }, [isAllowed]);
 
   useEffect(() => {
     pulseAnim.value = withRepeat(
@@ -104,6 +118,7 @@ export function PWAGuard({ children, moduleName = 'este módulo' }: PWAGuardProp
         >
           <Lock size={32} color={COLORS.red} />
         </Animated.View>
+        <Text className="text-zinc-500 text-sm mt-4 font-mono">Verificando acceso...</Text>
       </View>
     );
   }
