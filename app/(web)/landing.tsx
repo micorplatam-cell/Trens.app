@@ -300,7 +300,7 @@ const PremiumFeatureCard = ({
   index?: number;
 }) => {
   const borderOpacity = useSharedValue(0.1);
-  const glowOpacity = useSharedValue(0);
+  const isMobile = SCREEN_WIDTH < 640;
 
   useEffect(() => {
     // Subtle border animation
@@ -324,11 +324,16 @@ const PremiumFeatureCard = ({
   return (
     <Animated.View
       entering={FadeInUp.delay(delay).duration(700).springify()}
-      className="w-full sm:flex-1 sm:min-w-[280px] sm:max-w-[380px]"
+      style={{
+        width: isMobile ? '100%' : undefined,
+        flex: isMobile ? undefined : 1,
+        minWidth: isMobile ? undefined : 280,
+        maxWidth: isMobile ? '100%' : 380,
+      }}
     >
       <Animated.View
         style={cardStyle}
-        className="bg-zinc-900/30 backdrop-blur-xl rounded-3xl p-6 border-2 relative overflow-hidden"
+        className="bg-zinc-900/30 backdrop-blur-xl rounded-3xl p-5 border-2 relative overflow-hidden"
       >
         {/* Inner glow effect */}
         <LinearGradient
@@ -493,36 +498,46 @@ const TestimonialCard = ({
   role: string;
   text: string;
   delay?: number;
-}) => (
-  <Animated.View
-    entering={FadeInUp.delay(delay).duration(700)}
-    className="bg-zinc-900/40 backdrop-blur-xl border border-zinc-800/50 rounded-3xl p-5 min-w-[260px] max-w-[300px]"
-  >
-    <View className="flex-row items-center mb-3">
-      {[1, 2, 3, 4, 5].map((i) => (
-        <Star
-          key={i}
-          size={14}
-          color={PREMIUM_COLORS.fireYellow}
-          fill={PREMIUM_COLORS.fireYellow}
-        />
-      ))}
-    </View>
-    <Text className="text-zinc-300 text-sm leading-relaxed mb-4 italic">"{text}"</Text>
-    <View className="flex-row items-center gap-2">
-      <LinearGradient
-        colors={[PREMIUM_COLORS.fireRed, PREMIUM_COLORS.fireOrange]}
-        className="w-9 h-9 rounded-full items-center justify-center"
-      >
-        <User size={18} color="white" />
-      </LinearGradient>
-      <View>
-        <Text className="text-white font-bold text-sm">{name}</Text>
-        <Text className="text-zinc-500 text-xs">{role}</Text>
+}) => {
+  const cardWidth = SCREEN_WIDTH < 640 ? SCREEN_WIDTH - 64 : 280;
+  
+  return (
+    <Animated.View
+      entering={FadeInUp.delay(delay).duration(700)}
+      className="bg-zinc-900/40 backdrop-blur-xl border border-zinc-800/50 rounded-2xl p-4"
+      style={{ width: cardWidth, minWidth: cardWidth, maxWidth: cardWidth }}
+    >
+      <View className="flex-row items-center mb-2">
+        {[1, 2, 3, 4, 5].map((i) => (
+          <Star
+            key={i}
+            size={12}
+            color={PREMIUM_COLORS.fireYellow}
+            fill={PREMIUM_COLORS.fireYellow}
+          />
+        ))}
       </View>
-    </View>
-  </Animated.View>
-);
+      <Text 
+        className="text-zinc-300 leading-relaxed mb-3 italic"
+        style={{ fontSize: 13 }}
+      >
+        "{text}"
+      </Text>
+      <View className="flex-row items-center gap-2">
+        <LinearGradient
+          colors={[PREMIUM_COLORS.fireRed, PREMIUM_COLORS.fireOrange]}
+          className="w-8 h-8 rounded-full items-center justify-center"
+        >
+          <User size={16} color="white" />
+        </LinearGradient>
+        <View>
+          <Text className="text-white font-bold" style={{ fontSize: 13 }}>{name}</Text>
+          <Text className="text-zinc-500" style={{ fontSize: 11 }}>{role}</Text>
+        </View>
+      </View>
+    </Animated.View>
+  );
+};
 
 // ============================================================================
 // MAIN LANDING COMPONENT - PREMIUM VERSION
@@ -926,20 +941,33 @@ export default function LandingPage() {
       {/* ================================================================== */}
       {/* FEATURES SECTION - PREMIUM */}
       {/* ================================================================== */}
-      <View className="px-4 py-16 md:py-24 bg-black relative overflow-hidden">
+      <View 
+        className="bg-black relative overflow-hidden"
+        style={{ paddingHorizontal: 16, paddingVertical: SCREEN_WIDTH < 768 ? 48 : 96 }}
+      >
         {/* Background Elements */}
         <GlowOrb color={PREMIUM_COLORS.fireRed} size={400} top="20%" left="10%" delay={500} />
         <GlowOrb color={PREMIUM_COLORS.fireOrange} size={300} top="70%" left="80%" delay={1500} />
 
-        <Animated.View entering={FadeInUp.duration(600)} className="items-center mb-10 md:mb-20">
+        <Animated.View 
+          entering={FadeInUp.duration(600)} 
+          className="items-center"
+          style={{ marginBottom: SCREEN_WIDTH < 768 ? 32 : 64 }}
+        >
           <View className="flex-row items-center gap-3 mb-4">
             <Sparkles size={20} color={PREMIUM_COLORS.fireRed} />
-            <Text className="text-red-500 font-mono text-xs sm:text-sm tracking-[0.3em] uppercase">
+            <Text 
+              className="text-red-500 font-mono tracking-[0.3em] uppercase"
+              style={{ fontSize: SCREEN_WIDTH < 640 ? 11 : 14 }}
+            >
               Características
             </Text>
             <Sparkles size={20} color={PREMIUM_COLORS.fireRed} />
           </View>
-          <Text className="text-white text-2xl sm:text-4xl md:text-5xl font-bold text-center max-w-2xl leading-tight px-2">
+          <Text 
+            className="text-white font-bold text-center max-w-2xl leading-tight px-2"
+            style={{ fontSize: SCREEN_WIDTH < 640 ? 22 : SCREEN_WIDTH < 768 ? 32 : 40 }}
+          >
             Todo lo que necesitas para{' '}
             <Text style={{ color: PREMIUM_COLORS.fireRed }}>dominar</Text> tu entrenamiento
           </Text>
@@ -947,7 +975,7 @@ export default function LandingPage() {
 
         <View
           className="flex-row flex-wrap justify-center items-stretch"
-          style={{ maxWidth: 1300, alignSelf: 'center', gap: 16, paddingHorizontal: 4 }}
+          style={{ maxWidth: 1300, alignSelf: 'center', gap: 12, paddingHorizontal: 4 }}
         >
           <PremiumFeatureCard
             icon={Camera}
@@ -1011,15 +1039,28 @@ export default function LandingPage() {
       {/* ================================================================== */}
       {/* TESTIMONIALS SECTION */}
       {/* ================================================================== */}
-      <View className="px-4 py-16 md:py-24 bg-zinc-950 relative overflow-hidden">
-        <Animated.View entering={FadeInUp.duration(600)} className="items-center mb-8 md:mb-16">
+      <View 
+        className="bg-zinc-950 relative overflow-hidden"
+        style={{ paddingHorizontal: 16, paddingVertical: SCREEN_WIDTH < 768 ? 48 : 96 }}
+      >
+        <Animated.View 
+          entering={FadeInUp.duration(600)} 
+          className="items-center"
+          style={{ marginBottom: SCREEN_WIDTH < 768 ? 24 : 48 }}
+        >
           <View className="flex-row items-center gap-3 mb-4">
             <Heart size={20} color={PREMIUM_COLORS.fireRed} fill={PREMIUM_COLORS.fireRed} />
-            <Text className="text-red-500 font-mono text-xs sm:text-sm tracking-[0.3em] uppercase">
+            <Text 
+              className="text-red-500 font-mono tracking-[0.3em] uppercase"
+              style={{ fontSize: SCREEN_WIDTH < 640 ? 11 : 14 }}
+            >
               Testimonios
             </Text>
           </View>
-          <Text className="text-white text-2xl sm:text-3xl md:text-5xl font-bold text-center px-2">
+          <Text 
+            className="text-white font-bold text-center px-2"
+            style={{ fontSize: SCREEN_WIDTH < 640 ? 20 : SCREEN_WIDTH < 768 ? 28 : 40 }}
+          >
             Lo que dicen nuestros atletas
           </Text>
         </Animated.View>
@@ -1027,7 +1068,7 @@ export default function LandingPage() {
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: 20, gap: 20 }}
+          contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}
         >
           <TestimonialCard
             name="Carlos Mendoza"
