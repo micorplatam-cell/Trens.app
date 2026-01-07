@@ -6804,10 +6804,7 @@ export async function trainingRemoveExternalDay(
       }
     } else {
       // Sin días, resetear a 0
-      await supabase
-        .from('profiles')
-        .update({ training_current_day: 0 })
-        .eq('id', userId);
+      await supabase.from('profiles').update({ training_current_day: 0 }).eq('id', userId);
     }
 
     if (error) {

@@ -260,13 +260,19 @@ export const TodayCards: React.FC<TodayCardsProps> = ({ userId }) => {
         // =====================================================================
         const { data: profileData } = await supabase
           .from('profiles')
-          .select('training_current_day, training_routine_names, training_frequency')
+          .select('training_current_day, training_routine_names, training_frequency, plan_source')
           .eq('id', userId)
           .single();
 
         const currentTrainingDay = profileData?.training_current_day ?? 0;
         const routineNames = profileData?.training_routine_names || {};
         const routineName = routineNames[String(currentTrainingDay)] || 'ENTRENAMIENTO';
+        const frequency = profileData?.training_frequency ?? 0;
+        const planSource = profileData?.plan_source;
+
+        // Detectar si es plan personalizado (creado manualmente o sin template de Hank)
+        // Si tiene días pero training_mode no es 'external', sincronizar automáticamente
+        const isManualPlan = frequency > 0 && (planSource === 'custom' || !planSource);
 
         // Fetch ejercicios del día actual con su media
         const { data: exerciseConfigs } = await supabase
@@ -333,12 +339,17 @@ export const TodayCards: React.FC<TodayCardsProps> = ({ userId }) => {
           }
         });
 
-        const isRestDay = todayExercises.length === 0;
+        const isRestDay = todayExercises.length === 0 && frequency === 0;
+
+        // Si tiene días configurados pero sin ejercicios, mostrar como personalizado (no descanso)
+        const hasConfiguredDays = frequency > 0;
+        const showAsPersonalized = isManualPlan && hasConfiguredDays;
+
         setWorkout({
           routineName: isRestDay ? 'DESCANSO' : routineName,
           exercises: todayExercises,
           isRestDay,
-          isExternalMode: false,
+          isExternalMode: showAsPersonalized, // Mostrar como personalizado si es plan manual
         });
       } // Fin del else (modo GYM MODULE)
 

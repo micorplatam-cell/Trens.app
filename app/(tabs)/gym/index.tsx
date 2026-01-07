@@ -1902,8 +1902,44 @@ function GymScreen() {
           'días de entrenamiento'
         );
       } else {
-        setIsExternalMode(false);
-        setExternalSchedule({});
+        // Puede que el usuario tenga días pero training_mode no esté en 'external'
+        // Cargar profiles para verificar si tiene días configurados
+        const { data: profileCheck } = await supabase
+          .from('profiles')
+          .select('training_frequency, training_routine_names')
+          .eq('id', user.id)
+          .single();
+
+        const hasManualDays = (profileCheck?.training_frequency ?? 0) > 0;
+
+        if (hasManualDays && Object.keys(extSchedule).length === 0) {
+          // Usuario tiene días en profiles pero no en external_schedule
+          // Sincronizar automáticamente como modo personalizado
+          const routineNames = profileCheck?.training_routine_names || {};
+          const frequency = profileCheck?.training_frequency || 0;
+
+          const syncedSchedule: Record<string, string> = {};
+          for (let i = 0; i < frequency; i++) {
+            syncedSchedule[`Día ${i + 1}`] = routineNames[String(i)] || `DÍA ${i + 1}`;
+          }
+
+          // Activar modo external automáticamente
+          await supabase
+            .from('user_profiles')
+            .update({
+              training_mode: 'external',
+              external_schedule: syncedSchedule,
+              training_days_per_week: frequency,
+            })
+            .eq('user_id', user.id);
+
+          setIsExternalMode(true);
+          setExternalSchedule(syncedSchedule);
+          console.warn('🔄 GYM: Sincronizado modo personalizado automáticamente:', syncedSchedule);
+        } else {
+          setIsExternalMode(false);
+          setExternalSchedule({});
+        }
       }
 
       const { data: profile } = await supabase
@@ -5429,13 +5465,35 @@ function GymScreen() {
                           [String(newDayIndex)]: muscleGroupsName,
                         };
 
+                        // Actualizar profiles con el nuevo día
                         await supabase
                           .from('profiles')
                           .update({
                             training_frequency: updatedDays.length,
                             training_routine_names: updatedNames,
+                            plan_source: 'custom', // Marcar como plan personalizado
                           })
                           .eq('id', user.id);
+
+                        // ACTIVAR MODO PERSONALIZADO: Sincronizar con user_profiles
+                        // Construir external_schedule desde los días actualizados
+                        const newExternalSchedule: Record<string, string> = {};
+                        updatedDays.forEach((day, idx) => {
+                          newExternalSchedule[`Día ${idx + 1}`] = day.muscleGroups;
+                        });
+
+                        await supabase
+                          .from('user_profiles')
+                          .update({
+                            training_mode: 'external',
+                            external_schedule: newExternalSchedule,
+                            training_days_per_week: updatedDays.length,
+                          })
+                          .eq('user_id', user.id);
+
+                        // Actualizar estado local
+                        setIsExternalMode(true);
+                        setExternalSchedule(newExternalSchedule);
                       }
 
                       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
