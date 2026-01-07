@@ -210,13 +210,29 @@ export const TodayCards: React.FC<TodayCardsProps> = ({ userId }) => {
           .single();
 
         const currentDayIndex = profileData?.training_current_day ?? 0;
-        const scheduleEntries = Object.entries(externalSchedule);
+        // Filtrar entradas válidas (que tengan muscleGroup definido)
+        const scheduleEntries = Object.entries(externalSchedule).filter(
+          ([, muscle]) => muscle && String(muscle).trim() !== ''
+        );
         const totalDays = scheduleEntries.length;
 
-        // Obtener el día de entrenamiento actual (rotativo)
-        const safeIndex = currentDayIndex % totalDays;
+        // Si no hay días válidos, mostrar descanso
+        if (totalDays === 0) {
+          console.warn('🏋️ ADN [PERSONALIZADO]: Sin días válidos configurados');
+          setWorkout({
+            routineName: 'SIN CONFIGURAR',
+            exercises: [],
+            isRestDay: true,
+            isExternalMode: true,
+          });
+          setLoading(false);
+          return;
+        }
+
+        // Obtener el día de entrenamiento actual (rotativo) - asegurar índice válido
+        const safeIndex = Math.min(currentDayIndex, totalDays - 1) % totalDays;
         const [dayName, muscleGroup] = scheduleEntries[safeIndex] || ['', ''];
-        const todayTraining = muscleGroup ? String(muscleGroup) : null;
+        const todayTraining = muscleGroup ? String(muscleGroup).trim() : null;
 
         console.warn(
           `🏋️ ADN [PERSONALIZADO]: Día ${safeIndex + 1}/${totalDays} → ${dayName}: ${todayTraining || 'DESCANSO'}`

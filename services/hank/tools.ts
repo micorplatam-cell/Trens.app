@@ -6786,6 +6786,30 @@ export async function trainingRemoveExternalDay(
 
     const { error } = await supabase.from('user_profiles').update(updateData).eq('user_id', userId);
 
+    // SYNC: Ajustar training_current_day en profiles si quedó fuera de rango
+    if (newFrequency > 0) {
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('training_current_day')
+        .eq('id', userId)
+        .single();
+
+      const currentDay = profileData?.training_current_day ?? 0;
+      if (currentDay >= newFrequency) {
+        // Ajustar al último día válido
+        await supabase
+          .from('profiles')
+          .update({ training_current_day: newFrequency - 1 })
+          .eq('id', userId);
+      }
+    } else {
+      // Sin días, resetear a 0
+      await supabase
+        .from('profiles')
+        .update({ training_current_day: 0 })
+        .eq('id', userId);
+    }
+
     if (error) {
       console.error('trainingRemoveExternalDay error:', error);
       return { success: false, message: 'Error al eliminar el día.' };
