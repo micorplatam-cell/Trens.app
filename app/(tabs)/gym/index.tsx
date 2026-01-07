@@ -4553,6 +4553,7 @@ function GymScreen() {
 
                                 // Actualizar en Supabase
                                 if (user) {
+                                  // 1. Actualizar external_schedule en user_profiles
                                   await supabase
                                     .from('user_profiles')
                                     .update({
@@ -4561,8 +4562,31 @@ function GymScreen() {
                                     })
                                     .eq('user_id', user.id);
 
-                                  // Actualizar estado local
+                                  // 2. SINCRONIZAR: También actualizar profiles para evitar desincronización
+                                  const newRoutineNames: Record<string, string> = {};
+                                  Object.entries(newSchedule).forEach(([day, muscle], idx) => {
+                                    newRoutineNames[String(idx)] = `${day}: ${muscle}`;
+                                  });
+
+                                  await supabase
+                                    .from('profiles')
+                                    .update({
+                                      training_frequency: Object.keys(newSchedule).length,
+                                      training_routine_names: newRoutineNames,
+                                    })
+                                    .eq('id', user.id);
+
+                                  // 3. Actualizar estado local
                                   setExternalSchedule(newSchedule);
+                                  setTrainingProgram((prev) => ({
+                                    ...prev,
+                                    frequency: Object.keys(newSchedule).length,
+                                    days: Object.entries(newSchedule).map(([day, muscle], idx) => ({
+                                      id: String(idx + 1),
+                                      muscleGroups: `${day}: ${muscle}`,
+                                      exercises: [],
+                                    })),
+                                  }));
 
                                   // Si no quedan días, desactivar modo personalizado
                                   if (Object.keys(newSchedule).length === 0) {

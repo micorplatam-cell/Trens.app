@@ -6786,6 +6786,20 @@ export async function trainingRemoveExternalDay(
 
     const { error } = await supabase.from('user_profiles').update(updateData).eq('user_id', userId);
 
+    // SYNC: Actualizar profiles para mantener sincronización completa
+    const newRoutineNames: Record<string, string> = {};
+    Object.entries(newSchedule).forEach(([day, muscle], idx) => {
+      newRoutineNames[String(idx)] = `${day}: ${muscle}`;
+    });
+
+    await supabase
+      .from('profiles')
+      .update({
+        training_frequency: newFrequency,
+        training_routine_names: newRoutineNames,
+      })
+      .eq('id', userId);
+
     // SYNC: Ajustar training_current_day en profiles si quedó fuera de rango
     if (newFrequency > 0) {
       const { data: profileData } = await supabase
