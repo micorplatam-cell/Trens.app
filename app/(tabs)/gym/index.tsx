@@ -903,6 +903,15 @@ function GymScreen() {
     itemVisiblePercentThreshold: 70, // Considera visible si está 70% en pantalla (más estricto)
   });
 
+  // BUGFIX: Memoizar onViewableItemsChanged para evitar error "Changing onViewableItemsChanged on the fly"
+  const onViewableItemsChanged = useRef(
+    ({ viewableItems }: { viewableItems: Array<{ index: number | null }> }) => {
+      if (viewableItems.length > 0 && viewableItems[0].index !== null) {
+        setActiveExerciseIndex(viewableItems[0].index);
+      }
+    }
+  );
+
   // Trackear alternativa activa por cada ejercicio (exerciseIndex -> alternativeIndex)
   const [activeAlternatives, setActiveAlternatives] = useState<Record<number, number>>({});
 
@@ -7374,12 +7383,7 @@ function GymScreen() {
         })}
         showsVerticalScrollIndicator={false}
         viewabilityConfig={viewabilityConfig.current}
-        onViewableItemsChanged={({ viewableItems }) => {
-          // Actualizar el índice del ejercicio activo cuando cambia el visible
-          if (viewableItems.length > 0 && viewableItems[0].index !== null) {
-            setActiveExerciseIndex(viewableItems[0].index);
-          }
-        }}
+        onViewableItemsChanged={onViewableItemsChanged.current}
         onMomentumScrollEnd={() => {
           // Haptic Feedback al cambiar ejercicio
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
