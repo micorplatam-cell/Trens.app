@@ -105,14 +105,14 @@ export class ErrorBoundary extends Component<Props, State> {
             La app encontró un error inesperado. No te preocupes, tus datos están seguros.
           </Text>
 
-          {/* Error details - Siempre mostrar para debugging */}
+          {/* Error details - Mostrar siempre para debugging */}
           {this.state.error && (
             <View className="bg-zinc-900 rounded-lg p-3 mb-6 w-full max-w-sm">
               <Text className="text-red-400 text-xs font-mono" numberOfLines={5}>
                 {this.state.error.message || 'Error desconocido'}
               </Text>
               {this.state.error.stack && (
-                <Text className="text-zinc-600 text-[10px] font-mono mt-2" numberOfLines={3}>
+                <Text className="text-zinc-500 text-[10px] font-mono mt-2" numberOfLines={3}>
                   {this.state.error.stack.split('\n').slice(0, 3).join('\n')}
                 </Text>
               )}
