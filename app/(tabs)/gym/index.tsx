@@ -4488,10 +4488,10 @@ function GymScreen() {
                   setViewMode('FOCUS');
                 }
               }}
-              disabled={exercises.length === 0 && !isExternalMode}
+              disabled={exercises.length === 0}
               className="flex-row items-center gap-2 px-5 py-3 rounded-xl"
               style={
-                exercises.length > 0 || isExternalMode
+                exercises.length > 0
                   ? {
                       backgroundColor: '#DC2626',
                       shadowColor: '#DC2626',
@@ -4506,11 +4506,11 @@ function GymScreen() {
             >
               <Play
                 size={16}
-                color={exercises.length > 0 || isExternalMode ? '#fff' : '#71717a'}
-                fill={exercises.length > 0 || isExternalMode ? '#fff' : '#71717a'}
+                color={exercises.length > 0 ? '#fff' : '#71717a'}
+                fill={exercises.length > 0 ? '#fff' : '#71717a'}
               />
               <Text
-                className={`font-bold text-sm ${exercises.length > 0 || isExternalMode ? 'text-white' : 'text-zinc-500'}`}
+                className={`font-bold text-sm ${exercises.length > 0 ? 'text-white' : 'text-zinc-500'}`}
               >
                 ENTRENAR
               </Text>
