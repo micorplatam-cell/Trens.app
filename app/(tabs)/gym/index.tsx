@@ -7463,12 +7463,23 @@ function GymScreen() {
                             !isPickingFromGallery
                           }
                         />
-                      ) : (
+                      ) : variation.image_url ? (
                         <Image
                           source={{ uri: variation.image_url }}
                           style={{ width: SCREEN_WIDTH, height: '100%' }}
                           contentFit="cover"
                         />
+                      ) : (
+                        // Placeholder cuando no hay imagen
+                        <View
+                          style={{ width: SCREEN_WIDTH, height: '100%' }}
+                          className="bg-zinc-900 items-center justify-center"
+                        >
+                          <View className="w-20 h-20 rounded-full bg-zinc-800 items-center justify-center">
+                            <Zap size={32} color="#DC2626" />
+                          </View>
+                          <Text className="text-zinc-500 text-sm mt-4">Sin imagen</Text>
+                        </View>
                       )}
 
                       {/* OVERLAY GRADIENTE SUPERIOR */}
