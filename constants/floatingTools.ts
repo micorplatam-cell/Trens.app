@@ -27,7 +27,7 @@ export const FAB_RIGHT_PADDING = 16;
 export const TAB_BAR_BASE_HEIGHT = 56;
 
 // Padding inicial desde el tab bar hasta el primer FAB (Hank)
-export const FAB_BOTTOM_PADDING = 12;
+export const FAB_BOTTOM_PADDING = 80;
 
 /**
  * Calcula la posición `bottom` para cada FAB basándose en el safe area
