@@ -4831,36 +4831,31 @@ function GymScreen() {
                 })}
 
               {/* BOTÓN AGREGAR DÍA - En modo GYM y PERSONALIZADO */}
-              {!isExternalMode && (
-                <TouchableOpacity
-                  onPress={() => {
-                    if (trainingProgram.days.length >= 7) {
-                      Alert.alert('Límite alcanzado', 'Máximo 7 días de entrenamiento');
-                      return;
-                    }
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                    setSelectedMuscleGroups([]);
-                    setAddDayModalVisible(true);
-                  }}
-                  className="px-4 py-2.5 rounded-xl border-2 border-dashed border-zinc-700 items-center justify-center flex-row gap-2"
-                  style={{ minWidth: 60 }}
+              <TouchableOpacity
+                onPress={() => {
+                  if (trainingProgram.days.length >= 7) {
+                    Alert.alert('Límite alcanzado', 'Máximo 7 días de entrenamiento');
+                    return;
+                  }
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  setSelectedMuscleGroups([]);
+                  setAddDayModalVisible(true);
+                }}
+                className="px-4 py-2.5 rounded-xl border-2 border-dashed items-center justify-center flex-row gap-2"
+                style={{
+                  minWidth: 60,
+                  borderColor: isExternalMode ? '#a855f750' : '#3f3f46',
+                  backgroundColor: isExternalMode ? '#1a0a2e' : 'transparent',
+                }}
+              >
+                <Plus size={16} color={isExternalMode ? '#a855f7' : '#F97316'} />
+                <Text
+                  className="font-bold text-xs"
+                  style={{ color: isExternalMode ? '#a855f7' : '#F97316' }}
                 >
-                  <Plus size={16} color="#F97316" />
-                  <Text className="text-fire-orange font-bold text-xs">NUEVO</Text>
-                </TouchableOpacity>
-              )}
-
-              {/* Mensaje para modo PERSONALIZADO */}
-              {isExternalMode && (
-                <TouchableOpacity
-                  onPress={() => setHankModalVisible(true)}
-                  className="px-4 py-2.5 rounded-xl bg-purple-900/30 border border-purple-500/30"
-                >
-                  <Text className="text-purple-400 text-[10px] font-mono">
-                    ✨ Editar días con Hank
-                  </Text>
-                </TouchableOpacity>
-              )}
+                  NUEVO
+                </Text>
+              </TouchableOpacity>
             </ScrollView>
           </View>
         </View>
@@ -5086,7 +5081,10 @@ function GymScreen() {
                     borderStyle: 'dashed',
                   }}
                 >
-                  <Plus color={trainingProgram.days.length === 0 ? '#71717a' : '#F97316'} size={18} />
+                  <Plus
+                    color={trainingProgram.days.length === 0 ? '#71717a' : '#F97316'}
+                    size={18}
+                  />
                   <Text
                     className={`font-bold text-sm tracking-wider ${
                       trainingProgram.days.length === 0 ? 'text-zinc-500' : 'text-fire-orange'
