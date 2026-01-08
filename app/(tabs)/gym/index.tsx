@@ -2699,7 +2699,7 @@ function GymScreen() {
           id: ex.id,
           name: ex.name,
           description: ex.description || '',
-          image_url: ex.default_media_url || '',
+          image_url: ex.default_media_url || ex.thumbnail_url || '',
           category: ex.muscle_group || 'OTRO',
           difficulty: ex.difficulty || 'INTERMEDIO',
           default_metadata: {
@@ -3440,6 +3440,9 @@ function GymScreen() {
 
         // Actualizar estado local inmediatamente (sin cerrar modal)
         setExercises((prev) => [...prev, newExercise]);
+
+        // Recargar ejercicios silenciosamente para obtener imagen correcta de la BD
+        setTimeout(() => loadExercises(selectedDayIndex, true), 300);
       }
     } catch (error) {
       console.error('💥 Error adding exercise:', error);
