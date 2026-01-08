@@ -877,9 +877,18 @@ function PlanScreen() {
     }
   }, []);
 
+  // Cargar datos inicialmente
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Recargar datos al volver a PLAN desde otro módulo
+  useFocusEffect(
+    useCallback(() => {
+      // Recargar datos silenciosamente cada vez que PLAN recibe focus
+      fetchData();
+    }, [fetchData])
+  );
 
   // RefreshTrigger from HANK
   useEffect(() => {
