@@ -7735,7 +7735,13 @@ function GymScreen() {
           const safeInitialIndex = Math.min(activeAltIndex, Math.max(0, allVariations.length - 1));
 
           return (
-            <View style={{ width: SCREEN_WIDTH, height: CONTENT_HEIGHT }} className="bg-black">
+            <View
+              style={{
+                width: SCREEN_WIDTH,
+                height: CONTENT_HEIGHT,
+                backgroundColor: '#000',
+              }}
+            >
               {/* FONDO SPOTIFY - Cubre toda la sección inferior cuando hay música */}
               {spotifyIsPlaying && spotifyCurrentTrack?.albumArt && (
                 <View
@@ -7774,7 +7780,12 @@ function GymScreen() {
                 }}
                 style={{ height: SCREEN_WIDTH * 0.85 + 170 }}
                 renderItem={({ item: variation }) => (
-                  <View style={{ width: SCREEN_WIDTH }} className="bg-black">
+                  <View
+                    style={{
+                      width: SCREEN_WIDTH,
+                      backgroundColor: spotifyIsPlaying ? 'transparent' : '#000',
+                    }}
+                  >
                     {/* IMAGEN/VIDEO HERO */}
                     <View className="relative" style={{ height: SCREEN_WIDTH * 0.85 }}>
                       {isVideoUrl(variation.image_url) ? (
