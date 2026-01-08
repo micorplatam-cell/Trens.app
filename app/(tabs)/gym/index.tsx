@@ -522,15 +522,16 @@ const SpotifyAlbumBackground: React.FC<SpotifyAlbumBackgroundProps> = React.memo
           }}
         />
 
-        {/* Gradiente superior para transición suave */}
+        {/* Gradiente superior para fusión suave con la imagen del ejercicio */}
         <LinearGradient
-          colors={['rgba(0,0,0,0.9)', 'transparent']}
+          colors={['transparent', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.7)']}
+          locations={[0, 0.4, 1]}
           style={{
             position: 'absolute',
             top: 0,
             left: 0,
             right: 0,
-            height: 40,
+            height: 100,
           }}
         />
       </View>
@@ -7742,16 +7743,16 @@ function GymScreen() {
                 backgroundColor: '#000',
               }}
             >
-              {/* FONDO SPOTIFY - Cubre toda la sección inferior cuando hay música */}
+              {/* FONDO SPOTIFY - Cubre desde el nombre hasta el footer */}
               {spotifyIsPlaying && spotifyCurrentTrack?.albumArt && (
                 <View
                   style={{
                     position: 'absolute',
-                    top: SCREEN_WIDTH * 0.85, // Debajo de la imagen del ejercicio
+                    top: SCREEN_WIDTH * 0.85 - 100, // Extender hacia arriba para cubrir el nombre
                     left: 0,
                     right: 0,
                     bottom: 0,
-                    zIndex: 0,
+                    zIndex: 1,
                   }}
                 >
                   <SpotifyAlbumBackground
