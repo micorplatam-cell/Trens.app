@@ -7752,7 +7752,7 @@ function GymScreen() {
                     left: 0,
                     right: 0,
                     bottom: 0,
-                    zIndex: 1,
+                    zIndex: 0,
                   }}
                 >
                   <SpotifyAlbumBackground
@@ -7831,7 +7831,11 @@ function GymScreen() {
 
                       {/* OVERLAY GRADIENTE INFERIOR */}
                       <LinearGradient
-                        colors={['transparent', 'rgba(0,0,0,0.95)', '#000']}
+                        colors={
+                          spotifyIsPlaying
+                            ? ['transparent', 'transparent', 'transparent']
+                            : ['transparent', 'rgba(0,0,0,0.95)', '#000']
+                        }
                         className="absolute bottom-0 left-0 right-0 h-32"
                       />
 
