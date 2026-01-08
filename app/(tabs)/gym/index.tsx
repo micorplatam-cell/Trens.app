@@ -7736,6 +7736,25 @@ function GymScreen() {
 
           return (
             <View style={{ width: SCREEN_WIDTH, height: CONTENT_HEIGHT }} className="bg-black">
+              {/* FONDO SPOTIFY - Cubre toda la sección inferior cuando hay música */}
+              {spotifyIsPlaying && spotifyCurrentTrack?.albumArt && (
+                <View
+                  style={{
+                    position: 'absolute',
+                    top: SCREEN_WIDTH * 0.85, // Debajo de la imagen del ejercicio
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    zIndex: 0,
+                  }}
+                >
+                  <SpotifyAlbumBackground
+                    albumArt={spotifyCurrentTrack.albumArt}
+                    isPlaying={spotifyIsPlaying}
+                  />
+                </View>
+              )}
+
               {/* PARTE SUPERIOR SCROLLEABLE - Imagen, nombre, historial */}
               <FlatList
                 horizontal
@@ -7925,7 +7944,12 @@ function GymScreen() {
                     </View>
 
                     {/* SLIDER DE HISTORIAL */}
-                    <View className="bg-black px-4 pt-3">
+                    <View
+                      className="px-4 pt-3"
+                      style={{
+                        backgroundColor: spotifyIsPlaying ? 'transparent' : '#000',
+                      }}
+                    >
                       <View className="flex-row items-center justify-between mb-2">
                         <View className="flex-row items-center gap-2">
                           <View className="w-1 h-4 bg-fire-orange rounded-full" />
@@ -8098,40 +8122,36 @@ function GymScreen() {
               />
 
               {/* CARD ESTRUCTURA - FIJA (fuera del scroll horizontal) */}
-              {/* Contenedor con fondo de Spotify animado */}
-              <View style={{ position: 'relative' }}>
-                {/* Fondo animado de Spotify (solo si hay track reproduciendo) */}
-                <SpotifyAlbumBackground
-                  albumArt={spotifyCurrentTrack?.albumArt}
-                  isPlaying={spotifyIsPlaying}
+              <View
+                className="px-4 pt-4"
+                style={{
+                  paddingRight: 90,
+                  backgroundColor: spotifyIsPlaying ? 'transparent' : '#000',
+                }}
+              >
+                <SeriesCard
+                  exerciseId={item.exercise_id}
+                  exerciseName={item.name}
+                  series={item.series || []}
+                  isActive={index === activeExerciseIndex}
+                  onPress={() => {
+                    setModalExercise(item);
+                    setStructureModalVisible(true);
+                  }}
                 />
-
-                {/* Contenido sobre el fondo */}
-                <View className="px-4 pt-4" style={{ paddingRight: 90 }}>
-                  <SeriesCard
-                    exerciseId={item.exercise_id}
-                    exerciseName={item.name}
-                    series={item.series || []}
-                    isActive={index === activeExerciseIndex}
-                    onPress={() => {
-                      setModalExercise(item);
-                      setStructureModalVisible(true);
-                    }}
-                  />
-                </View>
               </View>
 
               {/* ESPACIADOR FLEXIBLE */}
-              <View className="flex-1" />
+              <View className="flex-1" style={{ backgroundColor: spotifyIsPlaying ? 'transparent' : '#000' }} />
 
               {/* FOOTER "PRÓXIMO" */}
               {index < exercises.length - 1 && (
                 <View
                   className="py-3 px-4"
                   style={{
-                    backgroundColor: 'rgba(23, 23, 23, 0.95)',
+                    backgroundColor: spotifyIsPlaying ? 'rgba(0, 0, 0, 0.5)' : 'rgba(23, 23, 23, 0.95)',
                     borderTopWidth: 1,
-                    borderTopColor: '#27272a',
+                    borderTopColor: spotifyIsPlaying ? 'rgba(255,255,255,0.1)' : '#27272a',
                   }}
                 >
                   <View className="flex-row items-center gap-2">
