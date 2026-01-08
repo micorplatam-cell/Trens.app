@@ -2055,14 +2055,25 @@ function GymScreen() {
       // ===========================================================================
       // DETECTAR MODO DE ENTRENAMIENTO (external vs gym_module)
       // ===========================================================================
-      const { data: userProfileData } = await supabase
+      const { data: userProfileData, error: profileError } = await supabase
         .from('user_profiles')
         .select('training_mode, external_schedule')
         .eq('user_id', user.id)
         .single();
 
+      console.warn('🔍 GYM DETECCIÓN:', {
+        userProfileData,
+        error: profileError?.message,
+      });
+
       const trainingMode = userProfileData?.training_mode || 'none';
       const extSchedule = userProfileData?.external_schedule || {};
+
+      console.warn('🔍 GYM MODO:', {
+        trainingMode,
+        extScheduleKeys: Object.keys(extSchedule),
+        condition: trainingMode === 'external' && Object.keys(extSchedule).length > 0,
+      });
 
       if (trainingMode === 'external' && Object.keys(extSchedule).length > 0) {
         // MODO PERSONALIZADO: Usuario tiene su propio horario, puede agregar ejercicios
@@ -4753,6 +4764,8 @@ function GymScreen() {
                               text: 'Eliminar',
                               style: 'destructive',
                               onPress: async () => {
+                                const deletedDayIndex = index;
+
                                 // Eliminar el día del external_schedule
                                 const newSchedule = { ...externalSchedule };
                                 delete newSchedule[dayName];
@@ -4782,7 +4795,54 @@ function GymScreen() {
                                     })
                                     .eq('id', user.id);
 
-                                  // 3. Actualizar estado local
+                                  // 3. ELIMINAR/ACTUALIZAR EJERCICIOS del día eliminado
+                                  const { data: userExercises } = await supabase
+                                    .from('user_exercise_config')
+                                    .select('id, training_days, config')
+                                    .eq('user_id', user.id);
+
+                                  if (userExercises) {
+                                    for (const ex of userExercises) {
+                                      const currentDays: number[] = ex.training_days || [];
+                                      // Remover el día eliminado y reindexar días mayores
+                                      const newDays = currentDays
+                                        .filter((d: number) => d !== deletedDayIndex)
+                                        .map((d: number) => (d > deletedDayIndex ? d - 1 : d));
+
+                                      // Limpiar series_by_day en config
+                                      const config = ex.config || {};
+                                      const seriesByDay =
+                                        (config.series_by_day as Record<string, unknown>) || {};
+                                      const newSeriesByDay: Record<string, unknown> = {};
+
+                                      Object.entries(seriesByDay).forEach(([dayKey, series]) => {
+                                        const dayNum = parseInt(dayKey);
+                                        if (dayNum !== deletedDayIndex) {
+                                          const newKey =
+                                            dayNum > deletedDayIndex ? String(dayNum - 1) : dayKey;
+                                          newSeriesByDay[newKey] = series;
+                                        }
+                                      });
+
+                                      if (newDays.length === 0) {
+                                        // Eliminar ejercicio si ya no tiene días
+                                        await supabase
+                                          .from('user_exercise_config')
+                                          .delete()
+                                          .eq('id', ex.id);
+                                      } else {
+                                        await supabase
+                                          .from('user_exercise_config')
+                                          .update({
+                                            training_days: newDays,
+                                            config: { ...config, series_by_day: newSeriesByDay },
+                                          })
+                                          .eq('id', ex.id);
+                                      }
+                                    }
+                                  }
+
+                                  // 4. Actualizar estado local
                                   setExternalSchedule(newSchedule);
                                   setTrainingProgram((prev) => ({
                                     ...prev,
@@ -4809,6 +4869,9 @@ function GymScreen() {
                                     Math.min(selectedDayIndex, Object.keys(newSchedule).length - 1)
                                   );
                                   syncSelectedDay(newIndex);
+
+                                  // Recargar ejercicios del nuevo día seleccionado
+                                  loadExercises(newIndex);
                                 }
 
                                 Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
@@ -5730,14 +5793,22 @@ function GymScreen() {
                           newExternalSchedule[`Día ${idx + 1}`] = day.muscleGroups;
                         });
 
-                        await supabase
-                          .from('user_profiles')
-                          .update({
+                        // Usar upsert para garantizar que la fila exista
+                        const { error: upsertError } = await supabase.from('user_profiles').upsert(
+                          {
+                            user_id: user.id,
                             training_mode: 'external',
                             external_schedule: newExternalSchedule,
                             training_days_per_week: updatedDays.length,
-                          })
-                          .eq('user_id', user.id);
+                          },
+                          { onConflict: 'user_id' }
+                        );
+
+                        if (upsertError) {
+                          console.error('❌ Error guardando modo personalizado:', upsertError);
+                        } else {
+                          console.warn('✅ Modo personalizado guardado:', newExternalSchedule);
+                        }
 
                         // Actualizar estado local
                         setIsExternalMode(true);
