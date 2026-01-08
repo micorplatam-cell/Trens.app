@@ -4892,23 +4892,38 @@ function GymScreen() {
                   Sin ejercicios configurados
                 </Text>
                 <Text className="text-zinc-600 text-center mb-6 text-xs">
-                  Agrega ejercicios para este día de entrenamiento
+                  {trainingProgram.days.length === 0
+                    ? 'Primero agrega un día de entrenamiento'
+                    : 'Agrega ejercicios para este día de entrenamiento'}
                 </Text>
                 <TouchableOpacity
                   onPress={() => setModalVisible(true)}
+                  disabled={trainingProgram.days.length === 0}
                   className="px-8 py-4 rounded-xl"
-                  style={{
-                    backgroundColor: '#0a0000',
-                    borderWidth: 2,
-                    borderColor: '#F97316',
-                    shadowColor: '#F97316',
-                    shadowOffset: { width: 0, height: 4 },
-                    shadowOpacity: 0.4,
-                    shadowRadius: 16,
-                  }}
+                  style={
+                    trainingProgram.days.length === 0
+                      ? {
+                          backgroundColor: '#18181b',
+                          borderWidth: 2,
+                          borderColor: '#3f3f46',
+                        }
+                      : {
+                          backgroundColor: '#0a0000',
+                          borderWidth: 2,
+                          borderColor: '#F97316',
+                          shadowColor: '#F97316',
+                          shadowOffset: { width: 0, height: 4 },
+                          shadowOpacity: 0.4,
+                          shadowRadius: 16,
+                        }
+                  }
                 >
-                  <Text className="text-fire-orange font-bold text-sm tracking-wider">
-                    + AGREGAR EJERCICIO 🔥
+                  <Text
+                    className={`font-bold text-sm tracking-wider ${
+                      trainingProgram.days.length === 0 ? 'text-zinc-500' : 'text-fire-orange'
+                    }`}
+                  >
+                    + AGREGAR EJERCICIO {trainingProgram.days.length > 0 ? '🔥' : ''}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -5062,16 +5077,21 @@ function GymScreen() {
                 {/* BOTÓN AGREGAR EJERCICIO - Dentro del scroll */}
                 <TouchableOpacity
                   onPress={() => setModalVisible(true)}
+                  disabled={trainingProgram.days.length === 0}
                   className="mt-2 mb-4 p-4 rounded-xl items-center flex-row justify-center gap-2"
                   style={{
                     borderWidth: 2,
-                    borderColor: '#F97316',
-                    backgroundColor: '#0a0500',
+                    borderColor: trainingProgram.days.length === 0 ? '#3f3f46' : '#F97316',
+                    backgroundColor: trainingProgram.days.length === 0 ? '#18181b' : '#0a0500',
                     borderStyle: 'dashed',
                   }}
                 >
-                  <Plus color="#F97316" size={18} />
-                  <Text className="text-fire-orange font-bold text-sm tracking-wider">
+                  <Plus color={trainingProgram.days.length === 0 ? '#71717a' : '#F97316'} size={18} />
+                  <Text
+                    className={`font-bold text-sm tracking-wider ${
+                      trainingProgram.days.length === 0 ? 'text-zinc-500' : 'text-fire-orange'
+                    }`}
+                  >
                     AGREGAR EJERCICIO
                   </Text>
                 </TouchableOpacity>
