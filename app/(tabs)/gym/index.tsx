@@ -7747,7 +7747,7 @@ function GymScreen() {
                 <View
                   style={{
                     position: 'absolute',
-                    top: SCREEN_WIDTH * 0.85 - 80, // Extender hacia arriba para cubrir el nombre
+                    top: SCREEN_WIDTH * 0.85, // Debajo de la imagen del ejercicio
                     left: 0,
                     right: 0,
                     bottom: 0,
