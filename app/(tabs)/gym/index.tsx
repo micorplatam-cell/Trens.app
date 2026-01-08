@@ -57,13 +57,16 @@ import Animated, {
   useAnimatedStyle,
   withSpring,
   withTiming,
+  withRepeat,
+  withSequence,
   runOnJS,
   Easing,
 } from 'react-native-reanimated';
 import Slider from '@react-native-community/slider';
 import { useHank } from '../../../context/HankContext';
 import { LinearGradient } from 'expo-linear-gradient';
-import spotify, { SpotifyVideoMetadata } from '../../../services/spotify/spotify';
+import { BlurView } from 'expo-blur';
+import spotify, { SpotifyVideoMetadata, SpotifyTrack } from '../../../services/spotify/spotify';
 import cloudflareStream from '../../../services/cloudflare/stream';
 import { DraggableExerciseCard } from '../../../components/gym/DraggableExerciseCard';
 import { SeriesCard } from '../../../components/gym/SeriesCard';
@@ -386,6 +389,156 @@ const SwipeableSeriesRow: React.FC<SwipeableSeriesRowProps> = ({ children, onDel
 };
 
 // ============================================================================
+// SPOTIFY ALBUM BACKGROUND - Fondo animado con carátula del álbum
+// ============================================================================
+interface SpotifyAlbumBackgroundProps {
+  albumArt: string | null | undefined;
+  isPlaying: boolean;
+}
+
+const SpotifyAlbumBackground: React.FC<SpotifyAlbumBackgroundProps> = React.memo(
+  ({ albumArt, isPlaying }) => {
+    // Animaciones de pulso/ritmo
+    const scaleAnim = useSharedValue(1);
+    const rotateAnim = useSharedValue(0);
+    const translateXAnim = useSharedValue(0);
+    const translateYAnim = useSharedValue(0);
+
+    useEffect(() => {
+      if (isPlaying) {
+        // Pulso suave - escala moderada para no distraer
+        scaleAnim.value = withRepeat(
+          withSequence(
+            withTiming(1.15, { duration: 600, easing: Easing.out(Easing.ease) }),
+            withTiming(1.05, { duration: 500, easing: Easing.inOut(Easing.ease) }),
+            withTiming(1.1, { duration: 550, easing: Easing.out(Easing.ease) }),
+            withTiming(1.0, { duration: 550, easing: Easing.inOut(Easing.ease) })
+          ),
+          -1,
+          false
+        );
+        // Rotación sutil
+        rotateAnim.value = withRepeat(
+          withSequence(
+            withTiming(5, { duration: 2000, easing: Easing.inOut(Easing.ease) }),
+            withTiming(-5, { duration: 2000, easing: Easing.inOut(Easing.ease) })
+          ),
+          -1,
+          true
+        );
+        // Traslación horizontal (respira)
+        translateXAnim.value = withRepeat(
+          withSequence(
+            withTiming(25, { duration: 2500, easing: Easing.inOut(Easing.ease) }),
+            withTiming(-25, { duration: 2500, easing: Easing.inOut(Easing.ease) })
+          ),
+          -1,
+          true
+        );
+        // Traslación vertical (respira)
+        translateYAnim.value = withRepeat(
+          withSequence(
+            withTiming(-20, { duration: 1800, easing: Easing.inOut(Easing.ease) }),
+            withTiming(20, { duration: 1800, easing: Easing.inOut(Easing.ease) })
+          ),
+          -1,
+          true
+        );
+      } else {
+        // Detener animaciones suavemente
+        scaleAnim.value = withTiming(1, { duration: 400 });
+        rotateAnim.value = withTiming(0, { duration: 400 });
+        translateXAnim.value = withTiming(0, { duration: 400 });
+        translateYAnim.value = withTiming(0, { duration: 400 });
+      }
+    }, [isPlaying, scaleAnim, rotateAnim, translateXAnim, translateYAnim]);
+
+    const animatedStyle = useAnimatedStyle(() => ({
+      transform: [
+        { scale: scaleAnim.value },
+        { rotate: `${rotateAnim.value}deg` },
+        { translateX: translateXAnim.value },
+        { translateY: translateYAnim.value },
+      ],
+    }));
+
+    if (!albumArt || albumArt.length === 0) return null;
+
+    return (
+      <View
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          overflow: 'hidden',
+        }}
+        pointerEvents="none"
+      >
+        {/* Carátula animada de fondo */}
+        <Animated.View
+          style={[
+            {
+              position: 'absolute',
+              top: -60,
+              left: -60,
+              right: -60,
+              bottom: -60,
+            },
+            animatedStyle,
+          ]}
+        >
+          <Image
+            source={{ uri: albumArt }}
+            style={{ width: '100%', height: '100%' }}
+            contentFit="cover"
+            blurRadius={20}
+          />
+        </Animated.View>
+
+        {/* Overlay oscuro para contraste y legibilidad */}
+        <View
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.70)',
+          }}
+        />
+
+        {/* Glassmorphism overlay */}
+        <BlurView
+          intensity={15}
+          tint="dark"
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+          }}
+        />
+
+        {/* Gradiente superior para transición suave */}
+        <LinearGradient
+          colors={['rgba(0,0,0,0.9)', 'transparent']}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            height: 40,
+          }}
+        />
+      </View>
+    );
+  }
+);
+
+// ============================================================================
 // MAIN COMPONENT
 // ============================================================================
 
@@ -495,6 +648,10 @@ function GymScreen() {
   const [spotifyConnected, setSpotifyConnected] = useState(false);
   const [capturedSpotifyMetadata, setCapturedSpotifyMetadata] =
     useState<SpotifyVideoMetadata | null>(null);
+
+  // Spotify Now Playing State (para fondo animado en modo FOCUS)
+  const [spotifyCurrentTrack, setSpotifyCurrentTrack] = useState<SpotifyTrack | null>(null);
+  const [spotifyIsPlaying, setSpotifyIsPlaying] = useState(false);
 
   // Helper: Arreglar URLs de Cloudflare Stream incompletas
   const fixCloudflareUrl = (url: string): string => {
@@ -906,17 +1063,17 @@ function GymScreen() {
   // BUGFIX: Memoizar onViewableItemsChanged para evitar error "Changing onViewableItemsChanged on the fly"
   // Ref para trackear el último índice visible y evitar haptics redundantes
   const lastVisibleIndexRef = useRef<number | null>(null);
-  
+
   const onViewableItemsChanged = useRef(
     ({ viewableItems }: { viewableItems: Array<{ index: number | null }> }) => {
       if (viewableItems.length > 0 && viewableItems[0].index !== null) {
         const newIndex = viewableItems[0].index;
-        
+
         // Solo vibrar si el índice cambió (evita vibrar en scroll inicial)
         if (lastVisibleIndexRef.current !== null && lastVisibleIndexRef.current !== newIndex) {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         }
-        
+
         lastVisibleIndexRef.current = newIndex;
         setActiveExerciseIndex(newIndex);
       }
@@ -1002,6 +1159,41 @@ function GymScreen() {
     };
     initSpotify();
   }, [contextSpotifyConnected, updateSpotifyStatus]);
+
+  // -------------------------------------------------------------------------
+  // SPOTIFY NOW PLAYING - Polling para fondo animado en modo FOCUS
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    // Solo hacer polling si está en modo FOCUS y Spotify está conectado
+    if (!isFocused || viewMode !== 'FOCUS' || !spotifyPremium) {
+      return;
+    }
+
+    // Función para obtener estado actual
+    const fetchSpotifyState = async () => {
+      try {
+        const state = await spotify.getPlaybackState();
+        if (state?.track) {
+          setSpotifyCurrentTrack(state.track);
+          setSpotifyIsPlaying(state.isPlaying);
+        } else {
+          setSpotifyCurrentTrack(null);
+          setSpotifyIsPlaying(false);
+        }
+      } catch (error) {
+        // Silenciar errores de polling
+        console.warn('Spotify polling error:', error);
+      }
+    };
+
+    // Fetch inicial
+    fetchSpotifyState();
+
+    // Polling cada 3 segundos
+    const interval = setInterval(fetchSpotifyState, 3000);
+
+    return () => clearInterval(interval);
+  }, [isFocused, viewMode, spotifyPremium]);
 
   // -------------------------------------------------------------------------
   // SYNC ACTIVE EXERCISE WITH HANK CONTEXT
@@ -7906,17 +8098,27 @@ function GymScreen() {
               />
 
               {/* CARD ESTRUCTURA - FIJA (fuera del scroll horizontal) */}
-              <View className="bg-black px-4 pt-4" style={{ paddingRight: 90 }}>
-                <SeriesCard
-                  exerciseId={item.exercise_id}
-                  exerciseName={item.name}
-                  series={item.series || []}
-                  isActive={index === activeExerciseIndex}
-                  onPress={() => {
-                    setModalExercise(item);
-                    setStructureModalVisible(true);
-                  }}
+              {/* Contenedor con fondo de Spotify animado */}
+              <View style={{ position: 'relative' }}>
+                {/* Fondo animado de Spotify (solo si hay track reproduciendo) */}
+                <SpotifyAlbumBackground
+                  albumArt={spotifyCurrentTrack?.albumArt}
+                  isPlaying={spotifyIsPlaying}
                 />
+
+                {/* Contenido sobre el fondo */}
+                <View className="px-4 pt-4" style={{ paddingRight: 90 }}>
+                  <SeriesCard
+                    exerciseId={item.exercise_id}
+                    exerciseName={item.name}
+                    series={item.series || []}
+                    isActive={index === activeExerciseIndex}
+                    onPress={() => {
+                      setModalExercise(item);
+                      setStructureModalVisible(true);
+                    }}
+                  />
+                </View>
               </View>
 
               {/* ESPACIADOR FLEXIBLE */}
