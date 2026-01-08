@@ -7619,7 +7619,7 @@ function GymScreen() {
         style={{
           position: 'absolute',
           right: 16,
-          bottom: 130 + insets.bottom, // Ajustado
+          bottom: 200 + insets.bottom, // Subido más arriba
           zIndex: 40,
         }}
       >
