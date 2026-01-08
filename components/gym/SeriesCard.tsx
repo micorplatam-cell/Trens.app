@@ -33,6 +33,7 @@ interface SeriesCardProps {
   series: SeriesConfig[];
   onPress: () => void;
   isActive: boolean;
+  spotifyMode?: boolean;
 }
 
 const typeConfig: Record<string, { bg: string; border: string; label: string }> = {
@@ -322,6 +323,7 @@ export const SeriesCard = ({
   series,
   onPress,
   isActive,
+  spotifyMode = false,
 }: SeriesCardProps) => {
   const { targetState } = useHank();
   const { currentTarget, animationPhase, registerTarget, unregisterTarget } = targetState;
@@ -369,9 +371,9 @@ export const SeriesCard = ({
       onLayout={measureAndRegister}
       className="p-4 rounded-xl"
       style={{
-        backgroundColor: '#0a0a0a',
+        backgroundColor: spotifyMode ? 'rgba(0,0,0,0.4)' : '#0a0a0a',
         borderWidth: 1,
-        borderColor: '#1a1a1a',
+        borderColor: spotifyMode ? 'rgba(255,255,255,0.15)' : '#1a1a1a',
         overflow: 'visible', // Importante para que el highlight y esquinas se vean
       }}
     >

@@ -8008,7 +8008,12 @@ function GymScreen() {
                                   backgroundColor: spotifyIsPlaying ? 'rgba(0,0,0,0.4)' : '#0a0a0a',
                                   borderRadius: 10,
                                   borderWidth: 1.5,
-                                  borderColor: vIdx === 0 ? '#F97316' : (spotifyIsPlaying ? 'rgba(255,255,255,0.15)' : '#27272a'),
+                                  borderColor:
+                                    vIdx === 0
+                                      ? '#F97316'
+                                      : spotifyIsPlaying
+                                        ? 'rgba(255,255,255,0.15)'
+                                        : '#27272a',
                                   overflow: 'hidden',
                                 }}
                               >
@@ -8101,7 +8106,9 @@ function GymScreen() {
                                 backgroundColor: spotifyIsPlaying ? 'rgba(0,0,0,0.4)' : '#18181b',
                                 borderRadius: 10,
                                 borderWidth: 1,
-                                borderColor: spotifyIsPlaying ? 'rgba(255,255,255,0.15)' : '#27272a',
+                                borderColor: spotifyIsPlaying
+                                  ? 'rgba(255,255,255,0.15)'
+                                  : '#27272a',
                               }}
                             >
                               <Text className="text-zinc-400 text-[10px] font-bold">Ver todo</Text>
@@ -8145,6 +8152,7 @@ function GymScreen() {
                   exerciseName={item.name}
                   series={item.series || []}
                   isActive={index === activeExerciseIndex}
+                  spotifyMode={spotifyIsPlaying}
                   onPress={() => {
                     setModalExercise(item);
                     setStructureModalVisible(true);
@@ -8153,14 +8161,19 @@ function GymScreen() {
               </View>
 
               {/* ESPACIADOR FLEXIBLE */}
-              <View className="flex-1" style={{ backgroundColor: spotifyIsPlaying ? 'transparent' : '#000' }} />
+              <View
+                className="flex-1"
+                style={{ backgroundColor: spotifyIsPlaying ? 'transparent' : '#000' }}
+              />
 
               {/* FOOTER "PRÓXIMO" */}
               {index < exercises.length - 1 && (
                 <View
                   className="py-3 px-4"
                   style={{
-                    backgroundColor: spotifyIsPlaying ? 'rgba(0, 0, 0, 0.5)' : 'rgba(23, 23, 23, 0.95)',
+                    backgroundColor: spotifyIsPlaying
+                      ? 'rgba(0, 0, 0, 0.5)'
+                      : 'rgba(23, 23, 23, 0.95)',
                     borderTopWidth: 1,
                     borderTopColor: spotifyIsPlaying ? 'rgba(255,255,255,0.1)' : '#27272a',
                   }}
