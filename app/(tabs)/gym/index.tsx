@@ -904,10 +904,21 @@ function GymScreen() {
   });
 
   // BUGFIX: Memoizar onViewableItemsChanged para evitar error "Changing onViewableItemsChanged on the fly"
+  // Ref para trackear el último índice visible y evitar haptics redundantes
+  const lastVisibleIndexRef = useRef<number | null>(null);
+  
   const onViewableItemsChanged = useRef(
     ({ viewableItems }: { viewableItems: Array<{ index: number | null }> }) => {
       if (viewableItems.length > 0 && viewableItems[0].index !== null) {
-        setActiveExerciseIndex(viewableItems[0].index);
+        const newIndex = viewableItems[0].index;
+        
+        // Solo vibrar si el índice cambió (evita vibrar en scroll inicial)
+        if (lastVisibleIndexRef.current !== null && lastVisibleIndexRef.current !== newIndex) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        }
+        
+        lastVisibleIndexRef.current = newIndex;
+        setActiveExerciseIndex(newIndex);
       }
     }
   );
