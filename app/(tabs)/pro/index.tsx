@@ -2,7 +2,7 @@ import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
 import * as Sharing from 'expo-sharing';
 import { RotateCcw, Zap, ZapOff, Music, Lock } from 'lucide-react-native';
 import { PWAGuard } from '../../../components/auth/PWAGuard';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '../../../lib/haptics';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { CameraView, useCameraPermissions, FlashMode } from 'expo-camera';
 import { Audio } from 'expo-av';

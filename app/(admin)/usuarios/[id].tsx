@@ -32,7 +32,7 @@ import {
   Activity,
 } from 'lucide-react-native';
 import adminUsers, { AdminUser, OpenpayPayment } from '../../../services/admin/users';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '../../../lib/haptics';
 import * as Clipboard from 'expo-clipboard';
 
 // ============================================================================

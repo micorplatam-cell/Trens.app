@@ -11,7 +11,7 @@ import {
 import { Link, useRouter } from 'expo-router';
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '../../lib/haptics';
 import {
   Shield,
   Lock,

@@ -18,7 +18,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { isPWA } from '../../lib/platform';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '../../lib/haptics';
 
 // ============================================================================
 // COLORS

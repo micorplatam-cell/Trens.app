@@ -9,7 +9,7 @@ import {
   Dimensions,
 } from 'react-native';
 import { Camera, Plus, ChevronRight } from 'lucide-react-native';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '../../lib/haptics';
 import type { ProgressPhoto } from '../../types/progress';
 import { getProgressPhotos } from '../../services/progress/photos';
 

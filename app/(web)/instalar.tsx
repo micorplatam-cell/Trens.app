@@ -36,7 +36,7 @@ import {
   getDeferredPrompt,
   canShowInstallPrompt,
 } from '../../lib/pwaDetection';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '../../lib/haptics';
 
 const PREMIUM = {
   fireRed: '#DC2626',

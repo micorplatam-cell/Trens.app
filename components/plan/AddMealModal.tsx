@@ -17,7 +17,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '../../lib/haptics';
 import { X, Plus, Trash2, AlertTriangle, CheckCircle, Sparkles, Clock } from 'lucide-react-native';
 import {
   analyzeIngredientsSmart,

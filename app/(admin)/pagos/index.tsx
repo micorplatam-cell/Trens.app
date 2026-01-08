@@ -31,7 +31,7 @@ import {
 } from 'lucide-react-native';
 import adminPayments, { Payment } from '../../../services/admin/payments';
 import { Alert } from '../../../lib/alert';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '../../../lib/haptics';
 
 // ============================================================================
 // COLORS

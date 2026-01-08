@@ -30,7 +30,7 @@ import {
 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '../../../lib/haptics';
 import { supabase } from '../../../lib/supabase';
 import cloudflareR2 from '../../../services/cloudflare/r2';
 

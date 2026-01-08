@@ -11,7 +11,7 @@ import {
   Lock,
   LucideIcon,
 } from 'lucide-react-native';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '../../lib/haptics';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { useSport, Sport } from '../../context/SportContext';
 import { Alert } from '../../lib/alert';

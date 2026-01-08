@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, Modal, ScrollView, Image, PanResponder } 
 import { ChevronDown, Check, Play, Trophy, Dumbbell } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '../../lib/haptics';
 
 // ============================================================================
 // TIPOS

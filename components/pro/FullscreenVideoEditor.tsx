@@ -37,7 +37,7 @@ import {
   Volume2,
 } from 'lucide-react-native';
 import { VideoView, useVideoPlayer } from 'expo-video';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '../../lib/haptics';
 import spotify from '../../services/spotify/spotify';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');

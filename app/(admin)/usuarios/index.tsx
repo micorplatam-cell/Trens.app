@@ -36,7 +36,7 @@ import {
   Sparkles,
 } from 'lucide-react-native';
 import adminUsers, { AdminUser, AdminStats, CreateUserData } from '../../../services/admin/users';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '../../../lib/haptics';
 import {
   PhoneInput,
   getDefaultCountry,

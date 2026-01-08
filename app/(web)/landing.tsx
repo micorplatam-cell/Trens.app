@@ -78,7 +78,7 @@ import openpay, {
   getFormattedPrice,
 } from '../../lib/openpay';
 import { supabase } from '../../lib/supabase';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '../../lib/haptics';
 import {
   PhoneInput,
   getDefaultCountry,

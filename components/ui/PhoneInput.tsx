@@ -14,7 +14,7 @@ import {
   Pressable,
 } from 'react-native';
 import { Phone, ChevronDown, Search, X, Check } from 'lucide-react-native';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '../../lib/haptics';
 
 // ============================================================================
 // COUNTRIES DATA

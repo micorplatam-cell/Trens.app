@@ -39,7 +39,7 @@ import {
   triggerInstallPrompt,
   getDeferredPrompt,
 } from '../../lib/pwaDetection';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '../../lib/haptics';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 

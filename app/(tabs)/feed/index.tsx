@@ -15,7 +15,7 @@ import { useFocusEffect, router } from 'expo-router';
 import { Lock } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import { Heart, MessageCircle, Share2, Music, Bookmark, Play, Unlink } from 'lucide-react-native';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '../../../lib/haptics';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '../../../lib/supabase';

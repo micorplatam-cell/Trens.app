@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { Dumbbell, Bike, Car, Waves, Plus, LucideIcon } from 'lucide-react-native';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '../../lib/haptics';
 import { useSport, Sport } from '../../context/SportContext';
 import { SportSwitcherModal } from './SportSwitcher';
 

@@ -17,7 +17,7 @@ import {
   Trash2,
   Flame,
 } from 'lucide-react-native';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '../../lib/haptics';
 import { supabase } from '../../lib/supabase';
 import { useSaveGuard } from '../../context/SaveGuardContext';
 import { useHankTarget } from '../../hooks/useHankTarget';

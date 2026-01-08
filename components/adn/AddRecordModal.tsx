@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X, Link as LinkIcon, CheckCircle } from 'lucide-react-native';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '../../lib/haptics';
 
 const EXERCISES = [
   { id: 'squat', name: 'SENTADILLA', icon: '🦵' },

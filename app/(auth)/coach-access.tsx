@@ -9,7 +9,7 @@ import {
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import { Shield, ArrowLeft } from 'lucide-react-native';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '../../lib/haptics';
 
 export default function CoachAccessScreen() {
   const [code, setCode] = useState('');

@@ -26,7 +26,7 @@ import {
   Star,
   Triangle,
 } from 'lucide-react-native';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '../../../lib/haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { supabase } from '../../../lib/supabase';

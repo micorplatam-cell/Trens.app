@@ -12,7 +12,7 @@ import Animated, {
   withTiming,
   interpolate,
 } from 'react-native-reanimated';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '../../lib/haptics';
 import {
   Zap,
   Flame,

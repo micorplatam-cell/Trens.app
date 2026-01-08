@@ -13,7 +13,7 @@ import {
   Calendar,
   TrendingUp,
 } from 'lucide-react-native';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '../../lib/haptics';
 import type { ProgressPhoto } from '../../types/progress';
 import { deleteProgressPhoto } from '../../services/progress/photos';
 

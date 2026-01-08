@@ -25,7 +25,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Crown, X, Zap, ChevronRight, Lock, Sparkles, Shield } from 'lucide-react-native';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '../../lib/haptics';
 import { supabase } from '../../lib/supabase';
 import { Link } from 'expo-router';
 

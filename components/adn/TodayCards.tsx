@@ -14,7 +14,7 @@ import {
   Droplets,
 } from 'lucide-react-native';
 import { router, useFocusEffect } from 'expo-router';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '../../lib/haptics';
 import { supabase } from '../../lib/supabase';
 
 // ============================================================================
@@ -296,7 +296,9 @@ export const TodayCards: React.FC<TodayCardsProps> = ({ userId }) => {
           }
         });
 
-        console.warn(`🏋️ ADN [PERSONALIZADO]: ${externalExercises.length} ejercicios para día ${currentDayIndex}`);
+        console.warn(
+          `🏋️ ADN [PERSONALIZADO]: ${externalExercises.length} ejercicios para día ${currentDayIndex}`
+        );
 
         if (todayTraining) {
           setWorkout({
