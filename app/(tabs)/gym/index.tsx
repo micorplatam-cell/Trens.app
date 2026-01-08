@@ -7747,7 +7747,7 @@ function GymScreen() {
                 <View
                   style={{
                     position: 'absolute',
-                    top: SCREEN_WIDTH * 0.85, // Debajo de la imagen del ejercicio
+                    top: SCREEN_WIDTH * 0.85 - 80, // Extender hacia arriba para cubrir el nombre
                     left: 0,
                     right: 0,
                     bottom: 0,
@@ -8005,10 +8005,10 @@ function GymScreen() {
                                 style={{
                                   width: 75,
                                   height: 133,
-                                  backgroundColor: '#0a0a0a',
+                                  backgroundColor: spotifyIsPlaying ? 'rgba(0,0,0,0.4)' : '#0a0a0a',
                                   borderRadius: 10,
                                   borderWidth: 1.5,
-                                  borderColor: vIdx === 0 ? '#F97316' : '#27272a',
+                                  borderColor: vIdx === 0 ? '#F97316' : (spotifyIsPlaying ? 'rgba(255,255,255,0.15)' : '#27272a'),
                                   overflow: 'hidden',
                                 }}
                               >
@@ -8098,10 +8098,10 @@ function GymScreen() {
                               style={{
                                 width: 75,
                                 height: 133,
-                                backgroundColor: '#18181b',
+                                backgroundColor: spotifyIsPlaying ? 'rgba(0,0,0,0.4)' : '#18181b',
                                 borderRadius: 10,
                                 borderWidth: 1,
-                                borderColor: '#27272a',
+                                borderColor: spotifyIsPlaying ? 'rgba(255,255,255,0.15)' : '#27272a',
                               }}
                             >
                               <Text className="text-zinc-400 text-[10px] font-bold">Ver todo</Text>
@@ -8115,9 +8115,9 @@ function GymScreen() {
                         <View
                           className="items-center justify-center py-4 rounded-xl"
                           style={{
-                            backgroundColor: '#0a0a0a',
+                            backgroundColor: spotifyIsPlaying ? 'rgba(0,0,0,0.4)' : '#0a0a0a',
                             borderWidth: 1,
-                            borderColor: '#1a1a1a',
+                            borderColor: spotifyIsPlaying ? 'rgba(255,255,255,0.1)' : '#1a1a1a',
                           }}
                         >
                           <Video color="#52525b" size={24} />
