@@ -49,6 +49,7 @@ import Animated, {
   Extrapolation,
   SharedValue,
   useAnimatedScrollHandler,
+  runOnJS,
 } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
 import spotify, {
@@ -695,9 +696,25 @@ export default function SpotifyModal({
   }, []);
 
   // Manejar scroll de tabs en UI thread (sin lag) usando Reanimated
+  const handleTabSwipe = useCallback((index: number) => {
+    if (index >= 0 && index < TABS.length) {
+      const newTab = TABS[index];
+      if (newTab !== lastVisibleTab.current) {
+        lastVisibleTab.current = newTab;
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+        setActiveTab(newTab);
+        setShowPlaylistTracks(false);
+      }
+    }
+  }, []);
+
   const handleTabsScroll = useAnimatedScrollHandler({
     onScroll: (event) => {
       tabsScrollX.value = event.contentOffset.x;
+    },
+    onMomentumEnd: (event) => {
+      const index = Math.round(event.contentOffset.x / SCREEN_WIDTH);
+      runOnJS(handleTabSwipe)(index);
     },
   });
 
@@ -1676,20 +1693,8 @@ export default function SpotifyModal({
           showsHorizontalScrollIndicator={false}
           bounces={false}
           scrollEventThrottle={16}
+          decelerationRate="fast"
           onScroll={handleTabsScroll}
-          onMomentumScrollEnd={(event) => {
-            const offsetX = event.nativeEvent.contentOffset.x;
-            const index = Math.round(offsetX / SCREEN_WIDTH);
-            if (index >= 0 && index < TABS.length) {
-              const newTab = TABS[index];
-              if (newTab !== lastVisibleTab.current) {
-                lastVisibleTab.current = newTab;
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-                setActiveTab(newTab);
-                setShowPlaylistTracks(false);
-              }
-            }
-          }}
           contentContainerStyle={{ flexDirection: 'row' }}
           style={{ flex: 1 }}
           nestedScrollEnabled={true}
