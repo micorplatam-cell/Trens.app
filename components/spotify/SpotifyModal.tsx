@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -13,11 +13,9 @@ import {
   NativeSyntheticEvent,
   NativeScrollEvent,
   Platform,
-  ScrollView,
   Animated as RNAnimated,
 } from 'react-native';
 import { Alert } from '../../lib/alert';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import Slider from '@react-native-community/slider';
 import {
@@ -31,7 +29,6 @@ import {
   SkipBack,
   SkipForward,
   Wifi,
-  ChevronDown,
   Disc3,
   Library,
   X,
@@ -50,8 +47,6 @@ import Animated, {
   interpolate,
   Extrapolation,
   SharedValue,
-  runOnJS,
-  withSpring,
 } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
 import spotify, {
@@ -83,7 +78,7 @@ interface SpotifyModalProps {
 
 type TabType = 'now-playing' | 'playlists' | 'liked' | 'search';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 // ============================================================================
 // FORMATEAR DURACIÓN (helper function)
@@ -402,10 +397,9 @@ const AnimatedAlbumBackground = ({
 };
 
 // ============================================================================
-// ALBUM CAROUSEL - Carrusel de carátulas estilo Spotify
+// ALBUM DISPLAY - Carátula estática (sin swipe para cambiar canción)
 // ============================================================================
-const ALBUM_CAROUSEL_SIZE = 280;
-const ALBUM_CAROUSEL_GAP = 16;
+const ALBUM_DISPLAY_SIZE = 280;
 
 interface TrackInfo {
   name: string;
@@ -413,25 +407,9 @@ interface TrackInfo {
   album: string;
 }
 
-interface AlbumCarouselItem {
-  id: string;
-  albumArt: string | null;
-  trackInfo: TrackInfo | null;
-  type: 'prev' | 'current' | 'next';
-}
-
-interface AlbumCarouselProps {
+interface AlbumDisplayProps {
   currentAlbumArt: string | null;
-  prevAlbumArt: string | null;
-  nextAlbumArt: string | null;
   currentTrackInfo: TrackInfo | null;
-  prevTrackInfo: TrackInfo | null;
-  nextTrackInfo: TrackInfo | null;
-  currentTrackUri: string | null;
-  onNext: () => void;
-  onPrevious: () => void;
-  hasPrev: boolean;
-  hasNext: boolean;
   // Like button props
   isTrackLiked: boolean;
   checkingLikeStatus: boolean;
@@ -439,235 +417,62 @@ interface AlbumCarouselProps {
   onToggleLike: () => void;
 }
 
-const AlbumCarousel = React.memo(
+const AlbumDisplay = React.memo(
   ({
     currentAlbumArt,
-    prevAlbumArt,
-    nextAlbumArt,
     currentTrackInfo,
-    prevTrackInfo,
-    nextTrackInfo,
-    currentTrackUri,
-    onNext,
-    onPrevious,
-    hasPrev,
-    hasNext,
     isTrackLiked,
     checkingLikeStatus,
     togglingLike,
     onToggleLike,
-  }: AlbumCarouselProps) => {
-    const scrollX = useSharedValue(SCREEN_WIDTH);
-    const flatListRef = useRef<FlatList>(null);
-    const isScrolling = useRef(false);
-    const lastIndex = useRef(1);
-
-    // Estado local para mostrar la info de la canción instantáneamente
-    const [displayedTrackInfo, setDisplayedTrackInfo] = useState<TrackInfo | null>(
-      currentTrackInfo
-    );
-    const [displayedIndex, setDisplayedIndex] = useState(1); // 0=prev, 1=current, 2=next
-
-    // Ref para guardar la info del track al que el usuario hizo swipe
-    const swipeTargetInfo = useRef<TrackInfo | null>(null);
-    // Ref para saber el URI de la canción original cuando se hizo el swipe
-    const swipeOriginalUri = useRef<string | null>(null);
-
-    // Array de infos para acceso por índice
-    const trackInfos = useMemo(
-      () => [prevTrackInfo, currentTrackInfo, nextTrackInfo],
-      [prevTrackInfo, currentTrackInfo, nextTrackInfo]
-    );
-
-    // Construir los items del carrusel (siempre 3 items para el loop visual)
-    const carouselItems = useMemo<AlbumCarouselItem[]>(() => {
-      return [
-        { id: 'prev', albumArt: prevAlbumArt, trackInfo: prevTrackInfo, type: 'prev' as const },
-        {
-          id: 'current',
-          albumArt: currentAlbumArt,
-          trackInfo: currentTrackInfo,
-          type: 'current' as const,
-        },
-        { id: 'next', albumArt: nextAlbumArt, trackInfo: nextTrackInfo, type: 'next' as const },
-      ];
-    }, [
-      currentAlbumArt,
-      prevAlbumArt,
-      nextAlbumArt,
-      currentTrackInfo,
-      prevTrackInfo,
-      nextTrackInfo,
-    ]);
-
-    // Actualizar info cuando cambia la canción actual (cuando el URI cambia)
-    useEffect(() => {
-      // Si hay un swipe pendiente y el URI cambió, significa que la canción nueva llegó
-      if (swipeOriginalUri.current && currentTrackUri !== swipeOriginalUri.current) {
-        // La canción cambió - limpiar el swipe pendiente
-        swipeOriginalUri.current = null;
-        swipeTargetInfo.current = null;
-      }
-
-      // Solo actualizar displayedTrackInfo si NO hay un swipe pendiente
-      if (!swipeTargetInfo.current) {
-        setDisplayedTrackInfo(currentTrackInfo);
-        setDisplayedIndex(1);
-      }
-    }, [currentTrackUri, currentTrackInfo]);
-
-    // Resetear al centro cuando cambia la canción
-    useEffect(() => {
-      if (!isScrolling.current) {
-        flatListRef.current?.scrollToOffset({
-          offset: SCREEN_WIDTH,
-          animated: false,
-        });
-        scrollX.value = SCREEN_WIDTH;
-        lastIndex.current = 1;
-      }
-    }, [currentAlbumArt, scrollX]);
-
-    // Actualizar info instantáneamente basado en el scroll
-    const handleScroll = useCallback(
-      (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-        const offsetX = event.nativeEvent.contentOffset.x;
-        scrollX.value = offsetX;
-
-        // Si hay un swipe pendiente (esperando que Spotify cambie la canción), NO actualizar la info
-        if (swipeTargetInfo.current) {
-          return;
-        }
-
-        // Calcular qué índice está más cerca del centro
-        const currentIndex = Math.round(offsetX / SCREEN_WIDTH);
-
-        // Actualizar info instantáneamente si cambió el índice visible
-        if (currentIndex !== displayedIndex && currentIndex >= 0 && currentIndex <= 2) {
-          const newInfo = trackInfos[currentIndex];
-          if (newInfo) {
-            setDisplayedTrackInfo(newInfo);
-            setDisplayedIndex(currentIndex);
-          }
-        }
-      },
-      [scrollX, displayedIndex, trackInfos]
-    );
-
-    const handleScrollEnd = useCallback(
-      (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-        const offsetX = event.nativeEvent.contentOffset.x;
-        const newIndex = Math.round(offsetX / SCREEN_WIDTH);
-
-        if (newIndex === lastIndex.current) {
-          isScrolling.current = false;
-          return;
-        }
-
-        if (newIndex === 0 && hasPrev) {
-          // Swipe derecha → Anterior
-          isScrolling.current = true;
-          // Guardar la info del track destino y el URI original
-          swipeTargetInfo.current = prevTrackInfo;
-          swipeOriginalUri.current = currentTrackUri;
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          onPrevious();
-        } else if (newIndex === 2 && hasNext) {
-          // Swipe izquierda → Siguiente
-          isScrolling.current = true;
-          // Guardar la info del track destino y el URI original
-          swipeTargetInfo.current = nextTrackInfo;
-          swipeOriginalUri.current = currentTrackUri;
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          onNext();
-        } else {
-          // Volver al centro si no hay canción disponible
-          flatListRef.current?.scrollToOffset({
-            offset: SCREEN_WIDTH,
-            animated: true,
-          });
-          // Restaurar info de canción actual
-          swipeTargetInfo.current = null;
-          swipeOriginalUri.current = null;
-          setDisplayedTrackInfo(currentTrackInfo);
-          setDisplayedIndex(1);
-        }
-
-        // Reset después de un breve delay para permitir la actualización
-        setTimeout(() => {
-          isScrolling.current = false;
-        }, 300);
-      },
-      [
-        hasPrev,
-        hasNext,
-        onNext,
-        onPrevious,
-        currentTrackInfo,
-        prevTrackInfo,
-        nextTrackInfo,
-        currentTrackUri,
-      ]
-    );
-
-    const renderAlbumItem = useCallback(
-      ({ item, index }: { item: AlbumCarouselItem; index: number }) => {
-        const inputRange = [
-          (index - 1) * SCREEN_WIDTH,
-          index * SCREEN_WIDTH,
-          (index + 1) * SCREEN_WIDTH,
-        ];
-
-        return (
-          <AlbumCarouselItemComponent
-            item={item}
-            scrollX={scrollX}
-            inputRange={inputRange}
-            index={index}
-          />
-        );
-      },
-      [scrollX]
-    );
-
-    const getItemLayout = useCallback(
-      (_: any, index: number) => ({
-        length: SCREEN_WIDTH,
-        offset: SCREEN_WIDTH * index,
-        index,
-      }),
-      []
-    );
-
+  }: AlbumDisplayProps) => {
     return (
       <View>
-        {/* Carrusel de carátulas */}
-        <View style={{ height: ALBUM_CAROUSEL_SIZE, marginBottom: 16 }}>
-          <FlatList
-            ref={flatListRef}
-            data={carouselItems}
-            keyExtractor={(item) => `album-${item.id}`}
-            renderItem={renderAlbumItem}
-            horizontal
-            pagingEnabled
-            showsHorizontalScrollIndicator={false}
-            bounces={false}
-            decelerationRate="fast"
-            snapToInterval={SCREEN_WIDTH}
-            snapToAlignment="center"
-            contentContainerStyle={{ alignItems: 'center' }}
-            initialScrollIndex={1}
-            getItemLayout={getItemLayout}
-            onScroll={handleScroll}
-            onMomentumScrollEnd={handleScrollEnd}
-            scrollEventThrottle={16}
-            removeClippedSubviews={false}
-          />
+        {/* Carátula del álbum */}
+        <View style={{ alignItems: 'center', marginBottom: 16 }}>
+          <Animated.View
+            entering={FadeIn.duration(300)}
+            style={{
+              width: ALBUM_DISPLAY_SIZE,
+              height: ALBUM_DISPLAY_SIZE,
+              borderRadius: 16,
+              overflow: 'hidden',
+              backgroundColor: '#18181b',
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 10 },
+              shadowOpacity: 0.5,
+              shadowRadius: 20,
+              elevation: 15,
+            }}
+          >
+            {currentAlbumArt ? (
+              <Image
+                source={{ uri: currentAlbumArt }}
+                style={{ width: '100%', height: '100%' }}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+                recyclingKey={`album-current-${currentAlbumArt}`}
+                transition={200}
+              />
+            ) : (
+              <View
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: '#27272a',
+                }}
+              >
+                <Disc3 size={80} color="#1DB954" />
+              </View>
+            )}
+          </Animated.View>
         </View>
 
-        {/* Info de canción - actualización instantánea */}
+        {/* Info de canción */}
         <View style={{ paddingHorizontal: 24, marginBottom: 8 }}>
-          {displayedTrackInfo ? (
+          {currentTrackInfo ? (
             <View style={{ alignItems: 'center' }}>
               <View
                 style={{
@@ -687,24 +492,22 @@ const AlbumCarousel = React.memo(
                   }}
                   numberOfLines={2}
                 >
-                  {displayedTrackInfo.name}
+                  {currentTrackInfo.name}
                 </Text>
-                {/* Like button solo cuando es la canción actual */}
-                {displayedIndex === 1 && (
-                  <TouchableOpacity
-                    onPress={onToggleLike}
-                    disabled={checkingLikeStatus || togglingLike}
-                    style={{ marginLeft: 12 }}
-                  >
-                    {checkingLikeStatus || togglingLike ? (
-                      <ActivityIndicator size="small" color="#1DB954" />
-                    ) : isTrackLiked ? (
-                      <CheckCircle size={28} color="#1DB954" fill="#1DB954" />
-                    ) : (
-                      <PlusCircle size={28} color="#71717A" />
-                    )}
-                  </TouchableOpacity>
-                )}
+                {/* Like button */}
+                <TouchableOpacity
+                  onPress={onToggleLike}
+                  disabled={checkingLikeStatus || togglingLike}
+                  style={{ marginLeft: 12 }}
+                >
+                  {checkingLikeStatus || togglingLike ? (
+                    <ActivityIndicator size="small" color="#1DB954" />
+                  ) : isTrackLiked ? (
+                    <CheckCircle size={28} color="#1DB954" fill="#1DB954" />
+                  ) : (
+                    <PlusCircle size={28} color="#71717A" />
+                  )}
+                </TouchableOpacity>
               </View>
               <Text
                 style={{
@@ -715,7 +518,7 @@ const AlbumCarousel = React.memo(
                 }}
                 numberOfLines={1}
               >
-                {displayedTrackInfo.artist}
+                {currentTrackInfo.artist}
               </Text>
               <Text
                 style={{
@@ -726,7 +529,7 @@ const AlbumCarousel = React.memo(
                 }}
                 numberOfLines={1}
               >
-                {displayedTrackInfo.album}
+                {currentTrackInfo.album}
               </Text>
             </View>
           ) : (
@@ -738,79 +541,94 @@ const AlbumCarousel = React.memo(
   }
 );
 
-// Componente individual del álbum con animación
-interface AlbumCarouselItemComponentProps {
-  item: AlbumCarouselItem;
+// ============================================================================
+// TABS CONFIGURATION - Orden de las tabs
+// ============================================================================
+const TABS: TabType[] = ['now-playing', 'playlists', 'liked', 'search'];
+const TAB_ICONS = {
+  'now-playing': Disc3,
+  playlists: Library,
+  liked: Heart,
+  search: Search,
+};
+const TAB_LABELS = {
+  'now-playing': 'Ahora',
+  playlists: 'Playlists',
+  liked: 'Liked',
+  search: 'Buscar',
+};
+
+// ============================================================================
+// SWIPEABLE TAB BAR - Indicador de tabs con scroll horizontal
+// ============================================================================
+interface SwipeableTabBarProps {
+  activeTab: TabType;
+  onTabChange: (tab: TabType) => void;
   scrollX: SharedValue<number>;
-  inputRange: number[];
-  index: number;
 }
 
-const AlbumCarouselItemComponent = React.memo(
-  ({ item, scrollX, inputRange, index }: AlbumCarouselItemComponentProps) => {
-    const animatedStyle = useAnimatedStyle(() => {
-      const scale = interpolate(scrollX.value, inputRange, [0.75, 1, 0.75], Extrapolation.CLAMP);
+const SwipeableTabBar = React.memo(({ activeTab, onTabChange, scrollX }: SwipeableTabBarProps) => {
+  // Animación del indicador basada en scroll
+  const indicatorStyle = useAnimatedStyle(() => {
+    const tabWidth = SCREEN_WIDTH / 4;
+    const translateX = interpolate(
+      scrollX.value,
+      TABS.map((_, i) => i * SCREEN_WIDTH),
+      TABS.map((_, i) => i * tabWidth),
+      Extrapolation.CLAMP
+    );
+    return {
+      transform: [{ translateX }],
+    };
+  });
 
-      const opacity = interpolate(scrollX.value, inputRange, [0.5, 1, 0.5], Extrapolation.CLAMP);
-
-      return {
-        transform: [{ scale }],
-        opacity,
-      };
-    });
-
-    return (
-      <View
-        style={{
-          width: SCREEN_WIDTH,
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
+  return (
+    <View className="bg-black border-b border-zinc-900">
+      <View className="flex-row px-2 py-2 relative">
+        {/* Indicador animado de fondo */}
         <Animated.View
           style={[
             {
-              width: ALBUM_CAROUSEL_SIZE,
-              height: ALBUM_CAROUSEL_SIZE,
-              borderRadius: 16,
-              overflow: 'hidden',
-              backgroundColor: '#18181b',
-              shadowColor: '#000',
-              shadowOffset: { width: 0, height: 10 },
-              shadowOpacity: 0.5,
-              shadowRadius: 20,
-              elevation: 15,
+              position: 'absolute',
+              top: 8,
+              left: 8,
+              width: (SCREEN_WIDTH - 16) / 4,
+              height: '100%',
+              backgroundColor: '#1DB954',
+              borderRadius: 12,
             },
-            animatedStyle,
+            indicatorStyle,
           ]}
-        >
-          {item.albumArt ? (
-            <Image
-              source={{ uri: item.albumArt }}
-              style={{ width: '100%', height: '100%' }}
-              contentFit="cover"
-              cachePolicy="memory-disk"
-              recyclingKey={`album-${item.id}-${item.albumArt}`}
-              transition={0}
-            />
-          ) : (
-            <View
-              style={{
-                width: '100%',
-                height: '100%',
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: '#27272a',
+        />
+        
+        {/* Tab Buttons */}
+        {TABS.map((tab) => {
+          const Icon = TAB_ICONS[tab];
+          const label = TAB_LABELS[tab];
+          const isActive = activeTab === tab;
+          
+          return (
+            <TouchableOpacity
+              key={tab}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                onTabChange(tab);
               }}
+              className="flex-1 items-center py-3 z-10"
             >
-              <Disc3 size={80} color="#1DB954" />
-            </View>
-          )}
-        </Animated.View>
+              <Icon size={18} color={isActive ? '#000' : '#71717A'} />
+              <Text
+                className={`text-xs mt-1 font-bold ${isActive ? 'text-black' : 'text-zinc-500'}`}
+              >
+                {label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
-    );
-  }
-);
+    </View>
+  );
+});
 
 // ============================================================================
 // ESTADO PERSISTENTE A NIVEL DE MÓDULO (sobrevive desmontajes del Modal)
@@ -836,7 +654,6 @@ export default function SpotifyModal({
   onPrevious,
   onTrackChange,
 }: SpotifyModalProps) {
-  const insets = useSafeAreaInsets();
   // Inicializar estado desde variables persistentes
   const [activeTab, setActiveTab] = useState<TabType>(persistedTab);
   const [playlists, setPlaylists] = useState<SpotifyPlaylist[]>([]);
@@ -848,6 +665,66 @@ export default function SpotifyModal({
   const [loading, setLoading] = useState(false);
   const [showPlaylistTracks, setShowPlaylistTracks] = useState(persistedShowTracks);
 
+  // -------------------------------------------------------------------------
+  // SWIPEABLE TABS - Refs y estados para navegación horizontal
+  // -------------------------------------------------------------------------
+  const tabsScrollRef = useRef<FlatList>(null);
+  const tabsScrollX = useSharedValue(TABS.indexOf(activeTab) * SCREEN_WIDTH);
+  const isTabScrolling = useRef(false);
+
+  // Cambiar tab programáticamente (cuando se toca un botón de tab)
+  const handleTabChange = useCallback((tab: TabType) => {
+    const index = TABS.indexOf(tab);
+    if (index !== -1 && tabsScrollRef.current) {
+      isTabScrolling.current = true;
+      tabsScrollRef.current.scrollToIndex({ index, animated: true });
+      setActiveTab(tab);
+      setShowPlaylistTracks(false);
+      setTimeout(() => {
+        isTabScrolling.current = false;
+      }, 300);
+    }
+  }, []);
+
+  // Manejar scroll de tabs (cuando el usuario hace swipe)
+  const handleTabsScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const offsetX = event.nativeEvent.contentOffset.x;
+      tabsScrollX.value = offsetX;
+    },
+    [tabsScrollX]
+  );
+
+  // Manejar fin del scroll de tabs
+  const handleTabsScrollEnd = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (isTabScrolling.current) return;
+      
+      const offsetX = event.nativeEvent.contentOffset.x;
+      const index = Math.round(offsetX / SCREEN_WIDTH);
+      
+      if (index >= 0 && index < TABS.length) {
+        const newTab = TABS[index];
+        if (newTab !== activeTab) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          setActiveTab(newTab);
+          setShowPlaylistTracks(false);
+        }
+      }
+    },
+    [activeTab]
+  );
+
+  // Sincronizar scroll inicial
+  useEffect(() => {
+    if (visible && tabsScrollRef.current) {
+      const index = TABS.indexOf(activeTab);
+      setTimeout(() => {
+        tabsScrollRef.current?.scrollToIndex({ index, animated: false });
+      }, 100);
+    }
+  }, [visible]);
+
   // Guardar estado en variables de módulo cuando cambia
   useEffect(() => {
     persistedTab = activeTab;
@@ -858,8 +735,8 @@ export default function SpotifyModal({
   }, [showPlaylistTracks]);
 
   // Paginación
-  const [tracksOffset, setTracksOffset] = useState(0);
-  const [likedOffset, setLikedOffset] = useState(0);
+  const [, setTracksOffset] = useState(0);
+  const [, setLikedOffset] = useState(0);
   const [hasMoreTracks, setHasMoreTracks] = useState(true);
   const [hasMoreLiked, setHasMoreLiked] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -883,86 +760,6 @@ export default function SpotifyModal({
   const [isTrackLiked, setIsTrackLiked] = useState(false);
   const [checkingLikeStatus, setCheckingLikeStatus] = useState(false);
   const [togglingLike, setTogglingLike] = useState(false);
-
-  // Estado para almacenar álbumes adyacentes (carrusel estilo Spotify)
-  const [adjacentAlbums, setAdjacentAlbums] = useState<{
-    prev: string | null;
-    next: string | null;
-  }>({ prev: null, next: null });
-
-  // Estado para almacenar info completa de canciones adyacentes
-  const [adjacentTracks, setAdjacentTracks] = useState<{
-    prev: { name: string; artist: string; album: string } | null;
-    next: { name: string; artist: string; album: string } | null;
-  }>({ prev: null, next: null });
-
-  // Cargar info completa de canciones adyacentes desde la API de Spotify
-  const loadAdjacentTracksInfo = useCallback(async () => {
-    if (!spotifyConnected) return;
-
-    try {
-      const tracksInfo = await spotify.getAdjacentTracksInfo();
-      setAdjacentAlbums({
-        prev: tracksInfo.prev?.albumArt || null,
-        next: tracksInfo.next?.albumArt || null,
-      });
-      setAdjacentTracks({
-        prev: tracksInfo.prev
-          ? {
-              name: tracksInfo.prev.name,
-              artist: tracksInfo.prev.artist,
-              album: tracksInfo.prev.album,
-            }
-          : null,
-        next: tracksInfo.next
-          ? {
-              name: tracksInfo.next.name,
-              artist: tracksInfo.next.artist,
-              album: tracksInfo.next.album,
-            }
-          : null,
-      });
-    } catch (error) {
-      console.warn('Error cargando info de canciones adyacentes:', error);
-    }
-  }, [spotifyConnected]);
-
-  // Cargar info cuando cambia la canción actual o el contexto
-  useEffect(() => {
-    if (currentPlaylistTracks.length > 0 && currentTrackIndex >= 0) {
-      // Tenemos contexto de playlist, usar las canciones de la lista
-      const prevIndex =
-        currentTrackIndex > 0 ? currentTrackIndex - 1 : currentPlaylistTracks.length - 1;
-      const nextIndex =
-        currentTrackIndex < currentPlaylistTracks.length - 1 ? currentTrackIndex + 1 : 0;
-
-      const prevTrack = currentPlaylistTracks[prevIndex];
-      const nextTrack = currentPlaylistTracks[nextIndex];
-
-      setAdjacentAlbums({
-        prev: prevTrack?.albumArt || null,
-        next: nextTrack?.albumArt || null,
-      });
-
-      setAdjacentTracks({
-        prev: prevTrack
-          ? { name: prevTrack.name, artist: prevTrack.artist, album: prevTrack.album }
-          : null,
-        next: nextTrack
-          ? { name: nextTrack.name, artist: nextTrack.artist, album: nextTrack.album }
-          : null,
-      });
-    } else if (spotifyConnected && currentTrack) {
-      // Sin contexto de playlist, obtener info completa de la API de Spotify
-      loadAdjacentTracksInfo();
-    }
-  }, [
-    currentTrackIndex,
-    currentPlaylistTracks,
-    currentTrack?.uri,
-    spotifyConnected,
-    loadAdjacentTracksInfo,
-  ]);
 
   // -------------------------------------------------------------------------
   // PAN RESPONDER - Cerrar deslizando hacia abajo desde el header
@@ -1499,30 +1296,6 @@ export default function SpotifyModal({
   };
 
   // -------------------------------------------------------------------------
-  // RENDER TAB BUTTON
-  // -------------------------------------------------------------------------
-  const TabButton = ({ tab, icon: Icon, label }: { tab: TabType; icon: any; label: string }) => {
-    const isActive = activeTab === tab;
-    return (
-      <TouchableOpacity
-        onPress={() => {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          setActiveTab(tab);
-          setShowPlaylistTracks(false);
-        }}
-        className={`flex-1 items-center py-3 rounded-xl ${
-          isActive ? 'bg-[#1DB954]' : 'bg-transparent'
-        }`}
-      >
-        <Icon size={18} color={isActive ? '#000' : '#71717A'} />
-        <Text className={`text-xs mt-1 font-bold ${isActive ? 'text-black' : 'text-zinc-500'}`}>
-          {label}
-        </Text>
-      </TouchableOpacity>
-    );
-  };
-
-  // -------------------------------------------------------------------------
   // RENDER PLAYLIST ITEM
   // -------------------------------------------------------------------------
   const renderPlaylistItem = ({ item }: { item: SpotifyPlaylist }) => (
@@ -1582,334 +1355,395 @@ export default function SpotifyModal({
   );
 
   // -------------------------------------------------------------------------
-  // RENDER CONNECTED VIEW
+  // RENDER CONNECTED VIEW - Con swipe horizontal entre secciones
   // -------------------------------------------------------------------------
+  
+  // Renderizar contenido de "Now Playing"
+  const renderNowPlayingContent = () => (
+    <View style={{ width: SCREEN_WIDTH, flex: 1 }}>
+      {/* Fondo animado con carátula */}
+      <AnimatedAlbumBackground
+        albumArt={currentTrack?.albumArt}
+        isPlaying={playbackState?.isPlaying ?? false}
+      />
+
+      <View className="flex-1 px-0 pt-4">
+        {currentTrack ? (
+          <View className="flex-1 items-center justify-center">
+            {/* Album Display - Carátula estática */}
+            <AlbumDisplay
+              currentAlbumArt={currentTrack.albumArt}
+              currentTrackInfo={{
+                name: currentTrack.name,
+                artist: currentTrack.artist,
+                album: currentTrack.album,
+              }}
+              isTrackLiked={isTrackLiked}
+              checkingLikeStatus={checkingLikeStatus}
+              togglingLike={togglingLike}
+              onToggleLike={handleToggleLike}
+            />
+
+            {/* Progress Bar Slider */}
+            <View className="w-full mb-6 px-6">
+              <Slider
+                style={{ width: '100%', height: 40 }}
+                minimumValue={0}
+                maximumValue={currentTrack.durationMs || 1}
+                value={isSeeking ? currentPosition : currentPosition}
+                onSlidingStart={handleSeekStart}
+                onSlidingComplete={handleSeekComplete}
+                minimumTrackTintColor="#1DB954"
+                maximumTrackTintColor="#27272A"
+                thumbTintColor="#1DB954"
+                disabled={false}
+              />
+              <View className="flex-row justify-between px-1 -mt-1">
+                <Text className="text-zinc-500 text-xs font-mono">
+                  {formatDuration(currentPosition)}
+                </Text>
+                <Text className="text-zinc-500 text-xs font-mono">
+                  {formatDuration(currentTrack.durationMs || 0)}
+                </Text>
+              </View>
+            </View>
+
+            {/* Controls - Disponibles para todos */}
+            <View className="flex-row items-center justify-center gap-8">
+              <TouchableOpacity
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  handlePrevInPlaylist();
+                }}
+                className="w-14 h-14 bg-zinc-800 rounded-full items-center justify-center"
+              >
+                <SkipBack size={24} color="#fff" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  onPlayPause();
+                }}
+                className="w-20 h-20 bg-[#1DB954] rounded-full items-center justify-center"
+              >
+                {playbackState?.isPlaying ? (
+                  <Pause size={36} color="#000" fill="#000" />
+                ) : (
+                  <Play size={36} color="#000" fill="#000" style={{ marginLeft: 4 }} />
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  handleNextInPlaylist();
+                }}
+                className="w-14 h-14 bg-zinc-800 rounded-full items-center justify-center"
+              >
+                <SkipForward size={24} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : (
+          <View className="flex-1 items-center justify-center">
+            <View className="w-32 h-32 bg-zinc-900 rounded-full items-center justify-center mb-6">
+              <Music size={48} color="#71717A" />
+            </View>
+            <Text className="text-white font-bold text-xl mb-2">Sin reproducción</Text>
+            <Text className="text-zinc-500 text-center">
+              Abre Spotify y reproduce algo,{'\n'}o busca una canción aquí
+            </Text>
+            <TouchableOpacity
+              onPress={() => handleTabChange('search')}
+              className="mt-6 bg-[#1DB954] px-6 py-3 rounded-full"
+            >
+              <Text className="text-black font-bold">Buscar música</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+    </View>
+  );
+
+  // Renderizar contenido de "Playlists"
+  const renderPlaylistsContent = () => (
+    <View style={{ width: SCREEN_WIDTH, flex: 1, backgroundColor: '#0a0a0a' }}>
+      {showPlaylistTracks && selectedPlaylist ? (
+        // Tracks de playlist seleccionada
+        <View className="flex-1">
+          {/* Header de playlist */}
+          <View className="flex-row items-center px-4 py-4 border-b border-zinc-800">
+            <TouchableOpacity
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setShowPlaylistTracks(false);
+                setSelectedPlaylist(null);
+              }}
+              className="w-10 h-10 bg-zinc-800 rounded-full items-center justify-center mr-3"
+            >
+              <ChevronLeft size={20} color="#fff" />
+            </TouchableOpacity>
+            {selectedPlaylist.imageUrl && (
+              <Image
+                source={{ uri: selectedPlaylist.imageUrl }}
+                style={{ width: 40, height: 40, borderRadius: 6 }}
+                contentFit="cover"
+              />
+            )}
+            <View className="flex-1 ml-3">
+              <Text className="text-white font-bold text-base" numberOfLines={1}>
+                {selectedPlaylist.name}
+              </Text>
+              <Text className="text-zinc-500 text-xs">
+                {tracks.length}
+                {hasMoreTracks ? '+' : ''} / {selectedPlaylist.trackCount} canciones
+              </Text>
+            </View>
+          </View>
+
+          {/* Lista de tracks */}
+          {loading ? (
+            <View className="flex-1 items-center justify-center">
+              <ActivityIndicator size="large" color="#1DB954" />
+            </View>
+          ) : (
+            <FlatList
+              data={tracks}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item, index }) =>
+                renderTrackItemWithContext(item, index, tracks, 'playlist')
+              }
+              style={{ flex: 1 }}
+              contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
+              onEndReached={loadMorePlaylistTracks}
+              onEndReachedThreshold={0.3}
+              nestedScrollEnabled
+              ListFooterComponent={
+                loadingMore ? (
+                  <View className="py-4 items-center">
+                    <ActivityIndicator size="small" color="#1DB954" />
+                    <Text className="text-zinc-500 text-xs mt-2">
+                      Cargando más canciones...
+                    </Text>
+                  </View>
+                ) : null
+              }
+            />
+          )}
+        </View>
+      ) : (
+        // Lista de playlists
+        <View className="flex-1">
+          {loading ? (
+            <View className="flex-1 items-center justify-center">
+              <ActivityIndicator size="large" color="#1DB954" />
+            </View>
+          ) : (
+            <FlatList
+              data={playlists}
+              keyExtractor={(item) => item.id}
+              renderItem={renderPlaylistItem}
+              style={{ flex: 1 }}
+              contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
+              nestedScrollEnabled
+              ListEmptyComponent={
+                <View className="items-center justify-center py-20">
+                  <Library size={48} color="#71717A" />
+                  <Text className="text-zinc-400 mt-4 text-center">
+                    No se encontraron playlists.{'\n'}
+                    Reconecta Spotify si es necesario.
+                  </Text>
+                </View>
+              }
+            />
+          )}
+        </View>
+      )}
+    </View>
+  );
+
+  // Renderizar contenido de "Liked Songs"
+  const renderLikedContent = () => (
+    <View style={{ width: SCREEN_WIDTH, flex: 1, backgroundColor: '#0a0a0a' }}>
+      {/* Header Liked Songs */}
+      <LinearGradient colors={['#5B21B6', '#1E1B4B', '#000']} className="px-4 pt-4 pb-6">
+        <View className="flex-row items-center">
+          <View
+            className="w-16 h-16 bg-gradient-to-br from-purple-500 to-blue-500 rounded-lg items-center justify-center mr-4"
+            style={{ backgroundColor: '#8B5CF6' }}
+          >
+            <Heart size={28} color="#fff" fill="#fff" />
+          </View>
+          <View className="flex-1">
+            <Text className="text-white font-bold text-xl">Liked Songs</Text>
+            <Text className="text-zinc-300 text-sm mt-1">
+              {likedSongs.length}
+              {hasMoreLiked ? '+' : ''} canciones guardadas
+            </Text>
+          </View>
+        </View>
+      </LinearGradient>
+
+      {loading ? (
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator size="large" color="#1DB954" />
+        </View>
+      ) : (
+        <View className="flex-1">
+          <FlatList
+            data={likedSongs}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item, index }) =>
+              renderTrackItemWithContext(item, index, likedSongs, 'liked')
+            }
+            style={{ flex: 1 }}
+            contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
+            onEndReached={loadMoreLikedSongs}
+            onEndReachedThreshold={0.3}
+            nestedScrollEnabled
+            ListFooterComponent={
+              loadingMore ? (
+                <View className="py-4 items-center">
+                  <ActivityIndicator size="small" color="#1DB954" />
+                  <Text className="text-zinc-500 text-xs mt-2">
+                    Cargando más canciones...
+                  </Text>
+                </View>
+              ) : null
+            }
+            ListEmptyComponent={
+              <View className="items-center justify-center py-20">
+                <Heart size={48} color="#71717A" />
+                <Text className="text-zinc-400 mt-4">No tienes canciones guardadas</Text>
+              </View>
+            }
+          />
+        </View>
+      )}
+    </View>
+  );
+
+  // Renderizar contenido de "Search"
+  const renderSearchContent = () => (
+    <View style={{ width: SCREEN_WIDTH, flex: 1, backgroundColor: '#0a0a0a' }}>
+      {/* Search Bar - Búsqueda en tiempo real */}
+      <View className="px-4 pt-4 pb-2">
+        <View className="flex-row items-center bg-zinc-900 rounded-xl px-4 py-3 border border-zinc-800">
+          <Search size={20} color="#71717A" />
+          <TextInput
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder="¿Qué quieres escuchar?"
+            placeholderTextColor="#71717A"
+            className="flex-1 ml-3 text-white text-base"
+            returnKeyType="search"
+            autoCorrect={false}
+            autoCapitalize="none"
+          />
+          {loading && (
+            <ActivityIndicator size="small" color="#1DB954" style={{ marginRight: 8 }} />
+          )}
+          {searchQuery.length > 0 && !loading && (
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <X size={18} color="#71717A" />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
+      {searchResults.length > 0 ? (
+        <View className="flex-1">
+          <FlatList
+            data={searchResults}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item, index }) =>
+              renderTrackItemWithContext(item, index, searchResults, 'search')
+            }
+            style={{ flex: 1 }}
+            contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
+            nestedScrollEnabled
+          />
+        </View>
+      ) : (
+        <View className="flex-1 items-center justify-center px-8">
+          <Search size={48} color="#71717A" />
+          <Text className="text-zinc-400 mt-4 text-center">
+            Busca por nombre de canción, artista o álbum
+          </Text>
+        </View>
+      )}
+    </View>
+  );
+
+  // Renderizar cada página del swipe
+  const renderTabPage = useCallback(({ item }: { item: TabType }) => {
+    switch (item) {
+      case 'now-playing':
+        return renderNowPlayingContent();
+      case 'playlists':
+        return renderPlaylistsContent();
+      case 'liked':
+        return renderLikedContent();
+      case 'search':
+        return renderSearchContent();
+      default:
+        return null;
+    }
+  }, [
+    currentTrack, 
+    playbackState, 
+    isTrackLiked, 
+    checkingLikeStatus, 
+    togglingLike, 
+    currentPosition, 
+    isSeeking,
+    showPlaylistTracks,
+    selectedPlaylist,
+    tracks,
+    playlists,
+    likedSongs,
+    searchResults,
+    searchQuery,
+    loading,
+    loadingMore,
+    hasMoreTracks,
+    hasMoreLiked,
+  ]);
+
+  const getTabItemLayout = useCallback(
+    (_: any, index: number) => ({
+      length: SCREEN_WIDTH,
+      offset: SCREEN_WIDTH * index,
+      index,
+    }),
+    []
+  );
+
   const renderConnectedView = () => {
     return (
       <View className="flex-1">
-        {/* NOW PLAYING TAB */}
-        {activeTab === 'now-playing' && (
-          <View className="flex-1">
-            {/* Fondo animado con carátula */}
-            <AnimatedAlbumBackground
-              albumArt={currentTrack?.albumArt}
-              isPlaying={playbackState?.isPlaying ?? false}
-            />
-
-            <View className="flex-1 px-0 pt-4">
-              {currentTrack ? (
-                <View className="flex-1 items-center justify-center">
-                  {/* Album Carousel - Swipe para cambiar canción con info sincronizada */}
-                  <AlbumCarousel
-                    currentAlbumArt={currentTrack.albumArt}
-                    prevAlbumArt={adjacentAlbums.prev}
-                    nextAlbumArt={adjacentAlbums.next}
-                    currentTrackInfo={{
-                      name: currentTrack.name,
-                      artist: currentTrack.artist,
-                      album: currentTrack.album,
-                    }}
-                    prevTrackInfo={adjacentTracks.prev}
-                    nextTrackInfo={adjacentTracks.next}
-                    currentTrackUri={currentTrack.uri}
-                    onNext={handleNextInPlaylist}
-                    onPrevious={handlePrevInPlaylist}
-                    hasPrev={!!adjacentAlbums.prev}
-                    hasNext={!!adjacentAlbums.next}
-                    isTrackLiked={isTrackLiked}
-                    checkingLikeStatus={checkingLikeStatus}
-                    togglingLike={togglingLike}
-                    onToggleLike={handleToggleLike}
-                  />
-
-                  {/* Progress Bar Slider */}
-                  <View className="w-full mb-6 px-6">
-                    <Slider
-                      style={{ width: '100%', height: 40 }}
-                      minimumValue={0}
-                      maximumValue={currentTrack.durationMs || 1}
-                      value={isSeeking ? currentPosition : currentPosition}
-                      onSlidingStart={handleSeekStart}
-                      onSlidingComplete={handleSeekComplete}
-                      minimumTrackTintColor="#1DB954"
-                      maximumTrackTintColor="#27272A"
-                      thumbTintColor="#1DB954"
-                      disabled={false}
-                    />
-                    <View className="flex-row justify-between px-1 -mt-1">
-                      <Text className="text-zinc-500 text-xs font-mono">
-                        {formatDuration(currentPosition)}
-                      </Text>
-                      <Text className="text-zinc-500 text-xs font-mono">
-                        {formatDuration(currentTrack.durationMs || 0)}
-                      </Text>
-                    </View>
-                  </View>
-
-                  {/* Controls - Disponibles para todos */}
-                  <View className="flex-row items-center justify-center gap-8">
-                    <TouchableOpacity
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                        handlePrevInPlaylist();
-                      }}
-                      className="w-14 h-14 bg-zinc-800 rounded-full items-center justify-center"
-                    >
-                      <SkipBack size={24} color="#fff" />
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                        onPlayPause();
-                      }}
-                      className="w-20 h-20 bg-[#1DB954] rounded-full items-center justify-center"
-                    >
-                      {playbackState?.isPlaying ? (
-                        <Pause size={36} color="#000" fill="#000" />
-                      ) : (
-                        <Play size={36} color="#000" fill="#000" style={{ marginLeft: 4 }} />
-                      )}
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                        handleNextInPlaylist();
-                      }}
-                      className="w-14 h-14 bg-zinc-800 rounded-full items-center justify-center"
-                    >
-                      <SkipForward size={24} color="#fff" />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ) : (
-                <View className="flex-1 items-center justify-center">
-                  <View className="w-32 h-32 bg-zinc-900 rounded-full items-center justify-center mb-6">
-                    <Music size={48} color="#71717A" />
-                  </View>
-                  <Text className="text-white font-bold text-xl mb-2">Sin reproducción</Text>
-                  <Text className="text-zinc-500 text-center">
-                    Abre Spotify y reproduce algo,{'\n'}o busca una canción aquí
-                  </Text>
-                  <TouchableOpacity
-                    onPress={() => setActiveTab('search')}
-                    className="mt-6 bg-[#1DB954] px-6 py-3 rounded-full"
-                  >
-                    <Text className="text-black font-bold">Buscar música</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-            </View>
-          </View>
-        )}
-
-        {/* PLAYLISTS TAB */}
-        {activeTab === 'playlists' && (
-          <View className="flex-1">
-            {showPlaylistTracks && selectedPlaylist ? (
-              // Tracks de playlist seleccionada
-              <View className="flex-1">
-                {/* Header de playlist */}
-                <View className="flex-row items-center px-4 py-4 border-b border-zinc-800">
-                  <TouchableOpacity
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                      setShowPlaylistTracks(false);
-                      setSelectedPlaylist(null);
-                    }}
-                    className="w-10 h-10 bg-zinc-800 rounded-full items-center justify-center mr-3"
-                  >
-                    <ChevronLeft size={20} color="#fff" />
-                  </TouchableOpacity>
-                  {selectedPlaylist.imageUrl && (
-                    <Image
-                      source={{ uri: selectedPlaylist.imageUrl }}
-                      style={{ width: 40, height: 40, borderRadius: 6 }}
-                      contentFit="cover"
-                    />
-                  )}
-                  <View className="flex-1 ml-3">
-                    <Text className="text-white font-bold text-base" numberOfLines={1}>
-                      {selectedPlaylist.name}
-                    </Text>
-                    <Text className="text-zinc-500 text-xs">
-                      {tracks.length}
-                      {hasMoreTracks ? '+' : ''} / {selectedPlaylist.trackCount} canciones
-                    </Text>
-                  </View>
-                </View>
-
-                {/* Lista de tracks */}
-                {loading ? (
-                  <View className="flex-1 items-center justify-center">
-                    <ActivityIndicator size="large" color="#1DB954" />
-                  </View>
-                ) : (
-                  <FlatList
-                    data={tracks}
-                    keyExtractor={(item) => item.id}
-                    renderItem={({ item, index }) =>
-                      renderTrackItemWithContext(item, index, tracks, 'playlist')
-                    }
-                    style={{ flex: 1 }}
-                    contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
-                    onEndReached={loadMorePlaylistTracks}
-                    onEndReachedThreshold={0.3}
-                    ListFooterComponent={
-                      loadingMore ? (
-                        <View className="py-4 items-center">
-                          <ActivityIndicator size="small" color="#1DB954" />
-                          <Text className="text-zinc-500 text-xs mt-2">
-                            Cargando más canciones...
-                          </Text>
-                        </View>
-                      ) : null
-                    }
-                  />
-                )}
-              </View>
-            ) : (
-              // Lista de playlists
-              <View className="flex-1">
-                {loading ? (
-                  <View className="flex-1 items-center justify-center">
-                    <ActivityIndicator size="large" color="#1DB954" />
-                  </View>
-                ) : (
-                  <FlatList
-                    data={playlists}
-                    keyExtractor={(item) => item.id}
-                    renderItem={renderPlaylistItem}
-                    style={{ flex: 1 }}
-                    contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
-                    ListEmptyComponent={
-                      <View className="items-center justify-center py-20">
-                        <Library size={48} color="#71717A" />
-                        <Text className="text-zinc-400 mt-4 text-center">
-                          No se encontraron playlists.{'\n'}
-                          Reconecta Spotify si es necesario.
-                        </Text>
-                      </View>
-                    }
-                  />
-                )}
-              </View>
-            )}
-          </View>
-        )}
-
-        {/* LIKED SONGS TAB */}
-        {activeTab === 'liked' && (
-          <View className="flex-1">
-            {/* Header Liked Songs */}
-            <LinearGradient colors={['#5B21B6', '#1E1B4B', '#000']} className="px-4 pt-4 pb-6">
-              <View className="flex-row items-center">
-                <View
-                  className="w-16 h-16 bg-gradient-to-br from-purple-500 to-blue-500 rounded-lg items-center justify-center mr-4"
-                  style={{ backgroundColor: '#8B5CF6' }}
-                >
-                  <Heart size={28} color="#fff" fill="#fff" />
-                </View>
-                <View className="flex-1">
-                  <Text className="text-white font-bold text-xl">Liked Songs</Text>
-                  <Text className="text-zinc-300 text-sm mt-1">
-                    {likedSongs.length}
-                    {hasMoreLiked ? '+' : ''} canciones guardadas
-                  </Text>
-                </View>
-              </View>
-            </LinearGradient>
-
-            {loading ? (
-              <View className="flex-1 items-center justify-center">
-                <ActivityIndicator size="large" color="#1DB954" />
-              </View>
-            ) : (
-              <View className="flex-1">
-                <FlatList
-                  data={likedSongs}
-                  keyExtractor={(item) => item.id}
-                  renderItem={({ item, index }) =>
-                    renderTrackItemWithContext(item, index, likedSongs, 'liked')
-                  }
-                  style={{ flex: 1 }}
-                  contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
-                  onEndReached={loadMoreLikedSongs}
-                  onEndReachedThreshold={0.3}
-                  ListFooterComponent={
-                    loadingMore ? (
-                      <View className="py-4 items-center">
-                        <ActivityIndicator size="small" color="#1DB954" />
-                        <Text className="text-zinc-500 text-xs mt-2">
-                          Cargando más canciones...
-                        </Text>
-                      </View>
-                    ) : null
-                  }
-                  ListEmptyComponent={
-                    <View className="items-center justify-center py-20">
-                      <Heart size={48} color="#71717A" />
-                      <Text className="text-zinc-400 mt-4">No tienes canciones guardadas</Text>
-                    </View>
-                  }
-                />
-              </View>
-            )}
-          </View>
-        )}
-
-        {/* SEARCH TAB */}
-        {activeTab === 'search' && (
-          <View className="flex-1">
-            {/* Search Bar - Búsqueda en tiempo real */}
-            <View className="px-4 pt-4 pb-2">
-              <View className="flex-row items-center bg-zinc-900 rounded-xl px-4 py-3 border border-zinc-800">
-                <Search size={20} color="#71717A" />
-                <TextInput
-                  value={searchQuery}
-                  onChangeText={setSearchQuery}
-                  placeholder="¿Qué quieres escuchar?"
-                  placeholderTextColor="#71717A"
-                  className="flex-1 ml-3 text-white text-base"
-                  returnKeyType="search"
-                  autoFocus
-                  autoCorrect={false}
-                  autoCapitalize="none"
-                />
-                {loading && (
-                  <ActivityIndicator size="small" color="#1DB954" style={{ marginRight: 8 }} />
-                )}
-                {searchQuery.length > 0 && !loading && (
-                  <TouchableOpacity onPress={() => setSearchQuery('')}>
-                    <X size={18} color="#71717A" />
-                  </TouchableOpacity>
-                )}
-              </View>
-            </View>
-
-            {searchResults.length > 0 ? (
-              <View className="flex-1">
-                <FlatList
-                  data={searchResults}
-                  keyExtractor={(item) => item.id}
-                  renderItem={({ item, index }) =>
-                    renderTrackItemWithContext(item, index, searchResults, 'search')
-                  }
-                  style={{ flex: 1 }}
-                  contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
-                />
-              </View>
-            ) : (
-              <View className="flex-1 items-center justify-center px-8">
-                <Search size={48} color="#71717A" />
-                <Text className="text-zinc-400 mt-4 text-center">
-                  Busca por nombre de canción, artista o álbum
-                </Text>
-              </View>
-            )}
-          </View>
-        )}
+        {/* FlatList horizontal para swipe entre secciones */}
+        <FlatList
+          ref={tabsScrollRef}
+          data={TABS}
+          keyExtractor={(item) => item}
+          renderItem={renderTabPage}
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          bounces={false}
+          decelerationRate="fast"
+          snapToInterval={SCREEN_WIDTH}
+          snapToAlignment="center"
+          initialScrollIndex={TABS.indexOf(activeTab)}
+          getItemLayout={getTabItemLayout}
+          onScroll={handleTabsScroll}
+          onMomentumScrollEnd={handleTabsScrollEnd}
+          scrollEventThrottle={16}
+          removeClippedSubviews={false}
+          style={{ flex: 1 }}
+        />
 
         {/* Mini Player (si hay track y no está en Now Playing) */}
         {currentTrack && activeTab !== 'now-playing' && (
@@ -1917,7 +1751,7 @@ export default function SpotifyModal({
             currentTrack={currentTrack}
             isPlaying={playbackState?.isPlaying || false}
             onPlayPause={onPlayPause}
-            onExpand={() => setActiveTab('now-playing')}
+            onExpand={() => handleTabChange('now-playing')}
             isPro={isPro}
           />
         )}
@@ -2107,13 +1941,12 @@ export default function SpotifyModal({
 
           {spotifyConnected ? (
             <>
-              {/* Tab Bar - Solo si está conectado */}
-              <View className="flex-row px-4 py-3 bg-black border-b border-zinc-900">
-                <TabButton tab="now-playing" icon={Disc3} label="Ahora" />
-                <TabButton tab="playlists" icon={Library} label="Playlists" />
-                <TabButton tab="liked" icon={Heart} label="Liked" />
-                <TabButton tab="search" icon={Search} label="Buscar" />
-              </View>
+              {/* Tab Bar con indicador animado sincronizado con swipe */}
+              <SwipeableTabBar 
+                activeTab={activeTab} 
+                onTabChange={handleTabChange}
+                scrollX={tabsScrollX}
+              />
 
               {renderConnectedView()}
             </>
