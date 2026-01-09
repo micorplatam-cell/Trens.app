@@ -48,6 +48,7 @@ import Animated, {
   interpolate,
   Extrapolation,
   SharedValue,
+  useAnimatedScrollHandler,
 } from 'react-native-reanimated';
 import { BlurView } from 'expo-blur';
 import spotify, {
@@ -671,7 +672,7 @@ export default function SpotifyModal({
   // -------------------------------------------------------------------------
   // SWIPEABLE TABS - Sistema robusto de navegación horizontal
   // -------------------------------------------------------------------------
-  const tabsScrollRef = useRef<ScrollView>(null);
+  const tabsScrollRef = useRef<Animated.ScrollView>(null);
   const tabsScrollX = useSharedValue(TABS.indexOf(activeTab) * SCREEN_WIDTH);
   const isTabScrolling = useRef(false);
   const lastVisibleTab = useRef<TabType>(activeTab);
@@ -684,7 +685,7 @@ export default function SpotifyModal({
       lastVisibleTab.current = tab;
       // Vibración al cambiar de sección
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-      tabsScrollRef.current.scrollTo({ x: index * SCREEN_WIDTH, animated: true });
+      (tabsScrollRef.current as any).scrollTo({ x: index * SCREEN_WIDTH, animated: true });
       setActiveTab(tab);
       setShowPlaylistTracks(false);
       setTimeout(() => {
@@ -693,22 +694,21 @@ export default function SpotifyModal({
     }
   }, []);
 
-  // Manejar scroll de tabs (solo para animación del indicador)
-  const handleTabsScroll = useCallback(
-    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const offsetX = event.nativeEvent.contentOffset.x;
-      tabsScrollX.value = offsetX;
+  // Manejar scroll de tabs en UI thread (sin lag) usando Reanimated
+  const handleTabsScroll = useAnimatedScrollHandler({
+    onScroll: (event) => {
+      tabsScrollX.value = event.contentOffset.x;
     },
-    [tabsScrollX]
-  );
+  });
 
   // Sincronizar scroll inicial
   useEffect(() => {
     if (visible && tabsScrollRef.current) {
       const index = TABS.indexOf(activeTab);
       lastVisibleTab.current = activeTab;
+      tabsScrollX.value = index * SCREEN_WIDTH;
       setTimeout(() => {
-        tabsScrollRef.current?.scrollToIndex({ index, animated: false });
+        (tabsScrollRef.current as any)?.scrollTo({ x: index * SCREEN_WIDTH, animated: false });
       }, 100);
     }
   }, [visible]);
@@ -1263,17 +1263,20 @@ export default function SpotifyModal({
   // Cargar datos al cambiar de tab (solo si no hay datos)
   useEffect(() => {
     if (visible && spotifyConnected) {
+      console.log('🎵 Tab cambió a:', activeTab, 'playlists.length:', playlists.length, 'likedSongs.length:', likedSongs.length);
       // Pequeño delay para asegurar que el swipe termine antes de cargar
       const timer = setTimeout(() => {
-        if (activeTab === 'playlists' && playlists.length === 0) {
+        if (activeTab === 'playlists') {
+          console.log('🎵 Cargando playlists...');
           loadPlaylists();
-        } else if (activeTab === 'liked' && likedSongs.length === 0) {
+        } else if (activeTab === 'liked') {
+          console.log('🎵 Cargando liked songs...');
           loadLikedSongs();
         }
-      }, 100);
+      }, 150);
       return () => clearTimeout(timer);
     }
-  }, [activeTab, visible, spotifyConnected]);
+  }, [activeTab, visible, spotifyConnected, loadPlaylists, loadLikedSongs]);
 
   // NO reseteamos el estado al cerrar para mantener la navegación
   // El usuario verá exactamente donde se quedó cuando vuelva a abrir el modal
@@ -1665,9 +1668,9 @@ export default function SpotifyModal({
   const renderConnectedView = () => {
     return (
       <View className="flex-1">
-        {/* ScrollView horizontal para swipe entre secciones */}
-        <ScrollView
-          ref={tabsScrollRef as any}
+        {/* Animated.ScrollView horizontal para swipe entre secciones - UI thread */}
+        <Animated.ScrollView
+          ref={tabsScrollRef}
           horizontal
           pagingEnabled
           showsHorizontalScrollIndicator={false}
@@ -1690,6 +1693,7 @@ export default function SpotifyModal({
           contentContainerStyle={{ flexDirection: 'row' }}
           style={{ flex: 1 }}
           nestedScrollEnabled={true}
+          keyboardShouldPersistTaps="handled"
         >
           {/* Now Playing */}
           {renderNowPlayingContent()}
@@ -1702,7 +1706,7 @@ export default function SpotifyModal({
 
           {/* Search */}
           {renderSearchContent()}
-        </ScrollView>
+        </Animated.ScrollView>
 
         {/* Mini Player (si hay track y no está en Now Playing) */}
         {currentTrack && activeTab !== 'now-playing' && (
