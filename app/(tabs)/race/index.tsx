@@ -238,13 +238,42 @@ const AddEventModal = ({
 
   return (
     <Modal visible={visible} animationType="slide" transparent>
-      <View className="flex-1 bg-black/80 justify-end">
-        <View className="bg-zinc-900 rounded-t-3xl p-6">
-          <View className="flex-row items-center justify-between mb-6">
+      <View className="flex-1 bg-transparent justify-end">
+        <View
+          className="rounded-t-3xl p-6"
+          style={{
+            backgroundColor: '#0a0a0a',
+            borderTopWidth: 2,
+            borderTopColor: `${sportColor}80`,
+            overflow: 'hidden',
+          }}
+        >
+          {/* Línea de acento superior */}
+          <View
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              height: 3,
+              backgroundColor: sportColor,
+              shadowColor: sportColor,
+              shadowOffset: { width: 0, height: 0 },
+              shadowOpacity: 0.8,
+              shadowRadius: 10,
+              zIndex: 10,
+            }}
+          />
+
+          {/* Drag Indicator */}
+          <View className="items-center mb-4">
+            <View className="w-12 h-1.5 bg-zinc-600 rounded-full" />
+          </View>
+
+          {/* Header */}
+          <View className="items-center mb-6">
             <Text className="text-white text-xl font-bold">Nuevo Evento</Text>
-            <TouchableOpacity onPress={onClose}>
-              <X size={24} color="#A1A1AA" />
-            </TouchableOpacity>
+            <Text className="text-zinc-500 text-sm mt-1">Desliza para cerrar</Text>
           </View>
 
           {/* Tipo de evento */}

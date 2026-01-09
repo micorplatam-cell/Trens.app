@@ -1,5 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, TouchableOpacity, Modal, ScrollView, PanResponder, Dimensions } from 'react-native';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  Modal,
+  ScrollView,
+  PanResponder,
+  Dimensions,
+} from 'react-native';
 import {
   Dumbbell,
   Bike,
@@ -81,7 +89,13 @@ function SwipeableSportItem({
       '⚠️ Desactivar Deporte',
       `¿Quieres quitar ${sport.name} de tu lista?\n\nTus datos y progreso se conservarán. Podrás reactivarlo cuando quieras.`,
       [
-        { text: 'Cancelar', style: 'cancel', onPress: () => { translateX.value = withSpring(0); } },
+        {
+          text: 'Cancelar',
+          style: 'cancel',
+          onPress: () => {
+            translateX.value = withSpring(0);
+          },
+        },
         {
           text: 'Desactivar',
           style: 'destructive',
@@ -266,7 +280,8 @@ interface SportSwitcherModalProps {
 }
 
 export function SportSwitcherModal({ visible, onClose }: SportSwitcherModalProps) {
-  const { activeSport, allSports, userSports, setActiveSport, addUserSport, removeUserSport } = useSport();
+  const { activeSport, allSports, userSports, setActiveSport, addUserSport, removeUserSport } =
+    useSport();
 
   // -------------------------------------------------------------------------
   // PAN RESPONDER - Cerrar deslizando hacia abajo
@@ -353,20 +368,47 @@ export function SportSwitcherModal({ visible, onClose }: SportSwitcherModalProps
     <Modal visible={visible} transparent={true} animationType="slide" onRequestClose={onClose}>
       <View className="flex-1 bg-transparent justify-end">
         <Animated.View
-          className="bg-zinc-900 rounded-t-3xl"
-          style={[{ height: '70%', backgroundColor: '#18181b' }, animatedStyle]}
+          style={[
+            {
+              height: '70%',
+              backgroundColor: '#0a0a0a',
+              borderTopLeftRadius: 24,
+              borderTopRightRadius: 24,
+              borderTopWidth: 2,
+              borderTopColor: 'rgba(220, 38, 38, 0.5)',
+              overflow: 'hidden',
+            },
+            animatedStyle,
+          ]}
         >
+          {/* Línea de acento superior */}
+          <View
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              height: 3,
+              backgroundColor: '#DC2626',
+              shadowColor: '#DC2626',
+              shadowOffset: { width: 0, height: 0 },
+              shadowOpacity: 0.8,
+              shadowRadius: 10,
+              zIndex: 10,
+            }}
+          />
+
           {/* Header completo - Draggable para cerrar */}
           <View {...panResponder.panHandlers} className="border-b border-zinc-800">
             {/* Handle */}
-            <View className="items-center py-3">
-              <View className="w-10 h-1 bg-zinc-600 rounded-full" />
+            <View className="items-center pt-4 pb-2">
+              <View className="w-12 h-1.5 bg-zinc-600 rounded-full" />
             </View>
 
             {/* Títulos */}
             <View className="px-6 pb-4">
               <Text className="text-white font-bold text-xl">Cambiar Deporte</Text>
-              <Text className="text-zinc-500 text-sm mt-1">Selecciona tu deporte activo</Text>
+              <Text className="text-zinc-500 text-sm mt-1">Desliza para cerrar</Text>
             </View>
           </View>
 

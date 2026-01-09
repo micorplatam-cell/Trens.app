@@ -85,6 +85,10 @@ export default function SelectRecordVideoModal({
   useEffect(() => {
     if (visible) {
       translateY.value = 0;
+      // Haptic feedback cuando abre
+      setTimeout(() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      }, 300);
     }
   }, [visible, translateY]);
 
@@ -106,20 +110,47 @@ export default function SelectRecordVideoModal({
     <Modal visible={visible} transparent={true} animationType="slide" onRequestClose={handleClose}>
       <View className="flex-1 bg-transparent justify-end">
         <Animated.View
-          className="bg-black rounded-t-3xl"
-          style={[{ height: '85%', backgroundColor: '#000' }, animatedPanelStyle]}
+          style={[
+            {
+              height: '85%',
+              backgroundColor: '#0a0a0a',
+              borderTopLeftRadius: 24,
+              borderTopRightRadius: 24,
+              borderTopWidth: 2,
+              borderTopColor: 'rgba(249, 115, 22, 0.5)',
+              overflow: 'hidden',
+            },
+            animatedPanelStyle,
+          ]}
         >
+          {/* Línea de acento superior */}
+          <View
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              height: 3,
+              backgroundColor: '#F97316',
+              shadowColor: '#F97316',
+              shadowOffset: { width: 0, height: 0 },
+              shadowOpacity: 0.8,
+              shadowRadius: 10,
+              zIndex: 10,
+            }}
+          />
+
           {/* Header con PanResponder para cerrar deslizando */}
           <View
             {...panResponder.panHandlers}
-            className="flex-row items-center justify-between px-5 pt-6 pb-4 border-b border-zinc-800"
+            className="flex-row items-center justify-between px-5 pt-5 pb-4 border-b border-zinc-800"
           >
             {/* Indicador de drag */}
             <View className="absolute top-2 left-0 right-0 items-center">
-              <View className="w-10 h-1 bg-zinc-600 rounded-full" />
+              <View className="w-12 h-1.5 bg-zinc-600 rounded-full" />
             </View>
 
-            <View className="flex-row items-center">
+            <View className="flex-row items-center mt-3">
               <View className="w-10 h-10 rounded-full bg-fire-orange/20 items-center justify-center mr-3">
                 <Trophy size={22} color="#F97316" />
               </View>
@@ -256,9 +287,14 @@ export default function SelectRecordVideoModal({
             <TouchableOpacity
               disabled={!selectedVideo}
               onPress={handleSelect}
-              className="py-4 items-center rounded-lg overflow-hidden"
+              className="py-4 items-center rounded-xl overflow-hidden"
               style={{
                 backgroundColor: selectedVideo ? '#F97316' : '#27272a',
+                shadowColor: selectedVideo ? '#F97316' : 'transparent',
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: selectedVideo ? 0.5 : 0,
+                shadowRadius: 8,
+                elevation: selectedVideo ? 5 : 0,
               }}
             >
               {selectedVideo ? (

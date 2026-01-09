@@ -1,20 +1,14 @@
 // ============================================================================
 // TIME PICKER MODAL - Modal para cambiar hora de comida
 // Selector interactivo de hora en formato AM/PM
+// Estilo Savage Mode con cierre fluido y vibración
 // ============================================================================
 
-import React, { useState, useEffect, useRef } from 'react';
-import {
-  View,
-  Text,
-  Modal,
-  Pressable,
-  ScrollView,
-  PanResponder,
-  Animated as RNAnimated,
-} from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, Pressable, ScrollView } from 'react-native';
 import { Haptics } from '../../lib/haptics';
 import { Clock, Check } from 'lucide-react-native';
+import { BottomSheetModal } from '../ui/BottomSheetModal';
 
 // ============================================================================
 // TYPES
@@ -89,202 +83,205 @@ export const TimePickerModal: React.FC<TimePickerModalProps> = ({
     setSelectedMinute(m);
   };
 
-  const togglePeriod = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setSelectedPeriod(selectedPeriod === 'AM' ? 'PM' : 'AM');
-  };
-
   // Formatear display
   const displayTime = `${selectedHour}:${selectedMinute.toString().padStart(2, '0')} ${selectedPeriod}`;
 
-  // -------------------------------------------------------------------------
-  // PAN RESPONDER - Cerrar deslizando hacia abajo
-  // -------------------------------------------------------------------------
-  const panY = useRef(new RNAnimated.Value(0)).current;
+  // Footer con botón de guardar
+  const footer = (
+    <View className="p-4">
+      <Pressable
+        onPress={handleSave}
+        className="w-full bg-blue-500 py-4 rounded-xl flex-row items-center justify-center gap-2 active:bg-blue-600"
+        style={{
+          shadowColor: '#3B82F6',
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.3,
+          shadowRadius: 8,
+          elevation: 5,
+        }}
+      >
+        <Check size={20} color="#FFF" />
+        <Text className="text-white font-bold text-lg">GUARDAR HORA</Text>
+      </Pressable>
+    </View>
+  );
 
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 5,
-      onPanResponderMove: (_, gestureState) => {
-        if (gestureState.dy > 0) {
-          panY.setValue(gestureState.dy);
-        }
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        if (gestureState.dy > 100) {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          onClose();
-        } else {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          RNAnimated.spring(panY, {
-            toValue: 0,
-            useNativeDriver: false,
-          }).start();
-        }
-      },
-    })
-  ).current;
-
-  useEffect(() => {
-    if (visible) {
-      panY.setValue(0);
-    }
-  }, [visible, panY]);
-
-  const animatedStyle = {
-    transform: [{ translateY: panY }],
-  };
+  // Header personalizado con el icono
+  const titleIcon = (
+    <View className="w-10 h-10 rounded-full bg-blue-500/20 items-center justify-center">
+      <Clock size={20} color="#3B82F6" />
+    </View>
+  );
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View className="flex-1 bg-black/80 justify-end">
-        <RNAnimated.View
-          style={[{ backgroundColor: '#1a1a1a' }, animatedStyle]}
-          className="rounded-t-3xl border-t border-white/10"
-        >
-          {/* Header - Draggable para cerrar */}
-          <View
-            {...panResponder.panHandlers}
-            className="p-4 border-b border-white/10 bg-[#222222] rounded-t-3xl"
-          >
-            {/* Indicador de drag */}
-            <View className="items-center mb-3">
-              <View className="w-10 h-1 bg-zinc-600 rounded-full" />
-            </View>
-            <View className="flex-row items-center justify-center gap-3">
-              <Clock size={20} color="#3B82F6" />
-              <Text className="text-white font-bold text-lg">Cambiar Hora</Text>
-            </View>
-          </View>
-
-          {/* Time Display */}
-          <View className="items-center py-6 border-b border-white/5">
-            <Text className="text-white text-5xl font-mono font-bold tracking-wider">
-              {displayTime}
-            </Text>
-          </View>
-
-          {/* Hour Selector */}
-          <View className="p-4">
-            <Text className="text-zinc-500 text-xs font-bold uppercase mb-3">Hora</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <View className="flex-row gap-2">
-                {hours.map((h) => (
-                  <Pressable
-                    key={h}
-                    onPress={() => selectHour(h)}
-                    className={`w-12 h-12 rounded-xl items-center justify-center ${
-                      selectedHour === h ? 'bg-blue-500' : 'bg-zinc-800 active:bg-zinc-700'
-                    }`}
-                  >
-                    <Text
-                      className={`font-bold text-lg ${
-                        selectedHour === h ? 'text-white' : 'text-zinc-400'
-                      }`}
-                    >
-                      {h}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            </ScrollView>
-          </View>
-
-          {/* Minute Selector */}
-          <View className="px-4 pb-4">
-            <Text className="text-zinc-500 text-xs font-bold uppercase mb-3">Minutos</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <View className="flex-row gap-2">
-                {minutes.map((m) => (
-                  <Pressable
-                    key={m}
-                    onPress={() => selectMinute(m)}
-                    className={`w-12 h-12 rounded-xl items-center justify-center ${
-                      selectedMinute === m ? 'bg-blue-500' : 'bg-zinc-800 active:bg-zinc-700'
-                    }`}
-                  >
-                    <Text
-                      className={`font-bold text-lg ${
-                        selectedMinute === m ? 'text-white' : 'text-zinc-400'
-                      }`}
-                    >
-                      {m.toString().padStart(2, '0')}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            </ScrollView>
-          </View>
-
-          {/* AM/PM Toggle */}
-          <View className="px-4 pb-4">
-            <Text className="text-zinc-500 text-xs font-bold uppercase mb-3">Período</Text>
-            <View className="flex-row gap-3">
-              <Pressable
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  setSelectedPeriod('AM');
-                }}
-                className={`flex-1 py-4 rounded-xl items-center ${
-                  selectedPeriod === 'AM'
-                    ? 'bg-yellow-500/20 border-2 border-yellow-500'
-                    : 'bg-zinc-800 border-2 border-transparent'
-                }`}
-              >
-                <Text
-                  className={`font-bold text-xl ${
-                    selectedPeriod === 'AM' ? 'text-yellow-500' : 'text-zinc-500'
-                  }`}
-                >
-                  AM
-                </Text>
-                <Text
-                  className={`text-xs ${selectedPeriod === 'AM' ? 'text-yellow-500/60' : 'text-zinc-600'}`}
-                >
-                  Mañana
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  setSelectedPeriod('PM');
-                }}
-                className={`flex-1 py-4 rounded-xl items-center ${
-                  selectedPeriod === 'PM'
-                    ? 'bg-purple-500/20 border-2 border-purple-500'
-                    : 'bg-zinc-800 border-2 border-transparent'
-                }`}
-              >
-                <Text
-                  className={`font-bold text-xl ${
-                    selectedPeriod === 'PM' ? 'text-purple-500' : 'text-zinc-500'
-                  }`}
-                >
-                  PM
-                </Text>
-                <Text
-                  className={`text-xs ${selectedPeriod === 'PM' ? 'text-purple-500/60' : 'text-zinc-600'}`}
-                >
-                  Tarde/Noche
-                </Text>
-              </Pressable>
-            </View>
-          </View>
-
-          {/* Save Button */}
-          <View className="p-4 pb-8">
-            <Pressable
-              onPress={handleSave}
-              className="w-full bg-blue-500 py-4 rounded-xl flex-row items-center justify-center gap-2 active:bg-blue-600"
-            >
-              <Check size={20} color="#FFF" />
-              <Text className="text-white font-bold text-lg">GUARDAR HORA</Text>
-            </Pressable>
-          </View>
-        </RNAnimated.View>
+    <BottomSheetModal
+      visible={visible}
+      onClose={onClose}
+      title="Cambiar Hora"
+      titleIcon={titleIcon}
+      accentColor="#3B82F6"
+      height="auto"
+      scrollable={false}
+      footer={footer}
+    >
+      {/* Time Display */}
+      <View className="items-center py-6 border-b border-white/5 mx-4">
+        <Text className="text-white text-5xl font-mono font-bold tracking-wider">
+          {displayTime}
+        </Text>
       </View>
-    </Modal>
+
+      {/* Hour Selector */}
+      <View className="p-4">
+        <Text className="text-zinc-500 text-xs font-bold uppercase mb-3">Hora</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          <View className="flex-row gap-2">
+            {hours.map((h) => (
+              <Pressable
+                key={h}
+                onPress={() => selectHour(h)}
+                className={`w-12 h-12 rounded-xl items-center justify-center ${
+                  selectedHour === h ? 'bg-blue-500' : 'bg-zinc-800 active:bg-zinc-700'
+                }`}
+                style={
+                  selectedHour === h
+                    ? {
+                        shadowColor: '#3B82F6',
+                        shadowOffset: { width: 0, height: 2 },
+                        shadowOpacity: 0.4,
+                        shadowRadius: 4,
+                        elevation: 3,
+                      }
+                    : {}
+                }
+              >
+                <Text
+                  className={`font-bold text-lg ${
+                    selectedHour === h ? 'text-white' : 'text-zinc-400'
+                  }`}
+                >
+                  {h}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </ScrollView>
+      </View>
+
+      {/* Minute Selector */}
+      <View className="px-4 pb-4">
+        <Text className="text-zinc-500 text-xs font-bold uppercase mb-3">Minutos</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          <View className="flex-row gap-2">
+            {minutes.map((m) => (
+              <Pressable
+                key={m}
+                onPress={() => selectMinute(m)}
+                className={`w-12 h-12 rounded-xl items-center justify-center ${
+                  selectedMinute === m ? 'bg-blue-500' : 'bg-zinc-800 active:bg-zinc-700'
+                }`}
+                style={
+                  selectedMinute === m
+                    ? {
+                        shadowColor: '#3B82F6',
+                        shadowOffset: { width: 0, height: 2 },
+                        shadowOpacity: 0.4,
+                        shadowRadius: 4,
+                        elevation: 3,
+                      }
+                    : {}
+                }
+              >
+                <Text
+                  className={`font-bold text-lg ${
+                    selectedMinute === m ? 'text-white' : 'text-zinc-400'
+                  }`}
+                >
+                  {m.toString().padStart(2, '0')}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </ScrollView>
+      </View>
+
+      {/* AM/PM Toggle */}
+      <View className="px-4 pb-4">
+        <Text className="text-zinc-500 text-xs font-bold uppercase mb-3">Período</Text>
+        <View className="flex-row gap-3">
+          <Pressable
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setSelectedPeriod('AM');
+            }}
+            className={`flex-1 py-4 rounded-xl items-center ${
+              selectedPeriod === 'AM'
+                ? 'bg-yellow-500/20 border-2 border-yellow-500'
+                : 'bg-zinc-800 border-2 border-transparent'
+            }`}
+            style={
+              selectedPeriod === 'AM'
+                ? {
+                    shadowColor: '#EAB308',
+                    shadowOffset: { width: 0, height: 2 },
+                    shadowOpacity: 0.3,
+                    shadowRadius: 4,
+                    elevation: 3,
+                  }
+                : {}
+            }
+          >
+            <Text
+              className={`font-bold text-xl ${
+                selectedPeriod === 'AM' ? 'text-yellow-500' : 'text-zinc-500'
+              }`}
+            >
+              AM
+            </Text>
+            <Text
+              className={`text-xs ${selectedPeriod === 'AM' ? 'text-yellow-500/60' : 'text-zinc-600'}`}
+            >
+              Mañana
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setSelectedPeriod('PM');
+            }}
+            className={`flex-1 py-4 rounded-xl items-center ${
+              selectedPeriod === 'PM'
+                ? 'bg-purple-500/20 border-2 border-purple-500'
+                : 'bg-zinc-800 border-2 border-transparent'
+            }`}
+            style={
+              selectedPeriod === 'PM'
+                ? {
+                    shadowColor: '#A855F7',
+                    shadowOffset: { width: 0, height: 2 },
+                    shadowOpacity: 0.3,
+                    shadowRadius: 4,
+                    elevation: 3,
+                  }
+                : {}
+            }
+          >
+            <Text
+              className={`font-bold text-xl ${
+                selectedPeriod === 'PM' ? 'text-purple-500' : 'text-zinc-500'
+              }`}
+            >
+              PM
+            </Text>
+            <Text
+              className={`text-xs ${selectedPeriod === 'PM' ? 'text-purple-500/60' : 'text-zinc-600'}`}
+            >
+              Tarde/Noche
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+    </BottomSheetModal>
   );
 };
 

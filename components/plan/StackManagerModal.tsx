@@ -4,7 +4,7 @@
 // FEATURES: TimePicker visual, Edición de compuestos, Múltiples horarios
 // ============================================================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -14,7 +14,9 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  PanResponder,
 } from 'react-native';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Haptics } from '../../lib/haptics';
 import {
@@ -101,9 +103,7 @@ const formatTimeToAMPM = (time24: string): string => {
   return `${hour12}:${m.toString().padStart(2, '0')} ${period}`;
 };
 
-const parseTimeToAMPM = (
-  time24: string
-): { hour: number; minute: number; period: 'AM' | 'PM' } => {
+const parseTimeToAMPM = (time24: string): { hour: number; minute: number; period: 'AM' | 'PM' } => {
   if (!time24) return { hour: 12, minute: 0, period: 'PM' };
   const [h, m] = time24.split(':').map((s) => parseInt(s, 10));
   const hours = h || 0;
@@ -192,9 +192,7 @@ const InlineTimePicker: React.FC<InlineTimePickerProps> = ({
 
   return (
     <View className="bg-[#0a0a0a] border border-purple-500/30 rounded-xl p-4">
-      {label && (
-        <Text className="text-purple-400 text-xs font-bold uppercase mb-3">{label}</Text>
-      )}
+      {label && <Text className="text-purple-400 text-xs font-bold uppercase mb-3">{label}</Text>}
 
       {/* Preview */}
       <View className="items-center pb-4 border-b border-white/5 mb-4">
@@ -335,9 +333,7 @@ const EditItemView: React.FC<EditItemViewProps> = ({ item, onSave, onCancel, onD
   const [dose, setDose] = useState(item.dose);
   const [type, setType] = useState<StackItem['type']>(item.type);
   const [notes, setNotes] = useState(item.notes || '');
-  const [times, setTimes] = useState<string[]>(
-    item.times || (item.time ? [item.time] : ['08:00'])
-  );
+  const [times, setTimes] = useState<string[]>(item.times || (item.time ? [item.time] : ['08:00']));
   const [isPreWorkout, setIsPreWorkout] = useState(item.isPreWorkout || false);
   const [isPostWorkout, setIsPostWorkout] = useState(item.isPostWorkout || false);
   const [selectedDays, setSelectedDays] = useState<number[]>(
@@ -395,17 +391,11 @@ const EditItemView: React.FC<EditItemViewProps> = ({ item, onSave, onCancel, onD
     <ScrollView className="p-4" showsVerticalScrollIndicator={false}>
       {/* Header */}
       <View className="flex-row items-center gap-3 mb-4">
-        <Pressable
-          onPress={onCancel}
-          className="p-2 bg-zinc-800 rounded-lg active:bg-zinc-700"
-        >
+        <Pressable onPress={onCancel} className="p-2 bg-zinc-800 rounded-lg active:bg-zinc-700">
           <ChevronLeft size={20} color="#999" />
         </Pressable>
         <Text className="text-white font-bold text-lg flex-1">Editar Compuesto</Text>
-        <Pressable
-          onPress={onDelete}
-          className="p-2 bg-red-500/10 rounded-lg active:bg-red-500/20"
-        >
+        <Pressable onPress={onDelete} className="p-2 bg-red-500/10 rounded-lg active:bg-red-500/20">
           <Trash2 size={20} color="#EF4444" />
         </Pressable>
       </View>
@@ -431,9 +421,7 @@ const EditItemView: React.FC<EditItemViewProps> = ({ item, onSave, onCancel, onD
               setType(t.key);
             }}
             className={`flex-1 p-3 rounded-lg border items-center ${
-              type === t.key
-                ? 'bg-purple-500/20 border-purple-500'
-                : 'bg-[#111111] border-white/10'
+              type === t.key ? 'bg-purple-500/20 border-purple-500' : 'bg-[#111111] border-white/10'
             }`}
           >
             {t.icon}
@@ -464,9 +452,7 @@ const EditItemView: React.FC<EditItemViewProps> = ({ item, onSave, onCancel, onD
             key={idx}
             onPress={() => toggleDay(idx)}
             className={`flex-1 py-2 rounded-lg items-center ${
-              selectedDays.includes(idx)
-                ? 'bg-purple-500'
-                : 'bg-[#111111] border border-white/10'
+              selectedDays.includes(idx) ? 'bg-purple-500' : 'bg-[#111111] border border-white/10'
             }`}
           >
             <Text
@@ -492,9 +478,7 @@ const EditItemView: React.FC<EditItemViewProps> = ({ item, onSave, onCancel, onD
             if (!isPreWorkout) setIsPostWorkout(false);
           }}
           className={`flex-1 flex-row items-center justify-center gap-2 p-3 rounded-lg border ${
-            isPreWorkout
-              ? 'bg-yellow-500/20 border-yellow-500'
-              : 'bg-[#111111] border-white/10'
+            isPreWorkout ? 'bg-yellow-500/20 border-yellow-500' : 'bg-[#111111] border-white/10'
           }`}
         >
           <Zap size={16} color={isPreWorkout ? '#EAB308' : '#666'} />
@@ -511,9 +495,7 @@ const EditItemView: React.FC<EditItemViewProps> = ({ item, onSave, onCancel, onD
             if (!isPostWorkout) setIsPreWorkout(false);
           }}
           className={`flex-1 flex-row items-center justify-center gap-2 p-3 rounded-lg border ${
-            isPostWorkout
-              ? 'bg-green-500/20 border-green-500'
-              : 'bg-[#111111] border-white/10'
+            isPostWorkout ? 'bg-green-500/20 border-green-500' : 'bg-[#111111] border-white/10'
           }`}
         >
           <Flame size={16} color={isPostWorkout ? '#22C55E' : '#666'} />
@@ -592,6 +574,36 @@ export const StackManagerModal: React.FC<StackManagerModalProps> = ({
   const [viewMode, setViewMode] = useState<'list' | 'add' | 'edit'>('list');
   const [editingItem, setEditingItem] = useState<StackItem | null>(null);
 
+  // ===== ANIMACIONES FLUIDAS =====
+  const translateY = useSharedValue(0);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 5,
+      onPanResponderGrant: () => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      },
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0) {
+          translateY.value = gestureState.dy;
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 100 || gestureState.vy > 0.5) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          onClose();
+        } else {
+          translateY.value = withSpring(0, { damping: 20, stiffness: 300 });
+        }
+      },
+    })
+  ).current;
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+  }));
+
   // Form state for new item
   const [name, setName] = useState('');
   const [dose, setDose] = useState('');
@@ -608,6 +620,12 @@ export const StackManagerModal: React.FC<StackManagerModalProps> = ({
       setViewMode('list');
       setEditingItem(null);
       resetForm();
+    } else {
+      translateY.value = 0;
+      // Haptic feedback cuando abre
+      setTimeout(() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      }, 300);
     }
   }, [visible]);
 
@@ -707,20 +725,55 @@ export const StackManagerModal: React.FC<StackManagerModalProps> = ({
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         className="flex-1"
       >
-        <View className="flex-1 bg-black/80 justify-end">
-          <View className="bg-[#1a1a1a] rounded-t-3xl max-h-[90%] border-t border-white/10">
+        <View className="flex-1 bg-transparent justify-end">
+          <Animated.View
+            style={[
+              animatedStyle,
+              {
+                backgroundColor: '#0a0a0a',
+                borderTopLeftRadius: 24,
+                borderTopRightRadius: 24,
+                maxHeight: '90%',
+                borderTopWidth: 2,
+                borderTopColor: 'rgba(168, 85, 247, 0.5)',
+                overflow: 'hidden',
+              },
+            ]}
+          >
+            {/* Línea de acento superior */}
+            <View
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                height: 3,
+                backgroundColor: '#A855F7',
+                shadowColor: '#A855F7',
+                shadowOffset: { width: 0, height: 0 },
+                shadowOpacity: 0.8,
+                shadowRadius: 10,
+                zIndex: 10,
+              }}
+            />
+
+            {/* Drag Indicator - Header Draggable */}
+            <View {...panResponder.panHandlers} className="pt-4 pb-2 items-center">
+              <View className="w-12 h-1.5 bg-zinc-600 rounded-full" />
+            </View>
+
             {/* Header */}
-            <View className="flex-row justify-between items-center p-4 border-b border-white/10 bg-[#222222] rounded-t-3xl">
-              <Text className="text-white font-bold text-lg">
-                {viewMode === 'edit'
-                  ? 'Editar Compuesto'
-                  : viewMode === 'add'
-                    ? 'Nuevo Compuesto'
-                    : 'Stack Manager'}
-              </Text>
-              <Pressable onPress={onClose} className="p-2">
-                <X size={20} color="#999" />
-              </Pressable>
+            <View className="flex-row items-center px-4 pb-4 border-b border-zinc-800/50">
+              <View className="flex-row items-center gap-2">
+                <FlaskConical size={18} color="#A855F7" />
+                <Text className="text-white font-bold text-lg">
+                  {viewMode === 'edit'
+                    ? 'Editar Compuesto'
+                    : viewMode === 'add'
+                      ? 'Nuevo Compuesto'
+                      : 'Stack Manager'}
+                </Text>
+              </View>
             </View>
 
             {/* EDIT VIEW */}
@@ -753,7 +806,7 @@ export const StackManagerModal: React.FC<StackManagerModalProps> = ({
                   Activos ({items.length})
                 </Text>
                 {items.length === 0 ? (
-                  <View className="bg-[#111111] p-6 rounded-xl border border-white/5 mb-4">
+                  <View className="bg-zinc-900/80 p-6 rounded-xl border border-zinc-800 mb-4">
                     <Text className="text-zinc-500 text-center">
                       No hay suplementos configurados
                     </Text>
@@ -765,7 +818,7 @@ export const StackManagerModal: React.FC<StackManagerModalProps> = ({
                       <Pressable
                         key={item.id}
                         onPress={() => handleEditItem(item)}
-                        className="bg-[#111111] p-4 rounded-xl border border-white/5 mb-3 active:bg-[#1a1a1a]"
+                        className="bg-zinc-900/80 p-4 rounded-xl border border-zinc-800 mb-3 active:bg-zinc-800"
                       >
                         <View className="flex-row justify-between items-start">
                           <View className="flex-row gap-3 items-center flex-1">
@@ -788,20 +841,22 @@ export const StackManagerModal: React.FC<StackManagerModalProps> = ({
                                 )}
                               </View>
                               {/* Multiple times display */}
-                              {itemTimes.length > 0 && !item.isPreWorkout && !item.isPostWorkout && (
-                                <View className="flex-row flex-wrap gap-1 mt-2">
-                                  {itemTimes.map((t, idx) => (
-                                    <View
-                                      key={idx}
-                                      className="bg-purple-500/10 px-2 py-1 rounded"
-                                    >
-                                      <Text className="text-purple-400 text-xs font-mono">
-                                        {formatTimeToAMPM(t)}
-                                      </Text>
-                                    </View>
-                                  ))}
-                                </View>
-                              )}
+                              {itemTimes.length > 0 &&
+                                !item.isPreWorkout &&
+                                !item.isPostWorkout && (
+                                  <View className="flex-row flex-wrap gap-1 mt-2">
+                                    {itemTimes.map((t, idx) => (
+                                      <View
+                                        key={idx}
+                                        className="bg-purple-500/10 px-2 py-1 rounded"
+                                      >
+                                        <Text className="text-purple-400 text-xs font-mono">
+                                          {formatTimeToAMPM(t)}
+                                        </Text>
+                                      </View>
+                                    ))}
+                                  </View>
+                                )}
                             </View>
                           </View>
                           <View className="flex-row items-center gap-2">
@@ -817,7 +872,14 @@ export const StackManagerModal: React.FC<StackManagerModalProps> = ({
                 <Pressable
                   onPress={() => setViewMode('add')}
                   className="w-full bg-purple-600 py-4 rounded-xl mb-6 flex-row items-center justify-center gap-2 active:bg-purple-500"
-                  style={{ marginBottom: Math.max(insets.bottom, 16) + 8 }}
+                  style={{
+                    marginBottom: Math.max(insets.bottom, 16) + 8,
+                    shadowColor: '#A855F7',
+                    shadowOffset: { width: 0, height: 4 },
+                    shadowOpacity: 0.4,
+                    shadowRadius: 8,
+                    elevation: 5,
+                  }}
                 >
                   <Plus size={18} color="#FFF" />
                   <Text className="text-white font-bold">AGREGAR COMPUESTO</Text>
@@ -1021,13 +1083,20 @@ export const StackManagerModal: React.FC<StackManagerModalProps> = ({
                   <Pressable
                     onPress={handleAddItem}
                     className="flex-1 bg-purple-600 py-4 rounded-xl active:bg-purple-500"
+                    style={{
+                      shadowColor: '#A855F7',
+                      shadowOffset: { width: 0, height: 4 },
+                      shadowOpacity: 0.4,
+                      shadowRadius: 8,
+                      elevation: 5,
+                    }}
                   >
                     <Text className="text-white font-bold text-center">GUARDAR</Text>
                   </Pressable>
                 </View>
               </ScrollView>
             )}
-          </View>
+          </Animated.View>
         </View>
       </KeyboardAvoidingView>
     </Modal>

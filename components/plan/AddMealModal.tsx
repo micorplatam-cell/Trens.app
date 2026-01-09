@@ -2,9 +2,10 @@
 // ADD MEAL MODAL - Modal para agregar comidas
 // Análisis inteligente automático (siempre activo)
 // TimePicker visual como Stack
+// Estilo Savage Mode con cierre fluido y vibración
 // ============================================================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -15,7 +16,9 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  PanResponder,
 } from 'react-native';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from '../../lib/haptics';
 import { X, Plus, Trash2, AlertTriangle, CheckCircle, Sparkles, Clock } from 'lucide-react-native';
@@ -66,8 +69,53 @@ export const AddMealModal: React.FC<AddMealModalProps> = ({
   const [analysis, setAnalysis] = useState<IngredientAnalysis | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
+  // Animated value para el desplazamiento del panel
+  const translateY = useSharedValue(0);
+
   const hours = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
   const minutes = [0, 15, 30, 45];
+
+  // -------------------------------------------------------------------------
+  // VIBRACIÓN AL ABRIR
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    if (visible) {
+      translateY.value = 0;
+      // Vibración cuando el modal termina de abrir
+      const timer = setTimeout(() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [visible, translateY]);
+
+  // -------------------------------------------------------------------------
+  // PAN RESPONDER - Cierre deslizando hacia abajo
+  // -------------------------------------------------------------------------
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 5,
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0) {
+          translateY.value = gestureState.dy;
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 100) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          onClose();
+        } else {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          translateY.value = withSpring(0, { damping: 20, stiffness: 300 });
+        }
+      },
+    })
+  ).current;
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+  }));
 
   // Reset cuando se abre
   useEffect(() => {
@@ -173,14 +221,52 @@ export const AddMealModal: React.FC<AddMealModalProps> = ({
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         className="flex-1"
       >
-        <View className="flex-1 bg-black/80 justify-end">
-          <View className="bg-[#1a1a1a] rounded-t-3xl max-h-[90%] border-t border-white/10">
-            {/* Header */}
-            <View className="flex-row justify-between items-center p-4 border-b border-white/10 bg-[#222222] rounded-t-3xl">
-              <View className="flex-1">
+        <View className="flex-1 bg-transparent justify-end">
+          <Animated.View
+            style={[
+              {
+                backgroundColor: '#0a0a0a',
+                borderTopLeftRadius: 24,
+                borderTopRightRadius: 24,
+                maxHeight: '90%',
+                borderTopWidth: 2,
+                borderTopColor: 'rgba(168, 85, 247, 0.5)',
+                overflow: 'hidden',
+              },
+              animatedStyle,
+            ]}
+          >
+            {/* Línea de acento superior con glow */}
+            <View
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                height: 3,
+                backgroundColor: '#A855F7',
+                shadowColor: '#A855F7',
+                shadowOffset: { width: 0, height: 0 },
+                shadowOpacity: 0.8,
+                shadowRadius: 10,
+                zIndex: 10,
+              }}
+            />
+
+            {/* Header - Draggable para cerrar */}
+            <View
+              {...panResponder.panHandlers}
+              className="flex-row justify-between items-center p-4 border-b border-zinc-800/50"
+            >
+              {/* Indicador de drag */}
+              <View className="absolute top-3 left-0 right-0 items-center">
+                <View className="w-12 h-1.5 bg-zinc-700 rounded-full" />
+              </View>
+
+              <View className="flex-1 mt-2">
                 <View className="flex-row items-center gap-2">
+                  <Sparkles size={16} color="#A855F7" />
                   <Text className="text-white font-bold text-lg">Agregar Comida</Text>
-                  <Sparkles size={14} color="#A855F7" />
                 </View>
                 {targetMacros && (
                   <View className="flex-row gap-2 mt-1">
@@ -195,9 +281,6 @@ export const AddMealModal: React.FC<AddMealModalProps> = ({
                   </View>
                 )}
               </View>
-              <Pressable onPress={onClose} className="p-2">
-                <X size={20} color="#999" />
-              </Pressable>
             </View>
 
             <ScrollView className="p-4" showsVerticalScrollIndicator={false}>
@@ -367,7 +450,7 @@ export const AddMealModal: React.FC<AddMealModalProps> = ({
               {/* Ingredients */}
               <Text className="text-zinc-400 text-xs font-bold mb-2 uppercase">Ingredientes</Text>
               {ingredients.map((ing, i) => (
-                <View key={i} className="bg-black/40 p-4 rounded-xl border border-white/5 mb-3">
+                <View key={i} className="bg-zinc-900/80 p-4 rounded-xl border border-zinc-800 mb-3">
                   <View className="flex-row justify-between items-center mb-2">
                     <Text className="text-zinc-500 text-xs">Ingrediente {i + 1}</Text>
                     {ingredients.length > 1 && (
@@ -388,23 +471,30 @@ export const AddMealModal: React.FC<AddMealModalProps> = ({
 
               <Pressable
                 onPress={addIngredient}
-                className="w-full py-3 border border-dashed border-zinc-600 rounded-xl mb-6 active:border-white active:bg-white/5"
+                className="w-full py-3 border border-dashed border-zinc-600 rounded-xl mb-6 active:border-purple-500 active:bg-purple-500/5"
               >
                 <View className="flex-row items-center justify-center gap-2">
-                  <Plus size={18} color="#888" />
+                  <Plus size={18} color="#A855F7" />
                   <Text className="text-zinc-400 font-medium">Añadir ingrediente</Text>
                 </View>
               </Pressable>
 
               <Pressable
                 onPress={handleSave}
-                className="w-full bg-white py-4 rounded-xl active:bg-zinc-200"
-                style={{ marginBottom: Math.max(insets.bottom, 16) + 8 }}
+                className="w-full bg-purple-500 py-4 rounded-xl active:bg-purple-600"
+                style={{
+                  marginBottom: Math.max(insets.bottom, 16) + 8,
+                  shadowColor: '#A855F7',
+                  shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: 0.3,
+                  shadowRadius: 8,
+                  elevation: 5,
+                }}
               >
-                <Text className="text-black font-bold text-center text-lg">GUARDAR COMIDA</Text>
+                <Text className="text-white font-bold text-center text-lg">GUARDAR COMIDA</Text>
               </Pressable>
             </ScrollView>
-          </View>
+          </Animated.View>
         </View>
       </KeyboardAvoidingView>
     </Modal>

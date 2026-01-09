@@ -1,9 +1,10 @@
 // ============================================================================
 // EDIT MEAL MODAL - Modal para editar comidas existentes
 // Análisis inteligente automático (siempre activo)
+// Estilo Savage Mode con cierre fluido y vibración
 // ============================================================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -14,7 +15,9 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  PanResponder,
 } from 'react-native';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from '../../lib/haptics';
 import { X, Plus, Trash2, AlertTriangle, CheckCircle, Sparkles } from 'lucide-react-native';
@@ -88,6 +91,51 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [analysis, setAnalysis] = useState<IngredientAnalysis | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+
+  // Animated value para el desplazamiento del panel
+  const translateY = useSharedValue(0);
+
+  // -------------------------------------------------------------------------
+  // VIBRACIÓN AL ABRIR
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    if (visible) {
+      translateY.value = 0;
+      // Vibración cuando el modal termina de abrir
+      const timer = setTimeout(() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [visible, translateY]);
+
+  // -------------------------------------------------------------------------
+  // PAN RESPONDER - Cierre deslizando hacia abajo
+  // -------------------------------------------------------------------------
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 5,
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0) {
+          translateY.value = gestureState.dy;
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 100) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          onClose();
+        } else {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          translateY.value = withSpring(0, { damping: 20, stiffness: 300 });
+        }
+      },
+    })
+  ).current;
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+  }));
 
   // Sincronizar ingredientes cuando cambia la comida
   useEffect(() => {
@@ -191,11 +239,49 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         className="flex-1"
       >
-        <View className="flex-1 bg-black/80 justify-end">
-          <View className="bg-[#1a1a1a] rounded-t-3xl max-h-[90%] border-t border-white/10">
-            {/* Header */}
-            <View className="flex-row justify-between items-center p-4 border-b border-white/10 bg-[#222222] rounded-t-3xl">
-              <View className="flex-1">
+        <View className="flex-1 bg-transparent justify-end">
+          <Animated.View
+            style={[
+              {
+                backgroundColor: '#0a0a0a',
+                borderTopLeftRadius: 24,
+                borderTopRightRadius: 24,
+                maxHeight: '90%',
+                borderTopWidth: 2,
+                borderTopColor: 'rgba(168, 85, 247, 0.5)',
+                overflow: 'hidden',
+              },
+              animatedStyle,
+            ]}
+          >
+            {/* Línea de acento superior con glow */}
+            <View
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                height: 3,
+                backgroundColor: '#A855F7',
+                shadowColor: '#A855F7',
+                shadowOffset: { width: 0, height: 0 },
+                shadowOpacity: 0.8,
+                shadowRadius: 10,
+                zIndex: 10,
+              }}
+            />
+
+            {/* Header - Draggable para cerrar */}
+            <View
+              {...panResponder.panHandlers}
+              className="flex-row justify-between items-center p-4 pt-5 border-b border-zinc-800/50"
+            >
+              {/* Indicador de drag */}
+              <View className="absolute top-2 left-0 right-0 items-center z-10">
+                <View className="w-12 h-1.5 bg-zinc-600 rounded-full" />
+              </View>
+
+              <View className="flex-1 mt-2">
                 <View className="flex-row items-center gap-2">
                   <Text className="text-white font-bold text-lg">Editar Comida</Text>
                   <Sparkles size={14} color="#A855F7" />
@@ -220,9 +306,6 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
                   </View>
                 )}
               </View>
-              <Pressable onPress={onClose} className="p-2">
-                <X size={20} color="#999" />
-              </Pressable>
             </View>
 
             <ScrollView className="p-4" showsVerticalScrollIndicator={false}>
@@ -318,7 +401,7 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
               {ingredients.map((ing, i) => (
                 <View
                   key={ing.id}
-                  className="bg-black/40 p-4 rounded-xl border border-white/5 mb-3"
+                  className="bg-zinc-900/80 p-4 rounded-xl border border-zinc-800 mb-3"
                 >
                   <View className="flex-row justify-between items-center mb-2">
                     <Text className="text-zinc-500 text-xs">Ingrediente {i + 1}</Text>
@@ -337,7 +420,7 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
                   />
                   {/* IA calcula automáticamente */}
                   {ing.quantity && (
-                    <View className="mt-2 bg-purple-500/10 p-2 rounded-lg border border-purple-500/20">
+                    <View className="mt-2 bg-purple-500/10 p-2 rounded-xl border border-purple-500/20">
                       <Text className="text-purple-300 text-sm">
                         {ing.quantity}
                         {ing.portion ? ` • ${ing.portion}` : ''}
@@ -349,10 +432,10 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
 
               <Pressable
                 onPress={addIngredient}
-                className="w-full py-3 border border-dashed border-zinc-600 rounded-xl mb-6 active:border-white active:bg-white/5"
+                className="w-full py-3 border border-dashed border-zinc-600 rounded-xl mb-6 active:border-purple-500 active:bg-purple-500/5"
               >
                 <View className="flex-row items-center justify-center gap-2">
-                  <Plus size={18} color="#888" />
+                  <Plus size={18} color="#A855F7" />
                   <Text className="text-zinc-400 font-medium">Añadir ingrediente</Text>
                 </View>
               </Pressable>
@@ -361,18 +444,25 @@ export const EditMealModal: React.FC<EditMealModalProps> = ({
                 onPress={handleSave}
                 disabled={isSaving}
                 className={`w-full py-4 rounded-xl ${
-                  isSaving ? 'bg-zinc-600' : 'bg-white active:bg-zinc-200'
+                  isSaving ? 'bg-zinc-600' : 'bg-purple-500 active:bg-purple-600'
                 }`}
-                style={{ marginBottom: Math.max(insets.bottom, 16) + 8 }}
+                style={{
+                  marginBottom: Math.max(insets.bottom, 16) + 8,
+                  shadowColor: '#A855F7',
+                  shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: isSaving ? 0 : 0.3,
+                  shadowRadius: 8,
+                  elevation: isSaving ? 0 : 5,
+                }}
               >
                 {isSaving ? (
-                  <ActivityIndicator size="small" color="#000" />
+                  <ActivityIndicator size="small" color="#fff" />
                 ) : (
-                  <Text className="text-black font-bold text-center text-lg">GUARDAR CAMBIOS</Text>
+                  <Text className="text-white font-bold text-center text-lg">GUARDAR CAMBIOS</Text>
                 )}
               </Pressable>
             </ScrollView>
-          </View>
+          </Animated.View>
         </View>
       </KeyboardAvoidingView>
     </Modal>

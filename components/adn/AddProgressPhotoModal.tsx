@@ -1,21 +1,12 @@
-import React, { useState, useRef, useEffect } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  Modal,
-  TextInput,
-  Image,
-  ActivityIndicator,
-  PanResponder,
-  Animated as RNAnimated,
-} from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, TouchableOpacity, TextInput, Image, ActivityIndicator } from 'react-native';
 import { Alert } from '../../lib/alert';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Camera, Image as ImageIcon, Upload, X } from 'lucide-react-native';
 import * as Haptics from '../../lib/haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { uploadProgressPhoto } from '../../services/progress/photos';
+import { BottomSheetModal } from '../ui/BottomSheetModal';
 
 interface AddProgressPhotoModalProps {
   visible: boolean;
@@ -34,45 +25,6 @@ export default function AddProgressPhotoModal({
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
   const [isUploading, setIsUploading] = useState(false);
-
-  // -------------------------------------------------------------------------
-  // PAN RESPONDER - Cerrar deslizando hacia abajo
-  // -------------------------------------------------------------------------
-  const panY = useRef(new RNAnimated.Value(0)).current;
-
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 5,
-      onPanResponderMove: (_, gestureState) => {
-        if (gestureState.dy > 0) {
-          panY.setValue(gestureState.dy);
-        }
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        if (gestureState.dy > 100) {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          handleClose();
-        } else {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          RNAnimated.spring(panY, {
-            toValue: 0,
-            useNativeDriver: false,
-          }).start();
-        }
-      },
-    })
-  ).current;
-
-  useEffect(() => {
-    if (visible) {
-      panY.setValue(0);
-    }
-  }, [visible, panY]);
-
-  const animatedStyle = {
-    transform: [{ translateY: panY }],
-  };
 
   const resetState = () => {
     setSelectedImage(null);
@@ -155,106 +107,126 @@ export default function AddProgressPhotoModal({
     }
   };
 
+  // Footer con botón de subir
+  const footer = (
+    <View className="p-4">
+      <TouchableOpacity
+        onPress={handleUpload}
+        disabled={!selectedImage || isUploading}
+        className={`py-4 rounded-xl flex-row items-center justify-center gap-2 ${
+          selectedImage && !isUploading ? 'bg-savage-red' : 'bg-zinc-800'
+        }`}
+        style={
+          selectedImage && !isUploading
+            ? {
+                shadowColor: '#DC2626',
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.3,
+                shadowRadius: 8,
+                elevation: 5,
+              }
+            : {}
+        }
+      >
+        {isUploading ? (
+          <ActivityIndicator size="small" color="#fff" />
+        ) : (
+          <Upload size={18} color="#fff" />
+        )}
+        <Text className="text-white font-black uppercase tracking-widest text-xs">
+          {isUploading ? 'Subiendo...' : 'Guardar Foto'}
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
-      <View className="flex-1 bg-black/90 justify-end">
-        <RNAnimated.View
-          style={[{ backgroundColor: '#0a0a0a' }, animatedStyle]}
-          className="rounded-t-3xl border-t border-zinc-800"
-        >
-          {/* Header - Draggable para cerrar */}
-          <View {...panResponder.panHandlers} className="p-4 border-b border-zinc-800">
-            {/* Indicador de drag */}
-            <View className="items-center mb-3">
-              <View className="w-10 h-1 bg-zinc-600 rounded-full" />
-            </View>
-            <Text className="text-white font-bold text-sm uppercase tracking-wider text-center">
-              📸 Nueva Foto de Progreso
-            </Text>
-          </View>
-
-          <View className="p-4">
-            {/* Preview de imagen o botones de selección */}
-            {selectedImage ? (
-              <View className="mb-4">
-                <Image
-                  source={{ uri: selectedImage }}
-                  className="w-full h-80 rounded-lg"
-                  resizeMode="cover"
-                />
-                <TouchableOpacity
-                  onPress={() => setSelectedImage(null)}
-                  className="absolute top-2 right-2 bg-black/70 p-2 rounded-full"
-                >
-                  <X size={16} color="#fff" />
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <View className="flex-row gap-3 mb-4">
-                <TouchableOpacity
-                  onPress={pickFromCamera}
-                  className="flex-1 py-6 bg-zinc-900 rounded-lg items-center border border-zinc-800"
-                >
-                  <Camera size={32} color="#DC2626" />
-                  <Text className="text-white text-xs font-bold mt-2 uppercase">Cámara</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  onPress={pickFromGallery}
-                  className="flex-1 py-6 bg-zinc-900 rounded-lg items-center border border-zinc-800"
-                >
-                  <ImageIcon size={32} color="#DC2626" />
-                  <Text className="text-white text-xs font-bold mt-2 uppercase">Galería</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {/* Notas opcionales */}
-            <View className="mb-4">
-              <Text className="text-zinc-400 text-[10px] uppercase tracking-wider mb-2">
-                Notas (opcional)
-              </Text>
-              <TextInput
-                value={notes}
-                onChangeText={setNotes}
-                placeholder="Ej: Semana 8 de definición, sintiéndome más fuerte..."
-                placeholderTextColor="#52525b"
-                multiline
-                numberOfLines={3}
-                className="bg-zinc-900 border border-zinc-800 rounded-lg p-3 text-white text-sm"
-                style={{ textAlignVertical: 'top', minHeight: 80 }}
-              />
-            </View>
-
-            {/* Info sobre snapshot */}
-            <View className="bg-zinc-900/50 p-3 rounded-lg border border-zinc-800 mb-4">
-              <Text className="text-zinc-400 text-[10px] text-center">
-                💾 Se guardará automáticamente tu peso, medidas, plan de entrenamiento y nutrición
-                actuales junto con esta foto.
-              </Text>
-            </View>
-
-            {/* Botón Subir */}
+    <BottomSheetModal
+      visible={visible}
+      onClose={handleClose}
+      title="📸 Nueva Foto de Progreso"
+      accentColor="#DC2626"
+      height="auto"
+      scrollable={false}
+      footer={footer}
+    >
+      <View className="p-4">
+        {/* Preview de imagen o botones de selección */}
+        {selectedImage ? (
+          <View className="mb-4">
+            <Image
+              source={{ uri: selectedImage }}
+              className="w-full h-80 rounded-xl"
+              resizeMode="cover"
+              style={{
+                borderWidth: 2,
+                borderColor: '#DC262640',
+              }}
+            />
             <TouchableOpacity
-              onPress={handleUpload}
-              disabled={!selectedImage || isUploading}
-              className={`py-4 rounded-lg flex-row items-center justify-center gap-2 ${
-                selectedImage && !isUploading ? 'bg-savage-red' : 'bg-zinc-800'
-              }`}
-              style={{ marginBottom: Math.max(insets.bottom, 16) }}
+              onPress={() => setSelectedImage(null)}
+              className="absolute top-2 right-2 bg-black/70 p-2 rounded-full"
             >
-              {isUploading ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Upload size={18} color="#fff" />
-              )}
-              <Text className="text-white font-black uppercase tracking-widest text-xs">
-                {isUploading ? 'Subiendo...' : 'Guardar Foto'}
-              </Text>
+              <X size={16} color="#fff" />
             </TouchableOpacity>
           </View>
-        </RNAnimated.View>
+        ) : (
+          <View className="flex-row gap-3 mb-4">
+            <TouchableOpacity
+              onPress={pickFromCamera}
+              className="flex-1 py-6 bg-zinc-900 rounded-xl items-center border border-zinc-800 active:bg-zinc-800"
+              style={{
+                shadowColor: '#DC2626',
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.1,
+                shadowRadius: 4,
+              }}
+            >
+              <Camera size={32} color="#DC2626" />
+              <Text className="text-white text-xs font-bold mt-2 uppercase">Cámara</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={pickFromGallery}
+              className="flex-1 py-6 bg-zinc-900 rounded-xl items-center border border-zinc-800 active:bg-zinc-800"
+              style={{
+                shadowColor: '#DC2626',
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.1,
+                shadowRadius: 4,
+              }}
+            >
+              <ImageIcon size={32} color="#DC2626" />
+              <Text className="text-white text-xs font-bold mt-2 uppercase">Galería</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Notas opcionales */}
+        <View className="mb-4">
+          <Text className="text-zinc-400 text-[10px] uppercase tracking-wider mb-2">
+            Notas (opcional)
+          </Text>
+          <TextInput
+            value={notes}
+            onChangeText={setNotes}
+            placeholder="Ej: Semana 8 de definición, sintiéndome más fuerte..."
+            placeholderTextColor="#52525b"
+            multiline
+            numberOfLines={3}
+            className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 text-white text-sm"
+            style={{ textAlignVertical: 'top', minHeight: 80 }}
+          />
+        </View>
+
+        {/* Info sobre snapshot */}
+        <View className="bg-zinc-900/50 p-3 rounded-xl border border-zinc-800">
+          <Text className="text-zinc-400 text-[10px] text-center">
+            💾 Se guardará automáticamente tu peso, medidas, plan de entrenamiento y nutrición
+            actuales junto con esta foto.
+          </Text>
+        </View>
       </View>
-    </Modal>
+    </BottomSheetModal>
   );
 }

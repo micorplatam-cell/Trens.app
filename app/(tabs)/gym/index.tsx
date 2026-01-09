@@ -4083,9 +4083,36 @@ function GymScreen() {
     >
       <View className="flex-1 bg-transparent justify-end">
         <Animated.View
-          className="bg-black rounded-t-3xl"
-          style={[{ height: '92%', backgroundColor: '#000' }, animatedStyleSeriesConfig]}
+          style={[
+            {
+              height: '92%',
+              backgroundColor: '#0a0a0a',
+              borderTopLeftRadius: 24,
+              borderTopRightRadius: 24,
+              borderTopWidth: 2,
+              borderTopColor: 'rgba(220, 38, 38, 0.5)',
+              overflow: 'hidden',
+            },
+            animatedStyleSeriesConfig,
+          ]}
         >
+          {/* Línea de acento superior */}
+          <View
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              height: 3,
+              backgroundColor: '#DC2626',
+              shadowColor: '#DC2626',
+              shadowOffset: { width: 0, height: 0 },
+              shadowOpacity: 0.8,
+              shadowRadius: 10,
+              zIndex: 10,
+            }}
+          />
+
           {/* HEADER DRAGGABLE */}
           <View
             {...panResponderSeriesConfig.panHandlers}
@@ -4093,7 +4120,7 @@ function GymScreen() {
           >
             {/* Indicador de drag */}
             <View className="items-center mb-3">
-              <View className="w-10 h-1 bg-zinc-600 rounded-full" />
+              <View className="w-12 h-1.5 bg-zinc-600 rounded-full" />
             </View>
 
             {/* EXERCISE INFO CENTRADA */}
@@ -4339,9 +4366,35 @@ function GymScreen() {
       >
         <View className="flex-1 bg-transparent justify-end">
           <Animated.View
-            className="bg-black rounded-t-3xl overflow-hidden"
-            style={[{ height: '92%', backgroundColor: '#000' }, animatedStyleCatalog]}
+            style={[
+              {
+                height: '92%',
+                backgroundColor: '#0a0a0a',
+                borderTopLeftRadius: 24,
+                borderTopRightRadius: 24,
+                borderTopWidth: 2,
+                borderTopColor: 'rgba(220, 38, 38, 0.5)',
+                overflow: 'hidden',
+              },
+              animatedStyleCatalog,
+            ]}
           >
+            {/* Línea de acento superior */}
+            <View
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                height: 3,
+                backgroundColor: '#DC2626',
+                shadowColor: '#DC2626',
+                shadowOffset: { width: 0, height: 0 },
+                shadowOpacity: 0.8,
+                shadowRadius: 10,
+                zIndex: 10,
+              }}
+            />
             {/* HEADER DRAGGABLE - GRADIENT */}
             <LinearGradient
               colors={['#1a0805', '#0d0502', '#000000']}
@@ -4387,19 +4440,9 @@ function GymScreen() {
                           </View>
                         );
                       })}
+                      n{' '}
                     </View>
                   </View>
-                  <TouchableOpacity
-                    onPress={() => {
-                      setModalVisible(false);
-                      setCatalogTab('SUGERIDOS');
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                    }}
-                    className="w-10 h-10 bg-zinc-900/80 rounded-full items-center justify-center"
-                    style={{ borderWidth: 1, borderColor: '#27272a' }}
-                  >
-                    <ChevronDown size={22} color="#fff" />
-                  </TouchableOpacity>
                 </View>
 
                 {/* TABS - Scroll horizontal con mejor diseño */}
@@ -5452,9 +5495,36 @@ function GymScreen() {
         >
           <View className="flex-1 bg-transparent justify-end">
             <Animated.View
-              style={[animatedStyleAddDay, { height: '85%', backgroundColor: '#000' }]}
-              className="bg-black rounded-t-3xl"
+              style={[
+                {
+                  height: '85%',
+                  backgroundColor: '#0a0a0a',
+                  borderTopLeftRadius: 24,
+                  borderTopRightRadius: 24,
+                  borderTopWidth: 2,
+                  borderTopColor: 'rgba(249, 115, 22, 0.5)',
+                  overflow: 'hidden',
+                },
+                animatedStyleAddDay,
+              ]}
             >
+              {/* Línea de acento superior */}
+              <View
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: 3,
+                  backgroundColor: '#F97316',
+                  shadowColor: '#F97316',
+                  shadowOffset: { width: 0, height: 0 },
+                  shadowOpacity: 0.8,
+                  shadowRadius: 10,
+                  zIndex: 10,
+                }}
+              />
+
               {/* Header - Draggable para cerrar */}
               <View
                 {...panResponderAddDay.panHandlers}
@@ -5462,25 +5532,14 @@ function GymScreen() {
               >
                 {/* Indicador de drag centrado arriba */}
                 <View className="absolute top-2 left-0 right-0 items-center">
-                  <View className="w-10 h-1 bg-zinc-600 rounded-full" />
+                  <View className="w-12 h-1.5 bg-zinc-600 rounded-full" />
                 </View>
 
-                <View className="flex-row justify-between items-center">
-                  <View>
-                    <Text className="text-white text-xl font-bold">🔥 NUEVO DÍA</Text>
-                    <Text className="text-zinc-500 text-xs mt-0.5">
-                      Selecciona los grupos musculares
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    onPress={() => {
-                      setAddDayModalVisible(false);
-                      setSelectedMuscleGroups([]);
-                    }}
-                    className="w-10 h-10 bg-zinc-900 rounded-full items-center justify-center"
-                  >
-                    <ChevronDown size={22} color="#fff" />
-                  </TouchableOpacity>
+                <View className="items-center mt-2">
+                  <Text className="text-white text-xl font-bold">🔥 NUEVO DÍA</Text>
+                  <Text className="text-zinc-500 text-xs mt-0.5">
+                    Selecciona los grupos musculares
+                  </Text>
                 </View>
               </View>
 
@@ -6193,15 +6252,42 @@ function GymScreen() {
         >
           <View className="flex-1 bg-transparent justify-end">
             <Animated.View
-              className="bg-black rounded-t-3xl"
-              style={[{ height: '85%', backgroundColor: '#000' }, animatedStyleNotes]}
+              style={[
+                {
+                  height: '85%',
+                  backgroundColor: '#0a0a0a',
+                  borderTopLeftRadius: 24,
+                  borderTopRightRadius: 24,
+                  borderTopWidth: 2,
+                  borderTopColor: 'rgba(249, 115, 22, 0.5)',
+                  overflow: 'hidden',
+                },
+                animatedStyleNotes,
+              ]}
             >
+              {/* Línea de acento superior */}
+              <View
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: 3,
+                  backgroundColor: '#F97316',
+                  shadowColor: '#F97316',
+                  shadowOffset: { width: 0, height: 0 },
+                  shadowOpacity: 0.8,
+                  shadowRadius: 10,
+                  zIndex: 10,
+                }}
+              />
+
               {/* Drag Handle + Header (Área para arrastrar) */}
               <Animated.View
                 className="items-center pt-4 pb-4 border-b border-zinc-800"
                 {...panResponderNotes.panHandlers}
               >
-                <View className="w-12 h-1 bg-zinc-600 rounded-full mb-4" />
+                <View className="w-12 h-1.5 bg-zinc-600 rounded-full mb-4" />
 
                 {/* Header centrado */}
                 <View className="px-6 pb-2 w-full">
@@ -6453,15 +6539,42 @@ function GymScreen() {
         >
           <View className="flex-1 bg-transparent justify-end">
             <Animated.View
-              className="rounded-t-3xl"
-              style={[{ height: '50%', backgroundColor: '#0a0a0a' }, animatedStyleVideoNotes]}
+              style={[
+                {
+                  height: '50%',
+                  backgroundColor: '#0a0a0a',
+                  borderTopLeftRadius: 24,
+                  borderTopRightRadius: 24,
+                  borderTopWidth: 2,
+                  borderTopColor: 'rgba(249, 115, 22, 0.5)',
+                  overflow: 'hidden',
+                },
+                animatedStyleVideoNotes,
+              ]}
             >
+              {/* Línea de acento superior */}
+              <View
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: 3,
+                  backgroundColor: '#F97316',
+                  shadowColor: '#F97316',
+                  shadowOffset: { width: 0, height: 0 },
+                  shadowOpacity: 0.8,
+                  shadowRadius: 10,
+                  zIndex: 10,
+                }}
+              />
+
               {/* Drag Handle + Header (Área para arrastrar) */}
               <Animated.View
                 className="items-center pt-4 pb-4 border-b border-zinc-800"
                 {...panResponderVideoNotes.panHandlers}
               >
-                <View className="w-12 h-1 bg-zinc-600 rounded-full mb-4" />
+                <View className="w-12 h-1.5 bg-zinc-600 rounded-full mb-4" />
 
                 {/* Header centrado */}
                 <View className="px-6 pb-2 w-full">
@@ -6547,13 +6660,42 @@ function GymScreen() {
       transparent={true}
       onRequestClose={() => setHankModalVisible(false)}
     >
-      <View className="flex-1 bg-black/95">
-        <View className="flex-1 px-6 pt-16">
-          <View className="flex-row justify-between items-center mb-6">
+      <View className="flex-1 bg-transparent justify-end">
+        <View
+          className="flex-1 rounded-t-3xl px-6 pt-6"
+          style={{
+            backgroundColor: '#0a0a0a',
+            maxHeight: '90%',
+            borderTopWidth: 2,
+            borderTopColor: 'rgba(220, 38, 38, 0.5)',
+            overflow: 'hidden',
+          }}
+        >
+          {/* Línea de acento */}
+          <View
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              height: 3,
+              backgroundColor: '#DC2626',
+              shadowColor: '#DC2626',
+              shadowOffset: { width: 0, height: 0 },
+              shadowOpacity: 0.8,
+              shadowRadius: 10,
+              zIndex: 10,
+            }}
+          />
+
+          {/* Drag Indicator */}
+          <View className="items-center mb-4">
+            <View className="w-12 h-1.5 bg-zinc-600 rounded-full" />
+          </View>
+
+          {/* Header */}
+          <View className="items-center mb-6">
             <Text className="text-savage-red text-2xl font-bold">HANK IA</Text>
-            <TouchableOpacity onPress={() => setHankModalVisible(false)}>
-              <X color="#DC2626" size={24} />
-            </TouchableOpacity>
           </View>
 
           <View className="flex-1 bg-glass-strong rounded-savage p-4 border border-savage-red">

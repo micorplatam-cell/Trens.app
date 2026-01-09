@@ -231,6 +231,10 @@ export function SongPickerModal({
   useEffect(() => {
     if (visible) {
       headerPanY.setValue(0);
+      // Haptic feedback cuando abre
+      setTimeout(() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      }, 300);
     }
   }, [visible, headerPanY]);
 
@@ -984,13 +988,27 @@ export function SongPickerModal({
   // -------------------------------------------------------------------------
   const renderModalContent = () => (
     <>
+      {/* Accent Line */}
+      <View
+        className="absolute top-0 left-1/4 right-1/4 h-0.5 bg-[#1DB954] rounded-full"
+        style={{
+          shadowColor: '#1DB954',
+          shadowOffset: { width: 0, height: 0 },
+          shadowOpacity: 0.8,
+          shadowRadius: 8,
+        }}
+      />
+
       {/* Header - Draggable para cerrar */}
       <View {...headerPanResponder.panHandlers} className="px-5 pt-4 pb-4 border-b border-zinc-800">
         {/* Indicador de drag */}
         <View className="items-center mb-3">
-          <View className="w-10 h-1 bg-zinc-600 rounded-full" />
+          <View className="w-12 h-1.5 bg-zinc-700 rounded-full" />
         </View>
-        <Text className="text-white font-bold text-lg text-center">Añadir canción</Text>
+        <View className="flex-row items-center justify-center gap-2">
+          <Music size={18} color="#1DB954" />
+          <Text className="text-white font-bold text-lg text-center">Añadir canción</Text>
+        </View>
       </View>
 
       {/* Tabs */}
@@ -1045,7 +1063,7 @@ export function SongPickerModal({
         <Animated.View
           entering={SlideInDown.springify().damping(20)}
           exiting={SlideOutDown.duration(200)}
-          className="flex-1 bg-zinc-950 mt-12 rounded-t-3xl"
+          className="flex-1 bg-[#0a0a0a] mt-12 rounded-t-3xl border-t-2 border-[#1DB954]/50"
         >
           {renderModalContent()}
         </Animated.View>

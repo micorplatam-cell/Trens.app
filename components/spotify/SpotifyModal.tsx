@@ -999,6 +999,10 @@ export default function SpotifyModal({
   useEffect(() => {
     if (visible) {
       panY.setValue(0);
+      // Haptic feedback cuando abre
+      setTimeout(() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      }, 300);
     }
   }, [visible]);
 
@@ -1994,28 +1998,58 @@ export default function SpotifyModal({
     <Modal visible={visible} animationType="slide" transparent={true} onRequestClose={onClose}>
       <View className="flex-1 bg-transparent justify-end">
         <RNAnimated.View
-          className="bg-black rounded-t-3xl"
           style={[
-            { height: '95%', backgroundColor: '#000' },
-            Platform.OS === 'web' ? { overflow: 'hidden' } : {},
+            {
+              height: '95%',
+              backgroundColor: '#0a0a0a',
+              borderTopLeftRadius: 24,
+              borderTopRightRadius: 24,
+              borderTopWidth: 2,
+              borderTopColor: 'rgba(29, 185, 84, 0.5)',
+              overflow: 'hidden',
+            },
             animatedStyle,
           ]}
         >
+          {/* Línea de acento superior con glow */}
+          <View
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              height: 3,
+              backgroundColor: '#1DB954',
+              shadowColor: '#1DB954',
+              shadowOffset: { width: 0, height: 0 },
+              shadowOpacity: 0.8,
+              shadowRadius: 10,
+              zIndex: 10,
+            }}
+          />
           {/* Header - Draggable para cerrar */}
           <View
             {...panResponder.panHandlers}
-            className="flex-row items-center justify-between px-4 pt-6 pb-4 border-b border-zinc-900"
+            className="flex-row items-center justify-between px-4 pt-3 pb-4 border-b border-zinc-800/50"
           >
             {/* Indicador de drag centrado arriba */}
-            <View className="absolute top-2 left-0 right-0 items-center">
-              <View className="w-10 h-1 bg-zinc-600 rounded-full" />
+            <View className="absolute top-2 left-0 right-0 items-center z-10">
+              <View className="w-12 h-1.5 bg-zinc-600 rounded-full" />
             </View>
 
             {/* Espacio vacío para mantener layout centrado */}
-            <View className="w-10" />
+            <View className="w-10 mt-3" />
 
-            <View className="flex-row items-center">
-              <View className="w-8 h-8 bg-[#1DB954] rounded-full items-center justify-center mr-2">
+            <View className="flex-row items-center mt-3">
+              <View
+                className="w-8 h-8 bg-[#1DB954] rounded-full items-center justify-center mr-2"
+                style={{
+                  shadowColor: '#1DB954',
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowOpacity: 0.5,
+                  shadowRadius: 6,
+                }}
+              >
                 <Music size={16} color="#000" />
               </View>
               <View>

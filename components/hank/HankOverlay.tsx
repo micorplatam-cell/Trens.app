@@ -2036,9 +2036,36 @@ export const HankOverlay: React.FC = () => {
       <Modal visible={isOpen} transparent={true} animationType="slide" onRequestClose={handleClose}>
         <View className="flex-1 bg-transparent justify-end">
           <Animated.View
-            className="bg-black rounded-t-3xl"
-            style={[{ height: '92%', backgroundColor: '#000' }, animatedPanelStyle]}
+            style={[
+              {
+                height: '92%',
+                backgroundColor: '#0a0a0a',
+                borderTopLeftRadius: 24,
+                borderTopRightRadius: 24,
+                borderTopWidth: 2,
+                borderTopColor: 'rgba(220, 38, 38, 0.5)',
+                overflow: 'hidden',
+              },
+              animatedPanelStyle,
+            ]}
           >
+            {/* Línea de acento superior SAVAGE RED */}
+            <View
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                height: 3,
+                backgroundColor: '#DC2626',
+                shadowColor: '#DC2626',
+                shadowOffset: { width: 0, height: 0 },
+                shadowOpacity: 0.8,
+                shadowRadius: 10,
+                zIndex: 10,
+              }}
+            />
+
             <KeyboardAvoidingView
               behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
               className="flex-1"
@@ -2046,11 +2073,11 @@ export const HankOverlay: React.FC = () => {
               {/* Header con PanResponder para cerrar deslizando */}
               <View
                 {...panResponder.panHandlers}
-                className="flex-row items-center justify-between px-5 pt-6 pb-4 border-b border-zinc-800"
+                className="flex-row items-center justify-between px-5 pt-5 pb-4 border-b border-zinc-800/50"
               >
                 {/* Indicador de drag */}
-                <View className="absolute top-2 left-0 right-0 items-center">
-                  <View className="w-10 h-1 bg-zinc-600 rounded-full" />
+                <View className="absolute top-2 left-0 right-0 items-center z-10">
+                  <View className="w-12 h-1.5 bg-zinc-600 rounded-full" />
                 </View>
 
                 <View className="flex-row items-center">
