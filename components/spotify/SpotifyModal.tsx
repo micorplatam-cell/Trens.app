@@ -666,17 +666,40 @@ export default function SpotifyModal({
   const [showPlaylistTracks, setShowPlaylistTracks] = useState(persistedShowTracks);
 
   // -------------------------------------------------------------------------
-  // SWIPEABLE TABS - Refs y estados para navegación horizontal
+  // SWIPEABLE TABS - Sistema robusto de navegación horizontal
   // -------------------------------------------------------------------------
   const tabsScrollRef = useRef<FlatList>(null);
   const tabsScrollX = useSharedValue(TABS.indexOf(activeTab) * SCREEN_WIDTH);
   const isTabScrolling = useRef(false);
+  const lastVisibleTab = useRef<TabType>(activeTab);
+
+  // Configuración de visibilidad - considera visible cuando 50% está en pantalla
+  const viewabilityConfig = useRef({
+    itemVisiblePercentThreshold: 50,
+    minimumViewTime: 0,
+  }).current;
+
+  // Callback cuando cambia el item visible - ESTE ES EL QUE ACTUALIZA EL TAB
+  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: any[] }) => {
+    if (isTabScrolling.current) return;
+    if (viewableItems.length > 0) {
+      const visibleTab = viewableItems[0].item as TabType;
+      if (visibleTab && visibleTab !== lastVisibleTab.current) {
+        lastVisibleTab.current = visibleTab;
+        // Vibración fuerte al cambiar de sección
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+        setActiveTab(visibleTab);
+        setShowPlaylistTracks(false);
+      }
+    }
+  }).current;
 
   // Cambiar tab programáticamente (cuando se toca un botón de tab)
   const handleTabChange = useCallback((tab: TabType) => {
     const index = TABS.indexOf(tab);
     if (index !== -1 && tabsScrollRef.current) {
       isTabScrolling.current = true;
+      lastVisibleTab.current = tab;
       // Vibración al cambiar de sección
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
       tabsScrollRef.current.scrollToIndex({ index, animated: true });
@@ -684,11 +707,11 @@ export default function SpotifyModal({
       setShowPlaylistTracks(false);
       setTimeout(() => {
         isTabScrolling.current = false;
-      }, 300);
+      }, 400);
     }
   }, []);
 
-  // Manejar scroll de tabs (cuando el usuario hace swipe)
+  // Manejar scroll de tabs (solo para animación del indicador)
   const handleTabsScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
       const offsetX = event.nativeEvent.contentOffset.x;
@@ -697,31 +720,11 @@ export default function SpotifyModal({
     [tabsScrollX]
   );
 
-  // Manejar fin del scroll de tabs
-  const handleTabsScrollEnd = useCallback(
-    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      if (isTabScrolling.current) return;
-      
-      const offsetX = event.nativeEvent.contentOffset.x;
-      const index = Math.round(offsetX / SCREEN_WIDTH);
-      
-      if (index >= 0 && index < TABS.length) {
-        const newTab = TABS[index];
-        if (newTab !== activeTab) {
-          // Vibración fuerte al cambiar de sección
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-          setActiveTab(newTab);
-          setShowPlaylistTracks(false);
-        }
-      }
-    },
-    [activeTab]
-  );
-
   // Sincronizar scroll inicial
   useEffect(() => {
     if (visible && tabsScrollRef.current) {
       const index = TABS.indexOf(activeTab);
+      lastVisibleTab.current = activeTab;
       setTimeout(() => {
         tabsScrollRef.current?.scrollToIndex({ index, animated: false });
       }, 100);
@@ -1280,15 +1283,15 @@ export default function SpotifyModal({
     if (visible && spotifyConnected) {
       // Pequeño delay para asegurar que el swipe termine antes de cargar
       const timer = setTimeout(() => {
-        if (activeTab === 'playlists') {
-          loadPlaylists(); // Sin reset - solo carga si no hay datos
-        } else if (activeTab === 'liked') {
-          loadLikedSongs(); // Sin reset - solo carga si no hay datos
+        if (activeTab === 'playlists' && playlists.length === 0) {
+          loadPlaylists();
+        } else if (activeTab === 'liked' && likedSongs.length === 0) {
+          loadLikedSongs();
         }
-      }, 50);
+      }, 100);
       return () => clearTimeout(timer);
     }
-  }, [activeTab, visible, spotifyConnected, loadPlaylists, loadLikedSongs]);
+  }, [activeTab, visible, spotifyConnected]);
 
   // NO reseteamos el estado al cerrar para mantener la navegación
   // El usuario verá exactamente donde se quedó cuando vuelva a abrir el modal
@@ -1740,15 +1743,14 @@ export default function SpotifyModal({
           pagingEnabled
           showsHorizontalScrollIndicator={false}
           bounces={false}
-          decelerationRate={0.99}
-          disableIntervalMomentum={true}
+          scrollEnabled={true}
           snapToInterval={SCREEN_WIDTH}
           snapToAlignment="start"
           initialScrollIndex={TABS.indexOf(activeTab)}
           getItemLayout={getTabItemLayout}
           onScroll={handleTabsScroll}
-          onMomentumScrollEnd={handleTabsScrollEnd}
-          onScrollEndDrag={handleTabsScrollEnd}
+          onViewableItemsChanged={onViewableItemsChanged}
+          viewabilityConfig={viewabilityConfig}
           scrollEventThrottle={16}
           removeClippedSubviews={false}
           style={{ flex: 1 }}
