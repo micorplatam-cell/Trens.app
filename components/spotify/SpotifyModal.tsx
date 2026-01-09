@@ -79,7 +79,9 @@ interface SpotifyModalProps {
 
 type TabType = 'now-playing' | 'playlists' | 'liked' | 'search';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+// Altura disponible para el contenido (restando header del modal aproximadamente)
+const CONTENT_HEIGHT = SCREEN_HEIGHT - 120;
 
 // ============================================================================
 // FORMATEAR DURACIÓN (helper function)
@@ -601,13 +603,13 @@ const SwipeableTabBar = React.memo(({ activeTab, onTabChange, scrollX }: Swipeab
             indicatorStyle,
           ]}
         />
-        
+
         {/* Tab Buttons */}
         {TABS.map((tab) => {
           const Icon = TAB_ICONS[tab];
           const label = TAB_LABELS[tab];
           const isActive = activeTab === tab;
-          
+
           return (
             <TouchableOpacity
               key={tab}
@@ -1347,10 +1349,10 @@ export default function SpotifyModal({
   // -------------------------------------------------------------------------
   // RENDER CONNECTED VIEW - Con swipe horizontal entre secciones
   // -------------------------------------------------------------------------
-  
+
   // Renderizar contenido de "Now Playing"
   const renderNowPlayingContent = () => (
-    <View style={{ width: SCREEN_WIDTH, flex: 1 }}>
+    <View style={{ width: SCREEN_WIDTH, height: CONTENT_HEIGHT }}>
       {/* Fondo animado con carátula */}
       <AnimatedAlbumBackground
         albumArt={currentTrack?.albumArt}
@@ -1458,7 +1460,7 @@ export default function SpotifyModal({
 
   // Renderizar contenido de "Playlists"
   const renderPlaylistsContent = () => (
-    <View style={{ width: SCREEN_WIDTH, flex: 1, backgroundColor: '#0a0a0a' }}>
+    <View style={{ width: SCREEN_WIDTH, height: CONTENT_HEIGHT, backgroundColor: '#0a0a0a' }}>
       {showPlaylistTracks && selectedPlaylist ? (
         // Tracks de playlist seleccionada
         <View style={{ flex: 1 }}>
@@ -1513,9 +1515,7 @@ export default function SpotifyModal({
                 loadingMore ? (
                   <View className="py-4 items-center">
                     <ActivityIndicator size="small" color="#1DB954" />
-                    <Text className="text-zinc-500 text-xs mt-2">
-                      Cargando más canciones...
-                    </Text>
+                    <Text className="text-zinc-500 text-xs mt-2">Cargando más canciones...</Text>
                   </View>
                 ) : null
               }
@@ -1555,7 +1555,7 @@ export default function SpotifyModal({
 
   // Renderizar contenido de "Liked Songs"
   const renderLikedContent = () => (
-    <View style={{ width: SCREEN_WIDTH, flex: 1, backgroundColor: '#0a0a0a' }}>
+    <View style={{ width: SCREEN_WIDTH, height: CONTENT_HEIGHT, backgroundColor: '#0a0a0a' }}>
       {/* Header Liked Songs */}
       <LinearGradient colors={['#5B21B6', '#1E1B4B', '#000']} className="px-4 pt-4 pb-6">
         <View className="flex-row items-center">
@@ -1596,9 +1596,7 @@ export default function SpotifyModal({
               loadingMore ? (
                 <View className="py-4 items-center">
                   <ActivityIndicator size="small" color="#1DB954" />
-                  <Text className="text-zinc-500 text-xs mt-2">
-                    Cargando más canciones...
-                  </Text>
+                  <Text className="text-zinc-500 text-xs mt-2">Cargando más canciones...</Text>
                 </View>
               ) : null
             }
@@ -1616,7 +1614,7 @@ export default function SpotifyModal({
 
   // Renderizar contenido de "Search"
   const renderSearchContent = () => (
-    <View style={{ width: SCREEN_WIDTH, flex: 1, backgroundColor: '#0a0a0a' }}>
+    <View style={{ width: SCREEN_WIDTH, height: CONTENT_HEIGHT, backgroundColor: '#0a0a0a' }}>
       {/* Search Bar - Búsqueda en tiempo real */}
       <View className="px-4 pt-4 pb-2">
         <View className="flex-row items-center bg-zinc-900 rounded-xl px-4 py-3 border border-zinc-800">
@@ -1631,9 +1629,7 @@ export default function SpotifyModal({
             autoCorrect={false}
             autoCapitalize="none"
           />
-          {loading && (
-            <ActivityIndicator size="small" color="#1DB954" style={{ marginRight: 8 }} />
-          )}
+          {loading && <ActivityIndicator size="small" color="#1DB954" style={{ marginRight: 8 }} />}
           {searchQuery.length > 0 && !loading && (
             <TouchableOpacity onPress={() => setSearchQuery('')}>
               <X size={18} color="#71717A" />
@@ -1666,8 +1662,6 @@ export default function SpotifyModal({
     </View>
   );
 
-
-
   const renderConnectedView = () => {
     return (
       <View className="flex-1">
@@ -1693,19 +1687,19 @@ export default function SpotifyModal({
               }
             }
           }}
-          contentContainerStyle={{ width: SCREEN_WIDTH * TABS.length }}
+          contentContainerStyle={{ flexDirection: 'row' }}
           style={{ flex: 1 }}
           nestedScrollEnabled={true}
         >
           {/* Now Playing */}
           {renderNowPlayingContent()}
-          
+
           {/* Playlists */}
           {renderPlaylistsContent()}
-          
+
           {/* Liked Songs */}
           {renderLikedContent()}
-          
+
           {/* Search */}
           {renderSearchContent()}
         </ScrollView>
@@ -1907,8 +1901,8 @@ export default function SpotifyModal({
           {spotifyConnected ? (
             <>
               {/* Tab Bar con indicador animado sincronizado con swipe */}
-              <SwipeableTabBar 
-                activeTab={activeTab} 
+              <SwipeableTabBar
+                activeTab={activeTab}
                 onTabChange={handleTabChange}
                 scrollX={tabsScrollX}
               />
