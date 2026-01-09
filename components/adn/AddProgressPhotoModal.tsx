@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,10 +7,12 @@ import {
   TextInput,
   Image,
   ActivityIndicator,
+  PanResponder,
+  Animated as RNAnimated,
 } from 'react-native';
 import { Alert } from '../../lib/alert';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { X, Camera, Image as ImageIcon, Upload } from 'lucide-react-native';
+import { Camera, Image as ImageIcon, Upload, X } from 'lucide-react-native';
 import * as Haptics from '../../lib/haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { uploadProgressPhoto } from '../../services/progress/photos';
@@ -32,6 +34,45 @@ export default function AddProgressPhotoModal({
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
   const [isUploading, setIsUploading] = useState(false);
+
+  // -------------------------------------------------------------------------
+  // PAN RESPONDER - Cerrar deslizando hacia abajo
+  // -------------------------------------------------------------------------
+  const panY = useRef(new RNAnimated.Value(0)).current;
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 5,
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0) {
+          panY.setValue(gestureState.dy);
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 100) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          handleClose();
+        } else {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          RNAnimated.spring(panY, {
+            toValue: 0,
+            useNativeDriver: false,
+          }).start();
+        }
+      },
+    })
+  ).current;
+
+  useEffect(() => {
+    if (visible) {
+      panY.setValue(0);
+    }
+  }, [visible, panY]);
+
+  const animatedStyle = {
+    transform: [{ translateY: panY }],
+  };
 
   const resetState = () => {
     setSelectedImage(null);
@@ -117,15 +158,19 @@ export default function AddProgressPhotoModal({
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
       <View className="flex-1 bg-black/90 justify-end">
-        <View className="bg-[#0a0a0a] rounded-t-3xl border-t border-zinc-800">
-          {/* Header */}
-          <View className="flex-row items-center justify-between p-4 border-b border-zinc-800">
-            <Text className="text-white font-bold text-sm uppercase tracking-wider">
+        <RNAnimated.View
+          style={[{ backgroundColor: '#0a0a0a' }, animatedStyle]}
+          className="rounded-t-3xl border-t border-zinc-800"
+        >
+          {/* Header - Draggable para cerrar */}
+          <View {...panResponder.panHandlers} className="p-4 border-b border-zinc-800">
+            {/* Indicador de drag */}
+            <View className="items-center mb-3">
+              <View className="w-10 h-1 bg-zinc-600 rounded-full" />
+            </View>
+            <Text className="text-white font-bold text-sm uppercase tracking-wider text-center">
               📸 Nueva Foto de Progreso
             </Text>
-            <TouchableOpacity onPress={handleClose} className="p-2">
-              <X size={20} color="#71717a" />
-            </TouchableOpacity>
           </View>
 
           <View className="p-4">
@@ -208,7 +253,7 @@ export default function AddProgressPhotoModal({
               </Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </RNAnimated.View>
       </View>
     </Modal>
   );

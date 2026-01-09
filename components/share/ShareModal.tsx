@@ -2,10 +2,20 @@
 // SHARE MODAL - Modal profesional para compartir videos
 // =============================================================================
 
-import React, { useCallback, useState } from 'react';
-import { View, Text, Modal, Pressable, Image, ActivityIndicator } from 'react-native';
-import { Link2, Share2, MessageCircle, QrCode, X, Check } from 'lucide-react-native';
+import React, { useCallback, useState, useRef, useEffect } from 'react';
+import {
+  View,
+  Text,
+  Modal,
+  Pressable,
+  Image,
+  ActivityIndicator,
+  PanResponder,
+  Animated as RNAnimated,
+} from 'react-native';
+import { Link2, Share2, MessageCircle, QrCode, Check } from 'lucide-react-native';
 import Animated, { FadeIn, FadeOut, SlideInDown, SlideOutDown } from 'react-native-reanimated';
+import * as Haptics from '../../lib/haptics';
 import {
   ShareVideoOptions,
   copyVideoLink,
@@ -41,6 +51,48 @@ export function ShareModal({
   const [action, setAction] = useState<ShareAction>('idle');
   const [showQR, setShowQR] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
+
+  // -------------------------------------------------------------------------
+  // PAN RESPONDER - Cerrar deslizando hacia abajo
+  // -------------------------------------------------------------------------
+  const panY = useRef(new RNAnimated.Value(0)).current;
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 5,
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0) {
+          panY.setValue(gestureState.dy);
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 100) {
+          // Cerrar con animación fluida
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          handleClose();
+        } else {
+          // Volver arriba
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          RNAnimated.spring(panY, {
+            toValue: 0,
+            useNativeDriver: false,
+          }).start();
+        }
+      },
+    })
+  ).current;
+
+  // Resetear panY cuando el modal se abre
+  useEffect(() => {
+    if (visible) {
+      panY.setValue(0);
+    }
+  }, [visible, panY]);
+
+  const animatedStyle = {
+    transform: [{ translateY: panY }],
+  };
 
   const options: ShareVideoOptions = {
     videoId,
@@ -119,21 +171,17 @@ export function ShareModal({
       >
         <Pressable className="flex-1" onPress={handleClose} />
 
-        <Animated.View
-          entering={SlideInDown.springify().damping(20)}
-          exiting={SlideOutDown.duration(200)}
-          className="bg-zinc-900 rounded-t-3xl overflow-hidden"
+        <RNAnimated.View
+          style={[{ backgroundColor: '#18181b' }, animatedStyle]}
+          className="rounded-t-3xl overflow-hidden"
         >
-          {/* Header */}
-          <View className="flex-row items-center justify-between px-5 pt-5 pb-4">
-            <View className="w-10" />
-            <Text className="text-white font-bold text-lg">Compartir</Text>
-            <Pressable
-              onPress={handleClose}
-              className="w-10 h-10 items-center justify-center rounded-full bg-zinc-800"
-            >
-              <X size={20} color="#A1A1AA" />
-            </Pressable>
+          {/* Header - Draggable para cerrar */}
+          <View {...panResponder.panHandlers} className="px-5 pt-4 pb-4">
+            {/* Indicador de drag */}
+            <View className="items-center mb-3">
+              <View className="w-10 h-1 bg-zinc-600 rounded-full" />
+            </View>
+            <Text className="text-white font-bold text-lg text-center">Compartir</Text>
           </View>
 
           {/* Preview Card */}
@@ -247,7 +295,7 @@ export function ShareModal({
               </View>
             </>
           )}
-        </Animated.View>
+        </RNAnimated.View>
       </Animated.View>
     </Modal>
   );

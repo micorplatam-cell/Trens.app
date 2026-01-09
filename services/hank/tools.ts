@@ -6065,13 +6065,14 @@ export async function trainingAssignPlan(userId: string, planId: string): Promis
       routineNames[String(day.dayIndex)] = day.name;
     });
 
-    // 1. Actualizar perfil con el nuevo plan
+    // 1. Actualizar perfil con el nuevo plan (MARCAR plan_source: 'hank')
     const { error: profileError } = await supabase
       .from('profiles')
       .update({
         training_frequency: template.frequency,
         training_current_day: 0,
         training_routine_names: routineNames,
+        plan_source: 'hank', // ⬅️ IMPORTANTE: Marcar que fue asignado por Hank
         updated_at: new Date().toISOString(),
       })
       .eq('id', userId);
@@ -6081,16 +6082,20 @@ export async function trainingAssignPlan(userId: string, planId: string): Promis
       return { success: false, message: 'Error al actualizar tu perfil con el nuevo plan.' };
     }
 
-    // 2. Actualizar user_profiles si existe
-    await supabase
-      .from('user_profiles')
-      .update({
+    // 2. Actualizar user_profiles (usar UPSERT para garantizar que exista)
+    // NO establecer training_mode aquí - se detecta automáticamente por tener ejercicios
+    await supabase.from('user_profiles').upsert(
+      {
+        user_id: userId,
         training_days_per_week: template.frequency,
         training_experience: template.target_levels?.[0] || 'INTERMEDIO',
         goal: template.target_goals?.[0] || 'HIPERTROFIA',
+        // training_mode se detecta automáticamente como 'gym_module' por tener ejercicios
+        // NO lo establecemos como 'external' porque usará el módulo GYM
         updated_at: new Date().toISOString(),
-      })
-      .eq('user_id', userId);
+      },
+      { onConflict: 'user_id' }
+    );
 
     // 3. Eliminar ejercicios anteriores del usuario
     await supabase.from('user_exercise_config').delete().eq('user_id', userId);
@@ -6271,6 +6276,7 @@ export async function trainingRestructure(
         training_frequency: newDays.length,
         training_current_day: 0,
         training_routine_names: routineNames,
+        plan_source: 'custom', // Marcar como plan personalizado
         updated_at: new Date().toISOString(),
       })
       .eq('id', userId);
@@ -6279,6 +6285,23 @@ export async function trainingRestructure(
       console.error('trainingRestructure error:', error);
       return { success: false, message: 'Error al reestructurar el plan.' };
     }
+
+    // SYNC: Actualizar user_profiles con el nuevo horario
+    const newExternalSchedule: Record<string, string> = {};
+    newDays.forEach((day, idx) => {
+      newExternalSchedule[`Día ${idx + 1}`] = day.name.toUpperCase();
+    });
+
+    await supabase.from('user_profiles').upsert(
+      {
+        user_id: userId,
+        training_mode: 'external',
+        external_schedule: newExternalSchedule,
+        training_days_per_week: newDays.length,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'user_id' }
+    );
 
     // Limpiar ejercicios de días que ya no existen
     const { data: userExercises } = await supabase
@@ -6358,6 +6381,23 @@ export async function trainingRenameDay(
       return { success: false, message: 'Error al renombrar el día.' };
     }
 
+    // SYNC: También actualizar user_profiles.external_schedule
+    const newExternalSchedule: Record<string, string> = {};
+    for (let i = 0; i < frequency; i++) {
+      newExternalSchedule[`Día ${i + 1}`] = routineNames[String(i)] || `DÍA ${i + 1}`;
+    }
+
+    await supabase.from('user_profiles').upsert(
+      {
+        user_id: userId,
+        training_mode: 'external',
+        external_schedule: newExternalSchedule,
+        training_days_per_week: frequency,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'user_id' }
+    );
+
     return {
       success: true,
       message: `✅ Día ${dayIndex + 1} renombrado a "${newName.toUpperCase()}"`,
@@ -6395,12 +6435,32 @@ export async function trainingAddDay(userId: string, dayName: string): Promise<H
       .update({
         training_frequency: frequency + 1,
         training_routine_names: routineNames,
+        plan_source: 'custom', // Marcar como plan personalizado
       })
       .eq('id', userId);
 
     if (error) {
       return { success: false, message: 'Error al agregar el día.' };
     }
+
+    // SYNC: También actualizar user_profiles para activar modo personalizado
+    // Construir external_schedule desde los días actuales + el nuevo
+    const newExternalSchedule: Record<string, string> = {};
+    for (let i = 0; i <= newIndex; i++) {
+      const name = routineNames[String(i)] || `DÍA ${i + 1}`;
+      newExternalSchedule[`Día ${i + 1}`] = name;
+    }
+
+    await supabase.from('user_profiles').upsert(
+      {
+        user_id: userId,
+        training_mode: 'external',
+        external_schedule: newExternalSchedule,
+        training_days_per_week: frequency + 1,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'user_id' }
+    );
 
     return {
       success: true,
@@ -6499,6 +6559,37 @@ export async function trainingRemoveDay(userId: string, dayIndex: number): Promi
           .update({ training_days: newDays.length > 0 ? newDays : [0] })
           .eq('id', ex.id);
       }
+    }
+
+    // SYNC: También actualizar user_profiles
+    const newExternalSchedule: Record<string, string> = {};
+    Object.values(newRoutineNames).forEach((name, idx) => {
+      newExternalSchedule[`Día ${idx + 1}`] = name as string;
+    });
+
+    if (newFrequency > 0) {
+      await supabase.from('user_profiles').upsert(
+        {
+          user_id: userId,
+          training_mode: 'external',
+          external_schedule: newExternalSchedule,
+          training_days_per_week: newFrequency,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'user_id' }
+      );
+    } else {
+      // Si no quedan días, desactivar modo personalizado
+      await supabase.from('user_profiles').upsert(
+        {
+          user_id: userId,
+          training_mode: 'none',
+          external_schedule: {},
+          training_days_per_week: 0,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'user_id' }
+      );
     }
 
     return {
@@ -6643,15 +6734,16 @@ export async function trainingSetExternalMode(
       return { success: false, message: 'La frecuencia debe ser entre 1 y 7 días por semana.' };
     }
 
-    // Actualizar perfil
-    const { error } = await supabase
-      .from('user_profiles')
-      .update({
+    // Usar upsert para garantizar que la fila exista
+    const { error } = await supabase.from('user_profiles').upsert(
+      {
+        user_id: userId,
         training_mode: enabled ? 'external' : 'none',
         training_days_per_week: enabled ? frequency || null : null,
         updated_at: new Date().toISOString(),
-      })
-      .eq('user_id', userId);
+      },
+      { onConflict: 'user_id' }
+    );
 
     if (error) {
       console.error('trainingSetExternalMode error:', error);
@@ -6693,21 +6785,37 @@ export async function trainingSetExternalSchedule(
 
     const frequency = Object.keys(schedule).length;
 
-    // Actualizar perfil
-    const { error } = await supabase
-      .from('user_profiles')
-      .update({
+    // Actualizar user_profiles con el modo personalizado
+    const { error } = await supabase.from('user_profiles').upsert(
+      {
+        user_id: userId,
         training_mode: 'external',
         external_schedule: schedule,
         training_days_per_week: frequency,
         updated_at: new Date().toISOString(),
-      })
-      .eq('user_id', userId);
+      },
+      { onConflict: 'user_id' }
+    );
 
     if (error) {
       console.error('trainingSetExternalSchedule error:', error);
       return { success: false, message: 'Error al guardar el horario.' };
     }
+
+    // SYNC: También actualizar profiles para mantener consistencia con GYM
+    const routineNames: Record<string, string> = {};
+    Object.entries(schedule).forEach(([day, muscle], idx) => {
+      routineNames[String(idx)] = `${day}: ${muscle}`;
+    });
+
+    await supabase
+      .from('profiles')
+      .update({
+        training_frequency: frequency,
+        training_routine_names: routineNames,
+        plan_source: 'custom',
+      })
+      .eq('id', userId);
 
     const scheduleInfo = Object.entries(schedule)
       .map(([day, muscle]) => `• ${day}: ${muscle}`)

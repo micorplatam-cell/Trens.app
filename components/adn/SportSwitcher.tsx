@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, TouchableOpacity, Modal, ScrollView, PanResponder } from 'react-native';
+import { View, Text, TouchableOpacity, Modal, ScrollView, PanResponder, Dimensions } from 'react-native';
 import {
   Dumbbell,
   Bike,
@@ -9,10 +9,20 @@ import {
   Check,
   Plus,
   Lock,
+  Trash2,
   LucideIcon,
 } from 'lucide-react-native';
 import * as Haptics from '../../lib/haptics';
-import Animated, { useSharedValue, useAnimatedStyle, withTiming } from 'react-native-reanimated';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  withSpring,
+  runOnJS,
+  interpolate,
+  Extrapolation,
+} from 'react-native-reanimated';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSport, Sport } from '../../context/SportContext';
 import { Alert } from '../../lib/alert';
 
@@ -35,6 +45,185 @@ const SPORT_COLORS: Record<string, string> = {
   AUTO: '#EAB308',
   SURF: '#0EA5E9',
 };
+
+// Ancho para revelar el botón de desactivar
+const SWIPE_THRESHOLD = 80;
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+// ============================================================================
+// SWIPEABLE SPORT ITEM - Item con swipe left para desactivar
+// ============================================================================
+interface SwipeableSportItemProps {
+  sport: Sport;
+  isActive: boolean;
+  isAvailable: boolean;
+  sportColor: string;
+  onSelect: () => void;
+  onDeactivate: () => void;
+  canDeactivate: boolean; // No se puede desactivar si es el único deporte
+}
+
+function SwipeableSportItem({
+  sport,
+  isActive,
+  isAvailable,
+  sportColor,
+  onSelect,
+  onDeactivate,
+  canDeactivate,
+}: SwipeableSportItemProps) {
+  const translateX = useSharedValue(0);
+  const SportIcon = SPORT_ICONS[sport.code] || Dumbbell;
+
+  const handleDeactivate = () => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    Alert.alert(
+      '⚠️ Desactivar Deporte',
+      `¿Quieres quitar ${sport.name} de tu lista?\n\nTus datos y progreso se conservarán. Podrás reactivarlo cuando quieras.`,
+      [
+        { text: 'Cancelar', style: 'cancel', onPress: () => { translateX.value = withSpring(0); } },
+        {
+          text: 'Desactivar',
+          style: 'destructive',
+          onPress: () => {
+            translateX.value = withTiming(0, { duration: 200 });
+            onDeactivate();
+          },
+        },
+      ]
+    );
+  };
+
+  const panGesture = Gesture.Pan()
+    .activeOffsetX([-10, 10])
+    .onUpdate((event) => {
+      // Solo permitir swipe a la izquierda si puede desactivar
+      if (canDeactivate && event.translationX < 0) {
+        translateX.value = Math.max(event.translationX, -SWIPE_THRESHOLD - 20);
+      }
+    })
+    .onEnd((event) => {
+      if (canDeactivate && event.translationX < -SWIPE_THRESHOLD / 2) {
+        // Mantener abierto mostrando el botón
+        translateX.value = withSpring(-SWIPE_THRESHOLD);
+        runOnJS(Haptics.impactAsync)(Haptics.ImpactFeedbackStyle.Medium);
+      } else {
+        translateX.value = withSpring(0);
+      }
+    });
+
+  const tapGesture = Gesture.Tap().onEnd(() => {
+    if (translateX.value < -10) {
+      // Si está abierto, cerrar
+      translateX.value = withSpring(0);
+    } else {
+      // Si está cerrado, seleccionar
+      runOnJS(onSelect)();
+    }
+  });
+
+  const composedGesture = Gesture.Race(panGesture, tapGesture);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: translateX.value }],
+  }));
+
+  const deleteButtonStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(
+      translateX.value,
+      [-SWIPE_THRESHOLD, -20, 0],
+      [1, 0.5, 0],
+      Extrapolation.CLAMP
+    ),
+  }));
+
+  return (
+    <View className="mb-2 overflow-hidden rounded-xl">
+      {/* Botón de desactivar (detrás) */}
+      {canDeactivate && (
+        <Animated.View
+          style={[
+            {
+              position: 'absolute',
+              right: 0,
+              top: 0,
+              bottom: 0,
+              width: SWIPE_THRESHOLD,
+              backgroundColor: '#DC2626',
+              justifyContent: 'center',
+              alignItems: 'center',
+              borderTopRightRadius: 12,
+              borderBottomRightRadius: 12,
+            },
+            deleteButtonStyle,
+          ]}
+        >
+          <TouchableOpacity
+            onPress={handleDeactivate}
+            className="flex-1 w-full items-center justify-center"
+          >
+            <Trash2 color="#FFF" size={22} />
+            <Text className="text-white text-xs font-bold mt-1">Quitar</Text>
+          </TouchableOpacity>
+        </Animated.View>
+      )}
+
+      {/* Contenido principal (swipeable) */}
+      <GestureDetector gesture={composedGesture}>
+        <Animated.View
+          style={[
+            {
+              backgroundColor: isActive ? `${sportColor}20` : '#27272a',
+              borderWidth: isActive ? 1 : 0,
+              borderColor: sportColor,
+              opacity: isAvailable ? 1 : 0.6,
+              borderRadius: 12,
+            },
+            animatedStyle,
+          ]}
+          className="flex-row items-center p-4"
+        >
+          <View
+            className="w-12 h-12 rounded-full items-center justify-center"
+            style={{ backgroundColor: `${sportColor}30` }}
+          >
+            <SportIcon color={sportColor} size={24} />
+          </View>
+
+          <View className="flex-1 ml-4">
+            <View className="flex-row items-center">
+              <Text className="text-white font-bold text-base">{sport.name}</Text>
+              {!isAvailable && (
+                <View className="ml-2 px-2 py-0.5 bg-zinc-700 rounded">
+                  <Text className="text-zinc-400 text-xs font-medium">PRONTO</Text>
+                </View>
+              )}
+            </View>
+            <Text className="text-zinc-500 text-sm">{sport.description}</Text>
+            {canDeactivate && (
+              <Text className="text-zinc-600 text-xs mt-1">← Desliza para quitar</Text>
+            )}
+          </View>
+
+          {isActive && isAvailable && (
+            <View
+              className="w-8 h-8 rounded-full items-center justify-center"
+              style={{ backgroundColor: sportColor }}
+            >
+              <Check color="white" size={18} strokeWidth={3} />
+            </View>
+          )}
+
+          {!isAvailable && (
+            <View className="w-8 h-8 rounded-full items-center justify-center bg-zinc-700">
+              <Lock color="#71717a" size={16} />
+            </View>
+          )}
+        </Animated.View>
+      </GestureDetector>
+    </View>
+  );
+}
 
 // ============================================================================
 // SPORT PILL (Botón compacto para mostrar deporte activo)
@@ -77,7 +266,7 @@ interface SportSwitcherModalProps {
 }
 
 export function SportSwitcherModal({ visible, onClose }: SportSwitcherModalProps) {
-  const { activeSport, allSports, userSports, setActiveSport, addUserSport } = useSport();
+  const { activeSport, allSports, userSports, setActiveSport, addUserSport, removeUserSport } = useSport();
 
   // -------------------------------------------------------------------------
   // PAN RESPONDER - Cerrar deslizando hacia abajo
@@ -188,60 +377,28 @@ export function SportSwitcherModal({ visible, onClose }: SportSwitcherModalProps
                 <Text className="text-zinc-500 font-semibold text-xs mb-3 tracking-wider">
                   MIS DEPORTES
                 </Text>
-                {mySports.map((sport) => {
-                  const SportIcon = SPORT_ICONS[sport.code] || Dumbbell;
-                  const isActive = activeSport?.id === sport.id;
-                  const sportColor = SPORT_COLORS[sport.code] || '#DC2626';
-                  const isAvailable = AVAILABLE_SPORTS.includes(sport.code);
+                <GestureHandlerRootView>
+                  {mySports.map((sport) => {
+                    const isActive = activeSport?.id === sport.id;
+                    const sportColor = SPORT_COLORS[sport.code] || '#DC2626';
+                    const isAvailable = AVAILABLE_SPORTS.includes(sport.code);
+                    // No se puede desactivar si es el único deporte activo
+                    const canDeactivate = mySports.length > 1;
 
-                  return (
-                    <TouchableOpacity
-                      key={sport.id}
-                      onPress={() => handleSelectSport(sport)}
-                      className="flex-row items-center p-4 rounded-xl mb-2"
-                      style={{
-                        backgroundColor: isActive ? `${sportColor}20` : '#27272a',
-                        borderWidth: isActive ? 1 : 0,
-                        borderColor: sportColor,
-                        opacity: isAvailable ? 1 : 0.6,
-                      }}
-                    >
-                      <View
-                        className="w-12 h-12 rounded-full items-center justify-center"
-                        style={{ backgroundColor: `${sportColor}30` }}
-                      >
-                        <SportIcon color={sportColor} size={24} />
-                      </View>
-
-                      <View className="flex-1 ml-4">
-                        <View className="flex-row items-center">
-                          <Text className="text-white font-bold text-base">{sport.name}</Text>
-                          {!isAvailable && (
-                            <View className="ml-2 px-2 py-0.5 bg-zinc-700 rounded">
-                              <Text className="text-zinc-400 text-xs font-medium">PRONTO</Text>
-                            </View>
-                          )}
-                        </View>
-                        <Text className="text-zinc-500 text-sm">{sport.description}</Text>
-                      </View>
-
-                      {isActive && isAvailable && (
-                        <View
-                          className="w-8 h-8 rounded-full items-center justify-center"
-                          style={{ backgroundColor: sportColor }}
-                        >
-                          <Check color="white" size={18} strokeWidth={3} />
-                        </View>
-                      )}
-
-                      {!isAvailable && (
-                        <View className="w-8 h-8 rounded-full items-center justify-center bg-zinc-700">
-                          <Lock color="#71717a" size={16} />
-                        </View>
-                      )}
-                    </TouchableOpacity>
-                  );
-                })}
+                    return (
+                      <SwipeableSportItem
+                        key={sport.id}
+                        sport={sport}
+                        isActive={isActive}
+                        isAvailable={isAvailable}
+                        sportColor={sportColor}
+                        onSelect={() => handleSelectSport(sport)}
+                        onDeactivate={() => removeUserSport(sport.id)}
+                        canDeactivate={canDeactivate}
+                      />
+                    );
+                  })}
+                </GestureHandlerRootView>
               </View>
             )}
 

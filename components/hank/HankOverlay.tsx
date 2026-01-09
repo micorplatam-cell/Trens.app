@@ -2065,12 +2065,8 @@ export const HankOverlay: React.FC = () => {
                   </View>
                 </View>
 
-                <TouchableOpacity
-                  onPress={handleClose}
-                  className="w-10 h-10 rounded-full bg-zinc-900 items-center justify-center"
-                >
-                  <ChevronDown size={24} color="#A1A1AA" />
-                </TouchableOpacity>
+                {/* Espacio vacío para mantener layout centrado */}
+                <View className="w-10" />
               </View>
 
               {/* Messages */}

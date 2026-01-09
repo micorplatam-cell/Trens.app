@@ -1,6 +1,8 @@
 // ============================================================================
 // SPOTIFY OVERLAY - FAB flotante global para control de Spotify
-// Visible en todas las pantallas excepto Feed
+// VISIBILIDAD:
+//   - Si Spotify conectado → visible en todos los módulos EXCEPTO Feed
+//   - Si Spotify NO conectado → visible SOLO en GYM (para promover conexión)
 // Gestos: Long press = play/pause, Swipe up = next, Swipe left = restart
 //         Swipe down = HANK Insight (mensaje savage según canción + contexto)
 // ============================================================================
@@ -378,8 +380,19 @@ export function SpotifyOverlay() {
   const pulseAnim = useSharedValue(1);
   const glowAnim = useSharedValue(0);
 
-  // Ocultar en Feed
-  const isHidden = pathname?.includes('feed') || pathname === '/feed/index' || pathname === '/feed';
+  // Verificar si estamos en el módulo GYM
+  const isGymModule =
+    pathname?.includes('gym') || pathname === '/gym' || pathname === '/(tabs)/gym';
+
+  // Verificar si estamos en Feed (siempre oculto)
+  const isFeedModule =
+    pathname?.includes('feed') || pathname === '/feed/index' || pathname === '/feed';
+
+  // Lógica de visibilidad:
+  // - Si está en Feed → SIEMPRE oculto
+  // - Si Spotify NO está conectado → solo visible en GYM
+  // - Si Spotify SÍ está conectado → visible en todos excepto Feed
+  const isHidden = isFeedModule || (!spotifyConnected && !isGymModule);
 
   // -------------------------------------------------------------------------
   // SINCRONIZAR ESTADO DE SPOTIFY
@@ -842,7 +855,10 @@ export function SpotifyOverlay() {
   }));
 
   // -------------------------------------------------------------------------
-  // NO RENDERIZAR EN FEED
+  // LÓGICA DE VISIBILIDAD:
+  // - Feed → NUNCA visible
+  // - Spotify conectado → Visible en todos los módulos excepto Feed
+  // - Spotify NO conectado → Solo visible en GYM (para promover conexión)
   // -------------------------------------------------------------------------
   if (isHidden) {
     return null;

@@ -19,9 +19,9 @@ import {
   PanResponderGestureState,
   Platform,
   ScrollView,
+  Animated as RNAnimated,
 } from 'react-native';
 import {
-  X,
   Search,
   Music,
   Play,
@@ -198,6 +198,41 @@ export function SongPickerModal({
 
   // Trim slider state - track if was playing before drag
   const wasPlayingBeforeDrag = useRef(false);
+
+  // -------------------------------------------------------------------------
+  // PAN RESPONDER - Cerrar deslizando hacia abajo desde el header
+  // -------------------------------------------------------------------------
+  const headerPanY = useRef(new RNAnimated.Value(0)).current;
+
+  const headerPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 5,
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0) {
+          headerPanY.setValue(gestureState.dy);
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 120) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          handleClose();
+        } else {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          RNAnimated.spring(headerPanY, {
+            toValue: 0,
+            useNativeDriver: false,
+          }).start();
+        }
+      },
+    })
+  ).current;
+
+  useEffect(() => {
+    if (visible) {
+      headerPanY.setValue(0);
+    }
+  }, [visible, headerPanY]);
 
   // Timeline dimensions ref
   const timelineWidth = useRef(0);
@@ -949,16 +984,13 @@ export function SongPickerModal({
   // -------------------------------------------------------------------------
   const renderModalContent = () => (
     <>
-      {/* Header */}
-      <View className="flex-row items-center justify-between px-5 pt-5 pb-4 border-b border-zinc-800">
-        <View className="w-10" />
-        <Text className="text-white font-bold text-lg">Añadir canción</Text>
-        <TouchableOpacity
-          onPress={handleClose}
-          className="w-10 h-10 items-center justify-center rounded-full bg-zinc-800"
-        >
-          <X size={20} color="#A1A1AA" />
-        </TouchableOpacity>
+      {/* Header - Draggable para cerrar */}
+      <View {...headerPanResponder.panHandlers} className="px-5 pt-4 pb-4 border-b border-zinc-800">
+        {/* Indicador de drag */}
+        <View className="items-center mb-3">
+          <View className="w-10 h-1 bg-zinc-600 rounded-full" />
+        </View>
+        <Text className="text-white font-bold text-lg text-center">Añadir canción</Text>
       </View>
 
       {/* Tabs */}

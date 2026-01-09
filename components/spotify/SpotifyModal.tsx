@@ -2011,12 +2011,8 @@ export default function SpotifyModal({
               <View className="w-10 h-1 bg-zinc-600 rounded-full" />
             </View>
 
-            <TouchableOpacity
-              onPress={onClose}
-              className="w-10 h-10 bg-zinc-900 rounded-full items-center justify-center"
-            >
-              <ChevronDown size={22} color="#fff" />
-            </TouchableOpacity>
+            {/* Espacio vacío para mantener layout centrado */}
+            <View className="w-10" />
 
             <View className="flex-row items-center">
               <View className="w-8 h-8 bg-[#1DB954] rounded-full items-center justify-center mr-2">

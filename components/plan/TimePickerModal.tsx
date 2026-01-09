@@ -3,10 +3,18 @@
 // Selector interactivo de hora en formato AM/PM
 // ============================================================================
 
-import React, { useState, useEffect } from 'react';
-import { View, Text, Modal, Pressable, ScrollView } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  View,
+  Text,
+  Modal,
+  Pressable,
+  ScrollView,
+  PanResponder,
+  Animated as RNAnimated,
+} from 'react-native';
 import { Haptics } from '../../lib/haptics';
-import { X, Clock, Check } from 'lucide-react-native';
+import { Clock, Check } from 'lucide-react-native';
 
 // ============================================================================
 // TYPES
@@ -89,19 +97,65 @@ export const TimePickerModal: React.FC<TimePickerModalProps> = ({
   // Formatear display
   const displayTime = `${selectedHour}:${selectedMinute.toString().padStart(2, '0')} ${selectedPeriod}`;
 
+  // -------------------------------------------------------------------------
+  // PAN RESPONDER - Cerrar deslizando hacia abajo
+  // -------------------------------------------------------------------------
+  const panY = useRef(new RNAnimated.Value(0)).current;
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 5,
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0) {
+          panY.setValue(gestureState.dy);
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 100) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          onClose();
+        } else {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          RNAnimated.spring(panY, {
+            toValue: 0,
+            useNativeDriver: false,
+          }).start();
+        }
+      },
+    })
+  ).current;
+
+  useEffect(() => {
+    if (visible) {
+      panY.setValue(0);
+    }
+  }, [visible, panY]);
+
+  const animatedStyle = {
+    transform: [{ translateY: panY }],
+  };
+
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View className="flex-1 bg-black/80 justify-end">
-        <View className="bg-[#1a1a1a] rounded-t-3xl border-t border-white/10">
-          {/* Header */}
-          <View className="flex-row justify-between items-center p-4 border-b border-white/10 bg-[#222222] rounded-t-3xl">
-            <View className="flex-row items-center gap-3">
+        <RNAnimated.View
+          style={[{ backgroundColor: '#1a1a1a' }, animatedStyle]}
+          className="rounded-t-3xl border-t border-white/10"
+        >
+          {/* Header - Draggable para cerrar */}
+          <View
+            {...panResponder.panHandlers}
+            className="p-4 border-b border-white/10 bg-[#222222] rounded-t-3xl"
+          >
+            {/* Indicador de drag */}
+            <View className="items-center mb-3">
+              <View className="w-10 h-1 bg-zinc-600 rounded-full" />
+            </View>
+            <View className="flex-row items-center justify-center gap-3">
               <Clock size={20} color="#3B82F6" />
               <Text className="text-white font-bold text-lg">Cambiar Hora</Text>
             </View>
-            <Pressable onPress={onClose} className="p-2">
-              <X size={20} color="#999" />
-            </Pressable>
           </View>
 
           {/* Time Display */}
@@ -228,7 +282,7 @@ export const TimePickerModal: React.FC<TimePickerModalProps> = ({
               <Text className="text-white font-bold text-lg">GUARDAR HORA</Text>
             </Pressable>
           </View>
-        </View>
+        </RNAnimated.View>
       </View>
     </Modal>
   );

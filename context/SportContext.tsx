@@ -197,11 +197,12 @@ export function SportProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      // Cargar deportes del usuario
+      // Cargar deportes del usuario (solo los activos)
       const { data: userSportsData, error: userSportsError } = await supabase
         .from('user_sports')
         .select('*')
-        .eq('user_id', user.id);
+        .eq('user_id', user.id)
+        .eq('is_active', true);
 
       if (userSportsError) throw userSportsError;
       setUserSports(userSportsData || []);
@@ -288,25 +289,49 @@ export function SportProvider({ children }: { children: ReactNode }) {
 
   // -------------------------------------------------------------------------
   // AGREGAR DEPORTE AL USUARIO
+  // Si ya existe un registro desactivado, lo reactiva en lugar de crear uno nuevo
+  // Esto preserva los datos históricos del usuario para ese deporte
   // -------------------------------------------------------------------------
   const addUserSport = useCallback(
     async (sportId: string) => {
       if (!user) return;
 
       try {
-        const { data, error } = await supabase
+        // Verificar si ya existe un registro (activo o inactivo)
+        const { data: existingRecord } = await supabase
           .from('user_sports')
-          .insert({
-            user_id: user.id,
-            sport_id: sportId,
-            is_active: true,
-            is_primary: userSports.length === 0,
-          })
-          .select()
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('sport_id', sportId)
           .single();
 
-        if (error) throw error;
-        setUserSports((prev) => [...prev, data]);
+        if (existingRecord) {
+          // Reactivar el registro existente (preserva datos históricos)
+          const { data, error } = await supabase
+            .from('user_sports')
+            .update({ is_active: true })
+            .eq('id', existingRecord.id)
+            .select()
+            .single();
+
+          if (error) throw error;
+          setUserSports((prev) => [...prev, data]);
+        } else {
+          // Crear nuevo registro
+          const { data, error } = await supabase
+            .from('user_sports')
+            .insert({
+              user_id: user.id,
+              sport_id: sportId,
+              is_active: true,
+              is_primary: userSports.length === 0,
+            })
+            .select()
+            .single();
+
+          if (error) throw error;
+          setUserSports((prev) => [...prev, data]);
+        }
       } catch (error) {
         console.error('Error adding user sport:', error);
       }
@@ -315,21 +340,41 @@ export function SportProvider({ children }: { children: ReactNode }) {
   );
 
   // -------------------------------------------------------------------------
-  // REMOVER DEPORTE DEL USUARIO
+  // DESACTIVAR DEPORTE DEL USUARIO
+  // Solo marca is_active = false, NO elimina los datos
+  // Así el usuario puede reactivar el deporte y conservar su historial
   // -------------------------------------------------------------------------
   const removeUserSport = useCallback(
     async (sportId: string) => {
       if (!user) return;
 
       try {
-        await supabase.from('user_sports').delete().eq('user_id', user.id).eq('sport_id', sportId);
+        // Desactivar en lugar de eliminar (preserva datos históricos)
+        await supabase
+          .from('user_sports')
+          .update({ is_active: false })
+          .eq('user_id', user.id)
+          .eq('sport_id', sportId);
 
+        // Remover del estado local (pero sigue en BD como inactivo)
         setUserSports((prev) => prev.filter((us) => us.sport_id !== sportId));
+
+        // Si era el deporte activo, cambiar a GYM
+        if (activeSport?.id === sportId) {
+          const gym = allSports.find((s) => s.code === 'GYM');
+          if (gym) {
+            setActiveSportState(gym);
+            await supabase
+              .from('user_profiles')
+              .update({ active_sport_id: gym.id })
+              .eq('user_id', user.id);
+          }
+        }
       } catch (error) {
-        console.error('Error removing user sport:', error);
+        console.error('Error deactivating user sport:', error);
       }
     },
-    [user]
+    [user, activeSport, allSports]
   );
 
   // -------------------------------------------------------------------------

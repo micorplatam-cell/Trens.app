@@ -2075,8 +2075,12 @@ function GymScreen() {
         condition: trainingMode === 'external' && Object.keys(extSchedule).length > 0,
       });
 
+      // Flag para indicar si los días ya fueron configurados en modo personalizado
+      let externalModeConfigured = false;
+
       if (trainingMode === 'external' && Object.keys(extSchedule).length > 0) {
         // MODO PERSONALIZADO: Usuario tiene su propio horario, puede agregar ejercicios
+        externalModeConfigured = true;
         setIsExternalMode(true);
         setExternalSchedule(extSchedule);
         console.warn('🏋️ GYM [PERSONALIZADO]: Horario cargado:', extSchedule);
@@ -2137,18 +2141,32 @@ function GymScreen() {
             syncedSchedule[`Día ${i + 1}`] = routineNames[String(i)] || `DÍA ${i + 1}`;
           }
 
-          // Activar modo external automáticamente
-          await supabase
-            .from('user_profiles')
-            .update({
+          // Activar modo external automáticamente (usar upsert para garantizar que la fila exista)
+          await supabase.from('user_profiles').upsert(
+            {
+              user_id: user.id,
               training_mode: 'external',
               external_schedule: syncedSchedule,
               training_days_per_week: frequency,
-            })
-            .eq('user_id', user.id);
+            },
+            { onConflict: 'user_id' }
+          );
 
+          // Configurar días para modo personalizado sincronizado
+          const syncedDays = Object.entries(syncedSchedule).map(([dayName, muscleGroup], idx) => ({
+            id: String(idx + 1),
+            muscleGroups: `${dayName}: ${muscleGroup}`,
+            exercises: [],
+          }));
+
+          externalModeConfigured = true;
           setIsExternalMode(true);
           setExternalSchedule(syncedSchedule);
+          setTrainingProgram((prev) => ({
+            ...prev,
+            frequency: syncedDays.length,
+            days: syncedDays,
+          }));
           console.warn('🔄 GYM: Sincronizado modo personalizado automáticamente:', syncedSchedule);
         } else {
           setIsExternalMode(false);
@@ -2170,46 +2188,52 @@ function GymScreen() {
       // Cargar nombres de rutinas desde la base de datos
       let routineNames = profile?.training_routine_names || {};
 
-      // Si frequency es 0, el usuario no tiene días de entrenamiento
-      if (savedFrequency === 0) {
-        setTrainingProgram((prev) => ({
-          ...prev,
-          frequency: 0,
-          days: [],
-          currentDayIndex: 0,
-        }));
-        console.warn('🏋️ GYM: Usuario sin plan de entrenamiento (0 días)');
-      } else {
-        // Si no hay nombres guardados, inicializar con los valores por defecto
-        if (Object.keys(routineNames).length === 0) {
-          const defaultNames: Record<string, string> = {};
-          trainingProgram.days.forEach((day, idx) => {
-            defaultNames[String(idx)] = day.muscleGroups;
-          });
+      // =========================================================================
+      // RECONSTRUIR DÍAS: SOLO SI NO ESTÁ EN MODO PERSONALIZADO
+      // En modo personalizado, los días ya se configuraron arriba con el formato correcto
+      // =========================================================================
+      if (!externalModeConfigured) {
+        // Si frequency es 0, el usuario no tiene días de entrenamiento
+        if (savedFrequency === 0) {
+          setTrainingProgram((prev) => ({
+            ...prev,
+            frequency: 0,
+            days: [],
+            currentDayIndex: 0,
+          }));
+          console.warn('🏋️ GYM: Usuario sin plan de entrenamiento (0 días)');
+        } else {
+          // Si no hay nombres guardados, inicializar con los valores por defecto
+          if (Object.keys(routineNames).length === 0) {
+            const defaultNames: Record<string, string> = {};
+            trainingProgram.days.forEach((day, idx) => {
+              defaultNames[String(idx)] = day.muscleGroups;
+            });
 
-          // Guardar los nombres por defecto en la base de datos
-          await supabase
-            .from('profiles')
-            .update({ training_routine_names: defaultNames })
-            .eq('id', user.id);
+            // Guardar los nombres por defecto en la base de datos
+            await supabase
+              .from('profiles')
+              .update({ training_routine_names: defaultNames })
+              .eq('id', user.id);
 
-          routineNames = defaultNames;
-          console.warn('🏋️ GYM: Nombres de rutinas inicializados:', defaultNames);
+            routineNames = defaultNames;
+            console.warn('🏋️ GYM: Nombres de rutinas inicializados:', defaultNames);
+          }
+
+          // Reconstruir días basados en la frecuencia guardada (MODO GYM MODULE - naranja)
+          const numDays = savedFrequency;
+          const updatedDays = Array.from({ length: numDays }, (_, idx) => ({
+            id: String(idx + 1),
+            muscleGroups: routineNames[String(idx)] || `DÍA ${idx + 1}`,
+            exercises: [],
+          }));
+
+          setTrainingProgram((prev) => ({
+            ...prev,
+            frequency: numDays,
+            days: updatedDays,
+          }));
         }
-
-        // Reconstruir días basados en la frecuencia guardada
-        const numDays = savedFrequency;
-        const updatedDays = Array.from({ length: numDays }, (_, idx) => ({
-          id: String(idx + 1),
-          muscleGroups: routineNames[String(idx)] || `DÍA ${idx + 1}`,
-          exercises: [],
-        }));
-
-        setTrainingProgram((prev) => ({
-          ...prev,
-          frequency: numDays,
-          days: updatedDays,
-        }));
       }
 
       // Si no hay días, no hay nada más que hacer
