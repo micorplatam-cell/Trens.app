@@ -677,6 +677,8 @@ export default function SpotifyModal({
     const index = TABS.indexOf(tab);
     if (index !== -1 && tabsScrollRef.current) {
       isTabScrolling.current = true;
+      // Vibración al cambiar de sección
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
       tabsScrollRef.current.scrollToIndex({ index, animated: true });
       setActiveTab(tab);
       setShowPlaylistTracks(false);
@@ -706,7 +708,8 @@ export default function SpotifyModal({
       if (index >= 0 && index < TABS.length) {
         const newTab = TABS[index];
         if (newTab !== activeTab) {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          // Vibración fuerte al cambiar de sección
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
           setActiveTab(newTab);
           setShowPlaylistTracks(false);
         }
@@ -1275,11 +1278,15 @@ export default function SpotifyModal({
   // Cargar datos al cambiar de tab (solo si no hay datos)
   useEffect(() => {
     if (visible && spotifyConnected) {
-      if (activeTab === 'playlists') {
-        loadPlaylists(); // Sin reset - solo carga si no hay datos
-      } else if (activeTab === 'liked') {
-        loadLikedSongs(); // Sin reset - solo carga si no hay datos
-      }
+      // Pequeño delay para asegurar que el swipe termine antes de cargar
+      const timer = setTimeout(() => {
+        if (activeTab === 'playlists') {
+          loadPlaylists(); // Sin reset - solo carga si no hay datos
+        } else if (activeTab === 'liked') {
+          loadLikedSongs(); // Sin reset - solo carga si no hay datos
+        }
+      }, 50);
+      return () => clearTimeout(timer);
     }
   }, [activeTab, visible, spotifyConnected, loadPlaylists, loadLikedSongs]);
 
@@ -1471,7 +1478,7 @@ export default function SpotifyModal({
     <View style={{ width: SCREEN_WIDTH, flex: 1, backgroundColor: '#0a0a0a' }}>
       {showPlaylistTracks && selectedPlaylist ? (
         // Tracks de playlist seleccionada
-        <View className="flex-1">
+        <View style={{ flex: 1 }}>
           {/* Header de playlist */}
           <View className="flex-row items-center px-4 py-4 border-b border-zinc-800">
             <TouchableOpacity
@@ -1504,7 +1511,7 @@ export default function SpotifyModal({
 
           {/* Lista de tracks */}
           {loading ? (
-            <View className="flex-1 items-center justify-center">
+            <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
               <ActivityIndicator size="large" color="#1DB954" />
             </View>
           ) : (
@@ -1534,9 +1541,9 @@ export default function SpotifyModal({
         </View>
       ) : (
         // Lista de playlists
-        <View className="flex-1">
+        <View style={{ flex: 1 }}>
           {loading ? (
-            <View className="flex-1 items-center justify-center">
+            <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
               <ActivityIndicator size="large" color="#1DB954" />
             </View>
           ) : (
@@ -1545,10 +1552,10 @@ export default function SpotifyModal({
               keyExtractor={(item) => item.id}
               renderItem={renderPlaylistItem}
               style={{ flex: 1 }}
-              contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
+              contentContainerStyle={{ padding: 16, paddingBottom: 120, flexGrow: 1 }}
               nestedScrollEnabled
               ListEmptyComponent={
-                <View className="items-center justify-center py-20">
+                <View style={{ alignItems: 'center', justifyContent: 'center', paddingTop: 80 }}>
                   <Library size={48} color="#71717A" />
                   <Text className="text-zinc-400 mt-4 text-center">
                     No se encontraron playlists.{'\n'}
@@ -1586,11 +1593,11 @@ export default function SpotifyModal({
       </LinearGradient>
 
       {loading ? (
-        <View className="flex-1 items-center justify-center">
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <ActivityIndicator size="large" color="#1DB954" />
         </View>
       ) : (
-        <View className="flex-1">
+        <View style={{ flex: 1 }}>
           <FlatList
             data={likedSongs}
             keyExtractor={(item) => item.id}
@@ -1733,13 +1740,15 @@ export default function SpotifyModal({
           pagingEnabled
           showsHorizontalScrollIndicator={false}
           bounces={false}
-          decelerationRate="fast"
+          decelerationRate={0.99}
+          disableIntervalMomentum={true}
           snapToInterval={SCREEN_WIDTH}
-          snapToAlignment="center"
+          snapToAlignment="start"
           initialScrollIndex={TABS.indexOf(activeTab)}
           getItemLayout={getTabItemLayout}
           onScroll={handleTabsScroll}
           onMomentumScrollEnd={handleTabsScrollEnd}
+          onScrollEndDrag={handleTabsScrollEnd}
           scrollEventThrottle={16}
           removeClippedSubviews={false}
           style={{ flex: 1 }}
