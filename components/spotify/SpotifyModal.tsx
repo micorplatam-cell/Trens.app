@@ -14,6 +14,7 @@ import {
   NativeScrollEvent,
   Platform,
   Animated as RNAnimated,
+  ScrollView,
 } from 'react-native';
 import { Alert } from '../../lib/alert';
 import { Image } from 'expo-image';
@@ -668,31 +669,10 @@ export default function SpotifyModal({
   // -------------------------------------------------------------------------
   // SWIPEABLE TABS - Sistema robusto de navegación horizontal
   // -------------------------------------------------------------------------
-  const tabsScrollRef = useRef<FlatList>(null);
+  const tabsScrollRef = useRef<ScrollView>(null);
   const tabsScrollX = useSharedValue(TABS.indexOf(activeTab) * SCREEN_WIDTH);
   const isTabScrolling = useRef(false);
   const lastVisibleTab = useRef<TabType>(activeTab);
-
-  // Configuración de visibilidad - considera visible cuando 50% está en pantalla
-  const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 50,
-    minimumViewTime: 0,
-  }).current;
-
-  // Callback cuando cambia el item visible - ESTE ES EL QUE ACTUALIZA EL TAB
-  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: any[] }) => {
-    if (isTabScrolling.current) return;
-    if (viewableItems.length > 0) {
-      const visibleTab = viewableItems[0].item as TabType;
-      if (visibleTab && visibleTab !== lastVisibleTab.current) {
-        lastVisibleTab.current = visibleTab;
-        // Vibración fuerte al cambiar de sección
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-        setActiveTab(visibleTab);
-        setShowPlaylistTracks(false);
-      }
-    }
-  }).current;
 
   // Cambiar tab programáticamente (cuando se toca un botón de tab)
   const handleTabChange = useCallback((tab: TabType) => {
@@ -702,7 +682,7 @@ export default function SpotifyModal({
       lastVisibleTab.current = tab;
       // Vibración al cambiar de sección
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-      tabsScrollRef.current.scrollToIndex({ index, animated: true });
+      tabsScrollRef.current.scrollTo({ x: index * SCREEN_WIDTH, animated: true });
       setActiveTab(tab);
       setShowPlaylistTracks(false);
       setTimeout(() => {
@@ -1686,75 +1666,49 @@ export default function SpotifyModal({
     </View>
   );
 
-  // Renderizar cada página del swipe
-  const renderTabPage = useCallback(({ item }: { item: TabType }) => {
-    switch (item) {
-      case 'now-playing':
-        return renderNowPlayingContent();
-      case 'playlists':
-        return renderPlaylistsContent();
-      case 'liked':
-        return renderLikedContent();
-      case 'search':
-        return renderSearchContent();
-      default:
-        return null;
-    }
-  }, [
-    currentTrack, 
-    playbackState, 
-    isTrackLiked, 
-    checkingLikeStatus, 
-    togglingLike, 
-    currentPosition, 
-    isSeeking,
-    showPlaylistTracks,
-    selectedPlaylist,
-    tracks,
-    playlists,
-    likedSongs,
-    searchResults,
-    searchQuery,
-    loading,
-    loadingMore,
-    hasMoreTracks,
-    hasMoreLiked,
-  ]);
 
-  const getTabItemLayout = useCallback(
-    (_: any, index: number) => ({
-      length: SCREEN_WIDTH,
-      offset: SCREEN_WIDTH * index,
-      index,
-    }),
-    []
-  );
 
   const renderConnectedView = () => {
     return (
       <View className="flex-1">
-        {/* FlatList horizontal para swipe entre secciones */}
-        <FlatList
-          ref={tabsScrollRef}
-          data={TABS}
-          keyExtractor={(item) => item}
-          renderItem={renderTabPage}
+        {/* ScrollView horizontal para swipe entre secciones */}
+        <ScrollView
+          ref={tabsScrollRef as any}
           horizontal
           pagingEnabled
           showsHorizontalScrollIndicator={false}
           bounces={false}
-          scrollEnabled={true}
-          snapToInterval={SCREEN_WIDTH}
-          snapToAlignment="start"
-          initialScrollIndex={TABS.indexOf(activeTab)}
-          getItemLayout={getTabItemLayout}
-          onScroll={handleTabsScroll}
-          onViewableItemsChanged={onViewableItemsChanged}
-          viewabilityConfig={viewabilityConfig}
           scrollEventThrottle={16}
-          removeClippedSubviews={false}
+          onScroll={handleTabsScroll}
+          onMomentumScrollEnd={(event) => {
+            const offsetX = event.nativeEvent.contentOffset.x;
+            const index = Math.round(offsetX / SCREEN_WIDTH);
+            if (index >= 0 && index < TABS.length) {
+              const newTab = TABS[index];
+              if (newTab !== lastVisibleTab.current) {
+                lastVisibleTab.current = newTab;
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                setActiveTab(newTab);
+                setShowPlaylistTracks(false);
+              }
+            }
+          }}
+          contentContainerStyle={{ width: SCREEN_WIDTH * TABS.length }}
           style={{ flex: 1 }}
-        />
+          nestedScrollEnabled={true}
+        >
+          {/* Now Playing */}
+          {renderNowPlayingContent()}
+          
+          {/* Playlists */}
+          {renderPlaylistsContent()}
+          
+          {/* Liked Songs */}
+          {renderLikedContent()}
+          
+          {/* Search */}
+          {renderSearchContent()}
+        </ScrollView>
 
         {/* Mini Player (si hay track y no está en Now Playing) */}
         {currentTrack && activeTab !== 'now-playing' && (
