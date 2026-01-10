@@ -1138,7 +1138,7 @@ function GymScreen() {
 
   // Ref del FlatList para scroll programático
   const exerciseListRef = useRef<FlatList>(null);
-  
+
   // -------------------------------------------------------------------------
   // WEB: Control de scroll mecánico - un ejercicio/alternativa a la vez
   // -------------------------------------------------------------------------
@@ -1151,63 +1151,72 @@ function GymScreen() {
   const SCROLL_COOLDOWN = 150; // ms entre scrolls - rápido para mejor respuesta
 
   // Función para mover exactamente 1 ejercicio (vertical)
-  const scrollToExerciseIndex = useCallback((direction: 'up' | 'down') => {
-    const now = Date.now();
-    if (isScrollingRef.current || now - lastScrollTime.current < SCROLL_COOLDOWN) return;
-    if (viewMode !== 'FOCUS') return;
-    
-    isScrollingRef.current = true;
-    lastScrollTime.current = now;
-    
-    const newIndex = direction === 'down' 
-      ? Math.min(activeExerciseIndex + 1, exercises.length - 1)
-      : Math.max(activeExerciseIndex - 1, 0);
-    
-    if (newIndex !== activeExerciseIndex) {
-      // En web, solo actualizar el estado - CSS transform hace la animación
-      if (Platform.OS === 'web') {
-        setActiveExerciseIndex(newIndex);
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      } else if (exerciseListRef.current) {
-        exerciseListRef.current.scrollToIndex({
-          index: newIndex,
-          animated: true,
-        });
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  const scrollToExerciseIndex = useCallback(
+    (direction: 'up' | 'down') => {
+      const now = Date.now();
+      if (isScrollingRef.current || now - lastScrollTime.current < SCROLL_COOLDOWN) return;
+      if (viewMode !== 'FOCUS') return;
+
+      isScrollingRef.current = true;
+      lastScrollTime.current = now;
+
+      const newIndex =
+        direction === 'down'
+          ? Math.min(activeExerciseIndex + 1, exercises.length - 1)
+          : Math.max(activeExerciseIndex - 1, 0);
+
+      if (newIndex !== activeExerciseIndex) {
+        // En web, solo actualizar el estado - CSS transform hace la animación
+        if (Platform.OS === 'web') {
+          setActiveExerciseIndex(newIndex);
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        } else if (exerciseListRef.current) {
+          exerciseListRef.current.scrollToIndex({
+            index: newIndex,
+            animated: true,
+          });
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        }
       }
-    }
-    
-    setTimeout(() => {
-      isScrollingRef.current = false;
-    }, SCROLL_COOLDOWN);
-  }, [activeExerciseIndex, exercises.length, viewMode]);
+
+      setTimeout(() => {
+        isScrollingRef.current = false;
+      }, SCROLL_COOLDOWN);
+    },
+    [activeExerciseIndex, exercises.length, viewMode]
+  );
 
   // Función para mover exactamente 1 alternativa (horizontal)
-  const scrollToAlternative = useCallback((direction: 'left' | 'right') => {
-    const now = Date.now();
-    if (isScrollingHorizontalRef.current || now - lastScrollTimeH.current < SCROLL_COOLDOWN) return;
-    if (viewMode !== 'FOCUS') return;
-    
-    isScrollingHorizontalRef.current = true;
-    lastScrollTimeH.current = now;
-    
-    const currentAltIndex = activeAlternatives[activeExerciseIndex] || 0;
-    const currentExercise = exercises[activeExerciseIndex];
-    const totalAlternatives = 1 + (currentExercise?.alternatives?.length || 0);
-    
-    const newAltIndex = direction === 'right'
-      ? Math.min(currentAltIndex + 1, totalAlternatives - 1)
-      : Math.max(currentAltIndex - 1, 0);
-    
-    if (newAltIndex !== currentAltIndex) {
-      setActiveAlternatives(prev => ({ ...prev, [activeExerciseIndex]: newAltIndex }));
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
-    
-    setTimeout(() => {
-      isScrollingHorizontalRef.current = false;
-    }, SCROLL_COOLDOWN);
-  }, [activeExerciseIndex, activeAlternatives, exercises, viewMode]);
+  const scrollToAlternative = useCallback(
+    (direction: 'left' | 'right') => {
+      const now = Date.now();
+      if (isScrollingHorizontalRef.current || now - lastScrollTimeH.current < SCROLL_COOLDOWN)
+        return;
+      if (viewMode !== 'FOCUS') return;
+
+      isScrollingHorizontalRef.current = true;
+      lastScrollTimeH.current = now;
+
+      const currentAltIndex = activeAlternatives[activeExerciseIndex] || 0;
+      const currentExercise = exercises[activeExerciseIndex];
+      const totalAlternatives = 1 + (currentExercise?.alternatives?.length || 0);
+
+      const newAltIndex =
+        direction === 'right'
+          ? Math.min(currentAltIndex + 1, totalAlternatives - 1)
+          : Math.max(currentAltIndex - 1, 0);
+
+      if (newAltIndex !== currentAltIndex) {
+        setActiveAlternatives((prev) => ({ ...prev, [activeExerciseIndex]: newAltIndex }));
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }
+
+      setTimeout(() => {
+        isScrollingHorizontalRef.current = false;
+      }, SCROLL_COOLDOWN);
+    },
+    [activeExerciseIndex, activeAlternatives, exercises, viewMode]
+  );
 
   // Effect para capturar wheel/touch events en web
   useEffect(() => {
@@ -1216,10 +1225,10 @@ function GymScreen() {
     const handleWheel = (e: WheelEvent) => {
       // Solo interceptar si el scroll es significativo
       if (Math.abs(e.deltaY) < 10 && Math.abs(e.deltaX) < 10) return;
-      
+
       e.preventDefault();
       e.stopPropagation();
-      
+
       // Scroll horizontal para alternativas tiene prioridad
       if (Math.abs(e.deltaX) > Math.abs(e.deltaY) && Math.abs(e.deltaX) > 10) {
         if (e.deltaX > 0) {
@@ -1246,7 +1255,7 @@ function GymScreen() {
       const deltaY = touchStartY.current - e.changedTouches[0].clientY;
       const deltaX = touchStartX.current - e.changedTouches[0].clientX;
       const SWIPE_THRESHOLD = 50;
-      
+
       // Detectar dirección predominante
       if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > SWIPE_THRESHOLD) {
         // Swipe horizontal - cambiar alternativa
@@ -7710,26 +7719,63 @@ function GymScreen() {
       >
         <View className="flex-1 bg-transparent justify-end">
           <Animated.View
-            className="bg-black rounded-t-3xl"
-            style={[{ height: '85%', backgroundColor: '#000' }, animatedStyleStructure]}
+            style={[
+              {
+                height: '92%',
+                backgroundColor: '#0a0a0a',
+                borderTopLeftRadius: 24,
+                borderTopRightRadius: 24,
+                borderTopWidth: 2,
+                borderTopColor: 'rgba(220, 38, 38, 0.5)',
+                overflow: 'hidden',
+              },
+              animatedStyleStructure,
+            ]}
           >
-            {/* Drag Handle + Header */}
-            <Animated.View
-              className="items-center pt-4 pb-4 border-b border-zinc-800"
+            {/* Línea de acento superior con glow */}
+            <View
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                height: 3,
+                backgroundColor: '#DC2626',
+                shadowColor: '#DC2626',
+                shadowOffset: { width: 0, height: 0 },
+                shadowOpacity: 0.8,
+                shadowRadius: 10,
+                zIndex: 10,
+              }}
+            />
+
+            {/* HEADER DRAGGABLE */}
+            <View
               {...panResponderStructure.panHandlers}
+              className="px-4 pt-4 pb-3 border-b border-zinc-900"
             >
-              <View className="w-12 h-1 bg-zinc-600 rounded-full mb-4" />
+              {/* Indicador de drag */}
+              <View className="items-center mb-3">
+                <View className="w-12 h-1.5 bg-zinc-600 rounded-full" />
+              </View>
 
               {/* Header centrado */}
-              <View className="px-6 pb-2 w-full">
-                <Text className="text-white text-xl font-bold text-center" numberOfLines={1}>
-                  {modalExercise.name}
-                </Text>
-                <Text className="text-zinc-500 text-xs mt-1 tracking-wider text-center uppercase">
-                  Series de Hoy
-                </Text>
+              <View className="flex-row items-center justify-center">
+                <Image
+                  source={{ uri: modalExercise.image_url }}
+                  style={{ width: 36, height: 36, borderRadius: 8 }}
+                  contentFit="cover"
+                />
+                <View className="ml-2">
+                  <Text className="text-white font-bold text-sm" numberOfLines={1}>
+                    {modalExercise.name}
+                  </Text>
+                  <Text className="text-zinc-600 text-[10px] uppercase tracking-wider">
+                    Series de Hoy
+                  </Text>
+                </View>
               </View>
-            </Animated.View>
+            </View>
 
             {/* Leyenda de tipos */}
             <View className="flex-row justify-center gap-3 py-2 bg-zinc-950/50">
@@ -8076,10 +8122,14 @@ function GymScreen() {
           }
         }}
         style={Platform.OS === 'web' ? { overflow: 'hidden' } : undefined}
-        contentContainerStyle={Platform.OS === 'web' ? {
-          transform: `translateY(${-activeExerciseIndex * CONTENT_HEIGHT}px)`,
-          transition: 'transform 0.25s cubic-bezier(0.25, 0.1, 0.25, 1)',
-        } as any : undefined}
+        contentContainerStyle={
+          Platform.OS === 'web'
+            ? ({
+                transform: `translateY(${-activeExerciseIndex * CONTENT_HEIGHT}px)`,
+                transition: 'transform 0.25s cubic-bezier(0.25, 0.1, 0.25, 1)',
+              } as any)
+            : undefined
+        }
         ListEmptyComponent={
           <View style={{ height: CONTENT_HEIGHT }} className="justify-center items-center px-6">
             <View className="w-20 h-20 rounded-full bg-zinc-900 items-center justify-center mb-6">
@@ -8167,14 +8217,18 @@ function GymScreen() {
                     setActiveAlternatives((prev) => ({ ...prev, [index]: newIndex }));
                   }
                 }}
-                style={{ 
+                style={{
                   height: SCREEN_WIDTH * 0.85 + 170,
                   overflow: 'hidden',
                 }}
-                contentContainerStyle={Platform.OS === 'web' ? {
-                  transform: `translateX(${-activeAltIndex * SCREEN_WIDTH}px)`,
-                  transition: 'transform 0.3s ease-out',
-                } as any : undefined}
+                contentContainerStyle={
+                  Platform.OS === 'web'
+                    ? ({
+                        transform: `translateX(${-activeAltIndex * SCREEN_WIDTH}px)`,
+                        transition: 'transform 0.3s ease-out',
+                      } as any)
+                    : undefined
+                }
                 renderItem={({ item: variation }) => (
                   <View
                     style={{

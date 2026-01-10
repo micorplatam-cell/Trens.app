@@ -35,6 +35,7 @@ import {
   X,
   PlusCircle,
   CheckCircle,
+  Shuffle,
 } from 'lucide-react-native';
 import { Haptics } from '../../lib/haptics';
 import Animated, {
@@ -420,6 +421,10 @@ interface AlbumDisplayProps {
   checkingLikeStatus: boolean;
   togglingLike: boolean;
   onToggleLike: () => void;
+  // Shuffle props
+  isShuffleActive: boolean;
+  togglingShuffle: boolean;
+  onToggleShuffle: () => void;
 }
 
 const AlbumDisplay = React.memo(
@@ -430,6 +435,9 @@ const AlbumDisplay = React.memo(
     checkingLikeStatus,
     togglingLike,
     onToggleLike,
+    isShuffleActive,
+    togglingShuffle,
+    onToggleShuffle,
   }: AlbumDisplayProps) => {
     return (
       <View>
@@ -487,6 +495,22 @@ const AlbumDisplay = React.memo(
                   width: '100%',
                 }}
               >
+                {/* Shuffle button - izquierda */}
+                <TouchableOpacity
+                  onPress={onToggleShuffle}
+                  disabled={togglingShuffle}
+                  style={{ marginRight: 12 }}
+                >
+                  {togglingShuffle ? (
+                    <ActivityIndicator size="small" color="#1DB954" />
+                  ) : (
+                    <Shuffle
+                      size={24}
+                      color={isShuffleActive ? '#1DB954' : '#71717A'}
+                      strokeWidth={isShuffleActive ? 2.5 : 2}
+                    />
+                  )}
+                </TouchableOpacity>
                 <Text
                   style={{
                     color: '#fff',
@@ -499,7 +523,7 @@ const AlbumDisplay = React.memo(
                 >
                   {currentTrackInfo.name}
                 </Text>
-                {/* Like button */}
+                {/* Like button - derecha */}
                 <TouchableOpacity
                   onPress={onToggleLike}
                   disabled={checkingLikeStatus || togglingLike}
@@ -680,9 +704,105 @@ export default function SpotifyModal({
   const lastVisibleTab = useRef<TabType>(activeTab);
   const isDragging = useRef(false);
 
+  // -------------------------------------------------------------------------
+  // WEB: Control de scroll mecánico con gestos touch/wheel
+  // -------------------------------------------------------------------------
+  const webScrollContainerRef = useRef<View>(null);
+  const isWebScrolling = useRef(false);
+  const lastWebScrollTime = useRef(0);
+  const webTouchStartX = useRef(0);
+  const WEB_SCROLL_COOLDOWN = 200;
+
+  // Función para mover exactamente 1 tab (horizontal)
+  const scrollToTabIndex = useCallback(
+    (direction: 'left' | 'right') => {
+      const now = Date.now();
+      if (isWebScrolling.current || now - lastWebScrollTime.current < WEB_SCROLL_COOLDOWN) return;
+
+      isWebScrolling.current = true;
+      lastWebScrollTime.current = now;
+
+      const currentIndex = TABS.indexOf(activeTab);
+      const newIndex =
+        direction === 'right'
+          ? Math.min(currentIndex + 1, TABS.length - 1)
+          : Math.max(currentIndex - 1, 0);
+
+      if (newIndex !== currentIndex) {
+        const newTab = TABS[newIndex];
+        lastVisibleTab.current = newTab;
+        tabsScrollX.value = newIndex * SCREEN_WIDTH;
+        setActiveTab(newTab);
+        setShowPlaylistTracks(false);
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+      }
+
+      setTimeout(() => {
+        isWebScrolling.current = false;
+      }, WEB_SCROLL_COOLDOWN);
+    },
+    [activeTab, tabsScrollX]
+  );
+
+  // Event listeners para scroll horizontal en web
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !visible || !spotifyConnected) return;
+
+    // Wheel horizontal (con shift o trackpad horizontal)
+    const handleWheel = (e: WheelEvent) => {
+      // Solo procesar si el scroll es principalmente horizontal
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY) * 0.5 || e.shiftKey) {
+        const delta = e.shiftKey ? e.deltaY : e.deltaX;
+        if (Math.abs(delta) > 10) {
+          e.preventDefault();
+          scrollToTabIndex(delta > 0 ? 'right' : 'left');
+        }
+      }
+    };
+
+    // Touch swipe
+    const handleTouchStart = (e: TouchEvent) => {
+      webTouchStartX.current = e.touches[0].clientX;
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      const deltaX = e.changedTouches[0].clientX - webTouchStartX.current;
+      if (Math.abs(deltaX) > 50) {
+        // Umbral de 50px
+        scrollToTabIndex(deltaX < 0 ? 'right' : 'left');
+      }
+    };
+
+    window.addEventListener('wheel', handleWheel, { passive: false });
+    window.addEventListener('touchstart', handleTouchStart, { passive: true });
+    window.addEventListener('touchend', handleTouchEnd, { passive: true });
+
+    return () => {
+      window.removeEventListener('wheel', handleWheel);
+      window.removeEventListener('touchstart', handleTouchStart);
+      window.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, [visible, spotifyConnected, scrollToTabIndex]);
+
+  // Sincronizar tabsScrollX con activeTab para animación CSS
+  useEffect(() => {
+    const index = TABS.indexOf(activeTab);
+    tabsScrollX.value = index * SCREEN_WIDTH;
+  }, [activeTab, tabsScrollX]);
+
   // Cambiar tab programáticamente (cuando se toca un botón de tab)
   const handleTabChange = useCallback((tab: TabType) => {
     const index = TABS.indexOf(tab);
+    if (Platform.OS === 'web') {
+      // En web, solo actualizar estado - CSS transform hace la animación
+      lastVisibleTab.current = tab;
+      tabsScrollX.value = index * SCREEN_WIDTH;
+      setActiveTab(tab);
+      setShowPlaylistTracks(false);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+      return;
+    }
+
     if (index !== -1 && tabsScrollRef.current) {
       isTabScrolling.current = true;
       lastVisibleTab.current = tab;
@@ -797,6 +917,10 @@ export default function SpotifyModal({
   const [checkingLikeStatus, setCheckingLikeStatus] = useState(false);
   const [togglingLike, setTogglingLike] = useState(false);
 
+  // Estado para shuffle
+  const [isShuffleActive, setIsShuffleActive] = useState(false);
+  const [togglingShuffle, setTogglingShuffle] = useState(false);
+
   // -------------------------------------------------------------------------
   // PAN RESPONDER - Cerrar deslizando hacia abajo desde el header
   // -------------------------------------------------------------------------
@@ -903,6 +1027,35 @@ export default function SpotifyModal({
       setTogglingLike(false);
     }
   }, [currentTrack?.uri, isTrackLiked, togglingLike]);
+
+  // -------------------------------------------------------------------------
+  // TOGGLE SHUFFLE
+  // -------------------------------------------------------------------------
+  const handleToggleShuffle = useCallback(async () => {
+    if (togglingShuffle) return;
+
+    setTogglingShuffle(true);
+    try {
+      const newState = !isShuffleActive;
+      const success = await spotify.setShuffle(newState);
+      if (success) {
+        setIsShuffleActive(newState);
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      }
+    } catch (error) {
+      console.warn('Error toggling shuffle:', error);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setTogglingShuffle(false);
+    }
+  }, [isShuffleActive, togglingShuffle]);
+
+  // Sincronizar estado de shuffle con playbackState
+  useEffect(() => {
+    if (playbackState?.shuffleState !== undefined) {
+      setIsShuffleActive(playbackState.shuffleState);
+    }
+  }, [playbackState?.shuffleState]);
 
   // -------------------------------------------------------------------------
   // POLLING DE POSICIÓN DE REPRODUCCIÓN
@@ -1242,41 +1395,66 @@ export default function SpotifyModal({
   // SIGUIENTE Y ANTERIOR EN CONTEXTO DE PLAYLIST
   // -------------------------------------------------------------------------
   const handleNextInPlaylist = useCallback(async () => {
+    // Si shuffle está activo, SIEMPRE usar el next nativo de Spotify
+    // para que Spotify maneje la aleatoriedad de toda la playlist
+    if (isShuffleActive) {
+      onNext();
+      return;
+    }
+
     if (currentPlaylistTracks.length === 0 || currentTrackIndex === -1) {
       // Sin contexto, usar skip normal de Spotify
       onNext();
       return;
     }
 
-    const nextIndex = currentTrackIndex + 1;
-    if (nextIndex < currentPlaylistTracks.length) {
-      const nextTrack = currentPlaylistTracks[nextIndex];
-      await handlePlayTrack(nextTrack, currentPlaylistTracks, nextIndex, playlistContext!);
-    } else if (currentPlaylistTracks.length > 0) {
-      // Volver al inicio (loop)
-      const firstTrack = currentPlaylistTracks[0];
-      await handlePlayTrack(firstTrack, currentPlaylistTracks, 0, playlistContext!);
+    // Modo secuencial
+    let nextIndex = currentTrackIndex + 1;
+    if (nextIndex >= currentPlaylistTracks.length) {
+      nextIndex = 0; // Loop al inicio
     }
-  }, [currentPlaylistTracks, currentTrackIndex, playlistContext, handlePlayTrack, onNext]);
+
+    const nextTrack = currentPlaylistTracks[nextIndex];
+    await handlePlayTrack(nextTrack, currentPlaylistTracks, nextIndex, playlistContext!);
+  }, [
+    currentPlaylistTracks,
+    currentTrackIndex,
+    playlistContext,
+    handlePlayTrack,
+    onNext,
+    isShuffleActive,
+  ]);
 
   const handlePrevInPlaylist = useCallback(async () => {
+    // Si shuffle está activo, SIEMPRE usar el prev nativo de Spotify
+    // para que Spotify maneje la aleatoriedad de toda la playlist
+    if (isShuffleActive) {
+      onPrevious();
+      return;
+    }
+
     if (currentPlaylistTracks.length === 0 || currentTrackIndex === -1) {
       // Sin contexto, usar skip normal de Spotify
       onPrevious();
       return;
     }
 
-    const prevIndex = currentTrackIndex - 1;
-    if (prevIndex >= 0) {
-      const prevTrack = currentPlaylistTracks[prevIndex];
-      await handlePlayTrack(prevTrack, currentPlaylistTracks, prevIndex, playlistContext!);
-    } else {
-      // Ir al final (loop)
-      const lastIndex = currentPlaylistTracks.length - 1;
-      const lastTrack = currentPlaylistTracks[lastIndex];
-      await handlePlayTrack(lastTrack, currentPlaylistTracks, lastIndex, playlistContext!);
+    // Modo secuencial
+    let prevIndex = currentTrackIndex - 1;
+    if (prevIndex < 0) {
+      prevIndex = currentPlaylistTracks.length - 1; // Loop al final
     }
-  }, [currentPlaylistTracks, currentTrackIndex, playlistContext, handlePlayTrack, onPrevious]);
+
+    const prevTrack = currentPlaylistTracks[prevIndex];
+    await handlePlayTrack(prevTrack, currentPlaylistTracks, prevIndex, playlistContext!);
+  }, [
+    currentPlaylistTracks,
+    currentTrackIndex,
+    playlistContext,
+    handlePlayTrack,
+    onPrevious,
+    isShuffleActive,
+  ]);
 
   // -------------------------------------------------------------------------
   // SEEK (mover posición de reproducción)
@@ -1437,6 +1615,9 @@ export default function SpotifyModal({
               checkingLikeStatus={checkingLikeStatus}
               togglingLike={togglingLike}
               onToggleLike={handleToggleLike}
+              isShuffleActive={isShuffleActive}
+              togglingShuffle={togglingShuffle}
+              onToggleShuffle={handleToggleShuffle}
             />
 
             {/* Progress Bar Slider */}
@@ -1463,16 +1644,17 @@ export default function SpotifyModal({
               </View>
             </View>
 
-            {/* Controls - Disponibles para todos */}
-            <View className="flex-row items-center justify-center gap-8">
+            {/* Controls - Premium Design */}
+            <View className="flex-row items-center justify-center gap-10">
               <TouchableOpacity
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                   handlePrevInPlaylist();
                 }}
-                className="w-14 h-14 bg-zinc-800 rounded-full items-center justify-center"
+                className="w-11 h-11 items-center justify-center"
+                style={{ opacity: 0.9 }}
               >
-                <SkipBack size={24} color="#fff" />
+                <SkipBack size={28} color="#fff" fill="#fff" />
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -1480,12 +1662,19 @@ export default function SpotifyModal({
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                   onPlayPause();
                 }}
-                className="w-20 h-20 bg-[#1DB954] rounded-full items-center justify-center"
+                className="w-16 h-16 bg-white rounded-full items-center justify-center"
+                style={{
+                  shadowColor: '#fff',
+                  shadowOffset: { width: 0, height: 0 },
+                  shadowOpacity: 0.3,
+                  shadowRadius: 12,
+                  elevation: 8,
+                }}
               >
                 {playbackState?.isPlaying ? (
-                  <Pause size={36} color="#000" fill="#000" />
+                  <Pause size={28} color="#000" fill="#000" />
                 ) : (
-                  <Play size={36} color="#000" fill="#000" style={{ marginLeft: 4 }} />
+                  <Play size={28} color="#000" fill="#000" style={{ marginLeft: 3 }} />
                 )}
               </TouchableOpacity>
 
@@ -1494,9 +1683,10 @@ export default function SpotifyModal({
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                   handleNextInPlaylist();
                 }}
-                className="w-14 h-14 bg-zinc-800 rounded-full items-center justify-center"
+                className="w-11 h-11 items-center justify-center"
+                style={{ opacity: 0.9 }}
               >
-                <SkipForward size={24} color="#fff" />
+                <SkipForward size={28} color="#fff" fill="#fff" />
               </TouchableOpacity>
             </View>
           </View>
@@ -1756,6 +1946,8 @@ export default function SpotifyModal({
   );
 
   const renderConnectedView = () => {
+    const tabIndex = TABS.indexOf(activeTab);
+
     return (
       <View className="flex-1">
         {/* Animated.ScrollView horizontal con snap mecánico estilo TikTok */}
@@ -1770,11 +1962,20 @@ export default function SpotifyModal({
           snapToInterval={SCREEN_WIDTH}
           snapToAlignment="start"
           disableIntervalMomentum={true}
-          onScroll={handleTabsScroll}
-          onScrollEndDrag={handleNativeScrollEnd}
-          onMomentumScrollEnd={handleNativeScrollEnd}
-          contentContainerStyle={{ flexDirection: 'row' }}
-          style={{ flex: 1 }}
+          onScroll={Platform.OS !== 'web' ? handleTabsScroll : undefined}
+          onScrollEndDrag={Platform.OS !== 'web' ? handleNativeScrollEnd : undefined}
+          onMomentumScrollEnd={Platform.OS !== 'web' ? handleNativeScrollEnd : undefined}
+          scrollEnabled={Platform.OS !== 'web'}
+          contentContainerStyle={
+            Platform.OS === 'web'
+              ? ({
+                  flexDirection: 'row',
+                  transform: `translateX(${-tabIndex * SCREEN_WIDTH}px)`,
+                  transition: 'transform 0.3s cubic-bezier(0.25, 0.1, 0.25, 1)',
+                } as any)
+              : { flexDirection: 'row' }
+          }
+          style={{ flex: 1, overflow: Platform.OS === 'web' ? 'hidden' : undefined } as any}
           nestedScrollEnabled={true}
           keyboardShouldPersistTaps="always"
           keyboardDismissMode="none"
@@ -1968,18 +2169,16 @@ export default function SpotifyModal({
                 }}
                 style={({ pressed }) => [
                   {
-                    paddingHorizontal: 12,
-                    paddingVertical: 8,
+                    padding: 8,
                     backgroundColor: pressed ? '#27272a' : '#18181b',
                     borderRadius: 9999,
-                    flexDirection: 'row',
                     alignItems: 'center',
+                    justifyContent: 'center',
                     cursor: 'pointer' as any,
                   },
                 ]}
               >
-                <Wifi size={14} color="#1DB954" />
-                <Text className="text-zinc-400 text-xs ml-1.5">Reconectar</Text>
+                <Wifi size={16} color="#1DB954" />
               </Pressable>
             ) : (
               <View className="w-10" />

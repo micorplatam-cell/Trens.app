@@ -742,19 +742,15 @@ class SpotifyService {
   /**
    * Reproducir con contexto de playlist/liked songs
    * Esto habilita next/prev correctamente
-   * Desactiva shuffle y repeat para reproducir en orden sin loop
+   * Mantiene el estado actual de shuffle y repeat
    */
   async playWithContext(
     trackUri: string,
     trackUris: string[],
     positionMs?: number
   ): Promise<boolean> {
-    // Primero reproducir
-    const result = await this.play(trackUri, positionMs, undefined, trackUris);
-    // Desactivar shuffle y repeat después de iniciar reproducción (no bloquear si falla)
-    this.setShuffle(false).catch(() => {});
-    this.setRepeat('off').catch(() => {});
-    return result;
+    // Reproducir sin modificar shuffle/repeat - el usuario controla eso manualmente
+    return await this.play(trackUri, positionMs, undefined, trackUris);
   }
 
   /**

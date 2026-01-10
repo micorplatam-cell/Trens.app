@@ -757,22 +757,25 @@ export const StackManagerModal: React.FC<StackManagerModalProps> = ({
               }}
             />
 
-            {/* Drag Indicator - Header Draggable */}
-            <View {...panResponder.panHandlers} className="pt-4 pb-2 items-center">
-              <View className="w-12 h-1.5 bg-zinc-600 rounded-full" />
-            </View>
+            {/* Header Draggable - Todo el header es área de arrastre */}
+            <View {...panResponder.panHandlers} className="border-b border-zinc-800/50">
+              {/* Drag Indicator */}
+              <View className="pt-4 pb-2 items-center">
+                <View className="w-12 h-1.5 bg-zinc-600 rounded-full" />
+              </View>
 
-            {/* Header */}
-            <View className="flex-row items-center px-4 pb-4 border-b border-zinc-800/50">
-              <View className="flex-row items-center gap-2">
-                <FlaskConical size={18} color="#A855F7" />
-                <Text className="text-white font-bold text-lg">
-                  {viewMode === 'edit'
-                    ? 'Editar Compuesto'
-                    : viewMode === 'add'
-                      ? 'Nuevo Compuesto'
-                      : 'Stack Manager'}
-                </Text>
+              {/* Header Title */}
+              <View className="flex-row items-center px-4 pb-4">
+                <View className="flex-row items-center gap-2">
+                  <FlaskConical size={18} color="#A855F7" />
+                  <Text className="text-white font-bold text-lg">
+                    {viewMode === 'edit'
+                      ? 'Editar Compuesto'
+                      : viewMode === 'add'
+                        ? 'Nuevo Compuesto'
+                        : 'Stack Manager'}
+                  </Text>
+                </View>
               </View>
             </View>
 
