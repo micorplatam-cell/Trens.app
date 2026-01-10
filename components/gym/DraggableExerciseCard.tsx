@@ -3,7 +3,7 @@
 // Implementación Web: Single DOM element con CSS transforms (igual que WorkoutBlock)
 // ============================================================================
 
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { View, Text, Platform } from 'react-native';
 import { Alert } from '../../lib/alert';
 import { Image } from 'expo-image';
@@ -108,6 +108,8 @@ const WebDraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoScrollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const isDraggingRef = useRef(false);
+  const isScrollingRef = useRef(false); // Para distinguir scroll de drag
+  const isLongPressPending = useRef(false); // Long-press timer activo
   const activePointerId = useRef<number | null>(null);
   const dragStartPointerY = useRef<number>(0);
   const dragStartIndex = useRef(index);
@@ -127,6 +129,46 @@ const WebDraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
     type: 'exercise',
     label: exercise.name,
   });
+
+  // CRÍTICO: Manejar touchmove para prevenir scroll nativo en móviles
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleTouchMove = (e: TouchEvent) => {
+      // Si estamos arrastrando, prevenir scroll nativo SIEMPRE
+      if (isDraggingRef.current) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+
+      // Si hay long-press pendiente, verificar si el movimiento es pequeño
+      if (isLongPressPending.current) {
+        const touch = e.touches[0];
+        if (touch) {
+          const deltaX = Math.abs(touch.clientX - pressStartX.current);
+          const deltaY = Math.abs(touch.clientY - pressStartY.current);
+          // Si el movimiento es pequeño (< 20px), prevenir scroll para permitir long-press
+          if (deltaX < 20 && deltaY < 20) {
+            e.preventDefault();
+            console.log(
+              '[DraggableExerciseCard] TouchMove PREVENIDO - long-press pendiente, delta:',
+              deltaX,
+              deltaY
+            );
+          }
+        }
+      }
+    };
+
+    // passive: false es CRÍTICO para poder llamar preventDefault()
+    container.addEventListener('touchmove', handleTouchMove, { passive: false });
+
+    return () => {
+      container.removeEventListener('touchmove', handleTouchMove);
+    };
+  }, []);
 
   // Encontrar scrollable parent
   const findScrollableParent = useCallback((): HTMLElement | null => {
@@ -199,7 +241,8 @@ const WebDraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
 
       if (scrollDelta !== 0) {
         const oldScrollTop = scrollableParent.current.scrollTop;
-        const maxScroll = scrollableParent.current.scrollHeight - scrollableParent.current.clientHeight;
+        const maxScroll =
+          scrollableParent.current.scrollHeight - scrollableParent.current.clientHeight;
         const newScrollTop = Math.max(0, Math.min(maxScroll, oldScrollTop + scrollDelta));
         scrollableParent.current.scrollTop = newScrollTop;
         if (scrollableParent.current.scrollTop !== oldScrollTop) {
@@ -245,7 +288,9 @@ const WebDraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
   // POINTER DOWN en el handle
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
-      if (activePointerId.current !== null) return;
+      if (activePointerId.current !== null) {
+        return;
+      }
       activePointerId.current = e.pointerId;
       pressStartY.current = e.clientY;
       pressStartX.current = e.clientX;
@@ -255,6 +300,7 @@ const WebDraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
       dragStartIndex.current = index;
       lastReportedIndex.current = index;
 
+      // Capturar pointer para recibir eventos de movimiento
       if (containerRef.current) {
         try {
           containerRef.current.setPointerCapture(e.pointerId);
@@ -263,8 +309,14 @@ const WebDraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
         }
       }
 
+      // Marcar que hay un long-press pendiente
+      isLongPressPending.current = true;
+
       longPressTimer.current = setTimeout(() => {
         if (activePointerId.current !== e.pointerId) return;
+
+        // Long-press completado
+        isLongPressPending.current = false;
         isDraggingRef.current = true;
         setIsDragging(true);
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
@@ -273,14 +325,26 @@ const WebDraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
             if (!containerRef.current) return;
+
+            // Obtener posición del elemento
             const elementRect = containerRef.current.getBoundingClientRect();
-            const elementCenterY = elementRect.top + elementRect.height / 2;
-            const initialOffset = currentPointerY.current - elementCenterY;
-            initialCompressionOffset.current = initialOffset;
+
+            // DIFERENCIA CON PLAN: No hay compresión de tarjetas en gym
+            // Por lo tanto, no necesitamos calcular offset de compresión
+            // Solo necesitamos que el elemento siga al dedo desde su posición actual
+
+            // El dedo está en currentPointerY.current
+            // El elemento tiene su centro en elementRect.top + elementRect.height / 2
+            // Pero como NO hay compresión, el offset inicial debe ser 0
+            // El elemento ya está donde debe estar
+
+            initialCompressionOffset.current = 0;
             dragStartY.current = currentPointerY.current;
             dragStartPointerY.current = currentPointerY.current;
             initialScrollTop.current = scrollableParent.current?.scrollTop || 0;
-            setTranslateY(initialOffset);
+
+            // Empezar con translateY = 0 (el elemento ya está en su lugar)
+            setTranslateY(0);
             startAutoScroll();
           });
         });
@@ -296,7 +360,7 @@ const WebDraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
       currentPointerY.current = e.clientY;
       currentPointerX.current = e.clientX;
 
-      // Si estamos arrastrando
+      // Si estamos arrastrando, actualizar posición (PRIORIDAD MÁXIMA)
       if (isDraggingRef.current) {
         updateTranslateY();
         const targetIndex = calculateTargetIndex();
@@ -308,37 +372,81 @@ const WebDraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
         return;
       }
 
-      // Detectar swipe horizontal antes de que se active el long-press
-      const deltaX = e.clientX - pressStartX.current;
-      const deltaY = Math.abs(e.clientY - pressStartY.current);
-      
-      if (Math.abs(deltaX) > 10 && deltaY < 20 && !isDraggingRef.current) {
-        // Cancelar long-press timer
-        if (longPressTimer.current) {
-          clearTimeout(longPressTimer.current);
-          longPressTimer.current = null;
+      // Si ya estamos haciendo scroll, continuar scroll
+      if (isScrollingRef.current) {
+        if (scrollableParent.current) {
+          const deltaY = e.clientY - pressStartY.current;
+          scrollableParent.current.scrollTop -= deltaY;
+          pressStartY.current = e.clientY;
         }
-        setIsSwiping(true);
-        // Solo permitir swipe hacia la izquierda
+        return;
+      }
+
+      // Si ya estamos haciendo swipe, continuar swipe
+      if (isSwiping) {
+        const deltaX = e.clientX - pressStartX.current;
         if (deltaX < 0) {
           setTranslateX(Math.max(deltaX, -150));
         }
+        return;
       }
 
-      // Cancelar long-press si hay mucho movimiento vertical
-      if (deltaY > 15 && longPressTimer.current) {
-        clearTimeout(longPressTimer.current);
-        longPressTimer.current = null;
+      // Detectar qué gesto está haciendo el usuario
+      // UMBRAL MUY ALTO (50px) para evitar cancelar el long-press accidentalmente
+      // El usuario necesita mover MUCHO el dedo para que se considere scroll/swipe
+      const deltaX = e.clientX - pressStartX.current;
+      const deltaY = e.clientY - pressStartY.current;
+      const GESTURE_THRESHOLD = 50; // Umbral muy alto - priorizar long-press
+
+      // Swipe horizontal (izquierda para eliminar)
+      // Requiere movimiento muy horizontal (ratio 4:1)
+      if (Math.abs(deltaX) > GESTURE_THRESHOLD && Math.abs(deltaX) > Math.abs(deltaY) * 4) {
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+          longPressTimer.current = null;
+          isLongPressPending.current = false;
+        }
+        setIsSwiping(true);
+        if (deltaX < 0) {
+          setTranslateX(Math.max(deltaX, -150));
+        }
+        return;
+      }
+
+      // Scroll vertical - requiere movimiento muy vertical (ratio 4:1)
+      if (Math.abs(deltaY) > GESTURE_THRESHOLD && Math.abs(deltaY) > Math.abs(deltaX) * 4) {
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+          longPressTimer.current = null;
+          isLongPressPending.current = false;
+        }
+        isScrollingRef.current = true;
+        if (scrollableParent.current) {
+          scrollableParent.current.scrollTop -= deltaY;
+          pressStartY.current = e.clientY;
+        }
+        return;
       }
     },
-    [calculateTargetIndex, onPositionChange, updateTranslateY]
+    [calculateTargetIndex, onPositionChange, updateTranslateY, isSwiping]
   );
 
   // POINTER UP
   const handlePointerUp = useCallback(
     (e: React.PointerEvent) => {
-      if (activePointerId.current !== e.pointerId) return;
-      cleanup();
+      // SIEMPRE resetear el pointerId al final, sin importar qué pasó
+      const currentPointerId = activePointerId.current;
+
+      if (currentPointerId !== e.pointerId) {
+        return;
+      }
+
+      // Limpiar timer de long-press primero
+      if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+      }
+      isLongPressPending.current = false;
 
       if (containerRef.current) {
         try {
@@ -347,6 +455,9 @@ const WebDraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
           // Ignorar
         }
       }
+
+      // Resetear estado de scroll
+      isScrollingRef.current = false;
 
       // Si estaba haciendo swipe
       if (isSwiping) {
@@ -377,6 +488,8 @@ const WebDraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
 
       if (isDraggingRef.current) {
         finishDrag();
+        // finishDrag ya resetea activePointerId, pero por si acaso
+        activePointerId.current = null;
       } else {
         // Tap = editar
         const deltaX = Math.abs(e.clientX - pressStartX.current);
@@ -387,8 +500,13 @@ const WebDraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
         }
         activePointerId.current = null;
       }
+
+      console.log(
+        '[DraggableExerciseCard] PointerUp completado, activePointerId:',
+        activePointerId.current
+      );
     },
-    [cleanup, finishDrag, isSwiping, translateX, exercise.name, onDelete, onEdit]
+    [finishDrag, isSwiping, translateX, exercise.name, onDelete, onEdit]
   );
 
   // POINTER CANCEL
@@ -409,12 +527,25 @@ const WebDraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
     opacity: isDragging ? 0.95 : 1,
     boxShadow: isDragging ? '0 10px 40px rgba(249, 115, 22, 0.5)' : 'none',
     transition: isDragging || isSwiping ? 'none' : 'transform 0.2s ease-out',
-    touchAction: 'none',
+    // IMPORTANTE: Solo bloquear touch-action cuando estamos arrastrando
+    // Esto permite scroll vertical normal
+    touchAction: isDragging ? 'none' : 'pan-y',
     userSelect: 'none',
     cursor: isDragging ? 'grabbing' : isHoveringHandle ? 'grab' : 'pointer',
   };
 
   const series = exercise.series || [];
+
+  // handlePointerLeave - solo cancelar si NO estamos arrastrando
+  // handlePointerLeave - solo cancelar si NO estamos arrastrando
+  const handlePointerLeave = (e: React.PointerEvent) => {
+    // Si estamos arrastrando, NO cancelar - el pointer capture mantiene los eventos
+    if (isDraggingRef.current) {
+      return;
+    }
+    // Solo cancelar si no estamos en drag activo
+    handlePointerCancel(e);
+  };
 
   return (
     <div
@@ -424,7 +555,7 @@ const WebDraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerCancel}
-      onPointerLeave={handlePointerCancel}
+      onPointerLeave={handlePointerLeave}
       onMouseEnter={() => setIsHoveringHandle(true)}
       onMouseLeave={() => setIsHoveringHandle(false)}
       className="mb-2 relative"
@@ -692,7 +823,9 @@ const NativeDraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
   const deleteBackgroundStyle = useAnimatedStyle(() => ({
     opacity: interpolate(translateX.value, [0, DELETE_THRESHOLD], [0, 1], Extrapolation.CLAMP),
     transform: [
-      { scale: interpolate(translateX.value, [0, DELETE_THRESHOLD], [0.8, 1], Extrapolation.CLAMP) },
+      {
+        scale: interpolate(translateX.value, [0, DELETE_THRESHOLD], [0.8, 1], Extrapolation.CLAMP),
+      },
     ],
   }));
 
