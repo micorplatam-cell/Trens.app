@@ -102,6 +102,7 @@ const WebDraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
   const [translateX, setTranslateX] = useState(0);
   const [isHoveringHandle, setIsHoveringHandle] = useState(false);
   const [isSwiping, setIsSwiping] = useState(false);
+  const [isSwipeOpen, setIsSwipeOpen] = useState(false); // Swipe abierto mostrando botón
 
   // Refs
   const containerRef = useRef<HTMLDivElement>(null);
@@ -392,15 +393,12 @@ const WebDraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
       }
 
       // Detectar qué gesto está haciendo el usuario
-      // UMBRAL MUY ALTO (50px) para evitar cancelar el long-press accidentalmente
-      // El usuario necesita mover MUCHO el dedo para que se considere scroll/swipe
       const deltaX = e.clientX - pressStartX.current;
       const deltaY = e.clientY - pressStartY.current;
-      const GESTURE_THRESHOLD = 50; // Umbral muy alto - priorizar long-press
 
+      // SWIPE: Umbral bajo (15px) y ratio 2:1 para detectar fácilmente
       // Swipe horizontal (izquierda para eliminar)
-      // Requiere movimiento muy horizontal (ratio 4:1)
-      if (Math.abs(deltaX) > GESTURE_THRESHOLD && Math.abs(deltaX) > Math.abs(deltaY) * 4) {
+      if (Math.abs(deltaX) > 15 && Math.abs(deltaX) > Math.abs(deltaY) * 2) {
         if (longPressTimer.current) {
           clearTimeout(longPressTimer.current);
           longPressTimer.current = null;
@@ -408,13 +406,14 @@ const WebDraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
         }
         setIsSwiping(true);
         if (deltaX < 0) {
-          setTranslateX(Math.max(deltaX, -150));
+          setTranslateX(Math.max(deltaX, -120));
         }
         return;
       }
 
-      // Scroll vertical - requiere movimiento muy vertical (ratio 4:1)
-      if (Math.abs(deltaY) > GESTURE_THRESHOLD && Math.abs(deltaY) > Math.abs(deltaX) * 4) {
+      // SCROLL: Umbral alto (50px) y ratio 4:1 para priorizar long-press
+      // Scroll vertical - requiere movimiento muy vertical
+      if (Math.abs(deltaY) > 50 && Math.abs(deltaY) > Math.abs(deltaX) * 4) {
         if (longPressTimer.current) {
           clearTimeout(longPressTimer.current);
           longPressTimer.current = null;
@@ -462,26 +461,24 @@ const WebDraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
       // Si estaba haciendo swipe
       if (isSwiping) {
         setIsSwiping(false);
+        // Si deslizó suficiente, mantener abierto mostrando el botón
         if (translateX < DELETE_THRESHOLD) {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-          Alert.alert('🗑️ Eliminar ejercicio', `¿Eliminar "${exercise.name}" de este día?`, [
-            {
-              text: 'Cancelar',
-              style: 'cancel',
-              onPress: () => setTranslateX(0),
-            },
-            {
-              text: 'Eliminar',
-              style: 'destructive',
-              onPress: () => {
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-                onDelete();
-              },
-            },
-          ]);
+          setTranslateX(-100); // Posición fija mostrando botón
+          setIsSwipeOpen(true);
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         } else {
+          // No deslizó suficiente, cerrar
           setTranslateX(0);
+          setIsSwipeOpen(false);
         }
+        activePointerId.current = null;
+        return;
+      }
+
+      // Si el swipe estaba abierto y tocó en la tarjeta (no en el botón), cerrar
+      if (isSwipeOpen) {
+        setTranslateX(0);
+        setIsSwipeOpen(false);
         activePointerId.current = null;
         return;
       }
@@ -517,21 +514,31 @@ const WebDraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
     [handlePointerUp]
   );
 
-  // Estilos del container
+  // Estilos del container - NO aplicar translateX aquí, va en la tarjeta
   const containerStyle: React.CSSProperties = {
-    transform: isDragging
-      ? `translateY(${translateY}px) scale(1.02)`
-      : `translateX(${translateX}px)`,
+    transform: isDragging ? `translateY(${translateY}px) scale(1.02)` : 'none',
     zIndex: isDragging ? 1000 : 1,
     position: 'relative',
     opacity: isDragging ? 0.95 : 1,
     boxShadow: isDragging ? '0 10px 40px rgba(249, 115, 22, 0.5)' : 'none',
-    transition: isDragging || isSwiping ? 'none' : 'transform 0.2s ease-out',
+    transition: isDragging ? 'none' : 'transform 0.2s ease-out',
     // IMPORTANTE: Solo bloquear touch-action cuando estamos arrastrando
     // Esto permite scroll vertical normal
     touchAction: isDragging ? 'none' : 'pan-y',
     userSelect: 'none',
     cursor: isDragging ? 'grabbing' : isHoveringHandle ? 'grab' : 'pointer',
+  };
+
+  // Estilos de la tarjeta principal - aquí va el translateX para swipe
+  const cardStyle: React.CSSProperties = {
+    transform: isSwiping || isSwipeOpen ? `translateX(${translateX}px)` : 'none',
+    transition: isSwiping ? 'none' : 'transform 0.2s ease-out',
+    backgroundColor: isDragging ? '#1a1a1a' : '#0a0a0a',
+    borderWidth: isDragging ? 2 : 1,
+    borderColor: isDragging ? '#F97316' : '#27272a',
+    borderRadius: 16,
+    overflow: 'hidden',
+    position: 'relative' as const,
   };
 
   const series = exercise.series || [];
@@ -560,12 +567,47 @@ const WebDraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
       onMouseLeave={() => setIsHoveringHandle(false)}
       className="mb-2 relative"
     >
-      {/* DELETE BACKGROUND */}
+      {/* DELETE BUTTON (detrás) */}
       <div
         className="absolute right-0 top-0 bottom-0 w-24 bg-red-600 rounded-2xl flex items-center justify-center"
         style={{
-          opacity: Math.min(1, Math.abs(translateX) / 100),
-          transform: `scale(${0.8 + (Math.abs(translateX) / 100) * 0.2})`,
+          opacity: isSwipeOpen ? 1 : Math.min(1, Math.abs(translateX) / 80),
+          transform: `scale(${isSwipeOpen ? 1 : 0.8 + (Math.abs(translateX) / 100) * 0.2})`,
+          pointerEvents: isSwipeOpen ? 'auto' : 'none',
+          cursor: isSwipeOpen ? 'pointer' : 'default',
+          zIndex: isSwipeOpen ? 10 : 0,
+        }}
+        onPointerDown={(e) => {
+          if (!isSwipeOpen) return;
+          e.stopPropagation();
+        }}
+        onPointerUp={(e) => {
+          if (!isSwipeOpen) return;
+          e.stopPropagation();
+        }}
+        onClick={(e) => {
+          if (!isSwipeOpen) return;
+          e.stopPropagation();
+          e.preventDefault();
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+          Alert.alert('🗑️ Eliminar ejercicio', `¿Eliminar "${exercise.name}" de este día?`, [
+            {
+              text: 'Cancelar',
+              style: 'cancel',
+              onPress: () => {
+                setTranslateX(0);
+                setIsSwipeOpen(false);
+              },
+            },
+            {
+              text: 'Eliminar',
+              style: 'destructive',
+              onPress: () => {
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                onDelete();
+              },
+            },
+          ]);
         }}
       >
         <div className="flex flex-col items-center">
@@ -574,17 +616,8 @@ const WebDraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
         </div>
       </div>
 
-      {/* MAIN CARD */}
-      <View
-        ref={targetRef as any}
-        onLayout={onLayout}
-        className="rounded-2xl overflow-hidden"
-        style={{
-          backgroundColor: isDragging ? '#1a1a1a' : '#0a0a0a',
-          borderWidth: isDragging ? 2 : 1,
-          borderColor: isDragging ? '#F97316' : '#27272a',
-        }}
-      >
+      {/* MAIN CARD - con translateX para swipe */}
+      <View ref={targetRef as any} onLayout={onLayout} style={cardStyle as any}>
         <HankInlineHighlight isActive={isHighlighted} phase={animationPhase} borderRadius={16} />
         <View className="flex-row items-center p-3">
           {/* DRAG HANDLE */}

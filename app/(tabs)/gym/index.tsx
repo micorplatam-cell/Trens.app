@@ -1138,6 +1138,144 @@ function GymScreen() {
 
   // Ref del FlatList para scroll programático
   const exerciseListRef = useRef<FlatList>(null);
+  
+  // -------------------------------------------------------------------------
+  // WEB: Control de scroll mecánico - un ejercicio/alternativa a la vez
+  // -------------------------------------------------------------------------
+  const isScrollingRef = useRef(false);
+  const isScrollingHorizontalRef = useRef(false);
+  const lastScrollTime = useRef(0);
+  const lastScrollTimeH = useRef(0);
+  const touchStartY = useRef(0);
+  const touchStartX = useRef(0);
+  const SCROLL_COOLDOWN = 150; // ms entre scrolls - rápido para mejor respuesta
+
+  // Función para mover exactamente 1 ejercicio (vertical)
+  const scrollToExerciseIndex = useCallback((direction: 'up' | 'down') => {
+    const now = Date.now();
+    if (isScrollingRef.current || now - lastScrollTime.current < SCROLL_COOLDOWN) return;
+    if (viewMode !== 'FOCUS') return;
+    
+    isScrollingRef.current = true;
+    lastScrollTime.current = now;
+    
+    const newIndex = direction === 'down' 
+      ? Math.min(activeExerciseIndex + 1, exercises.length - 1)
+      : Math.max(activeExerciseIndex - 1, 0);
+    
+    if (newIndex !== activeExerciseIndex) {
+      // En web, solo actualizar el estado - CSS transform hace la animación
+      if (Platform.OS === 'web') {
+        setActiveExerciseIndex(newIndex);
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      } else if (exerciseListRef.current) {
+        exerciseListRef.current.scrollToIndex({
+          index: newIndex,
+          animated: true,
+        });
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      }
+    }
+    
+    setTimeout(() => {
+      isScrollingRef.current = false;
+    }, SCROLL_COOLDOWN);
+  }, [activeExerciseIndex, exercises.length, viewMode]);
+
+  // Función para mover exactamente 1 alternativa (horizontal)
+  const scrollToAlternative = useCallback((direction: 'left' | 'right') => {
+    const now = Date.now();
+    if (isScrollingHorizontalRef.current || now - lastScrollTimeH.current < SCROLL_COOLDOWN) return;
+    if (viewMode !== 'FOCUS') return;
+    
+    isScrollingHorizontalRef.current = true;
+    lastScrollTimeH.current = now;
+    
+    const currentAltIndex = activeAlternatives[activeExerciseIndex] || 0;
+    const currentExercise = exercises[activeExerciseIndex];
+    const totalAlternatives = 1 + (currentExercise?.alternatives?.length || 0);
+    
+    const newAltIndex = direction === 'right'
+      ? Math.min(currentAltIndex + 1, totalAlternatives - 1)
+      : Math.max(currentAltIndex - 1, 0);
+    
+    if (newAltIndex !== currentAltIndex) {
+      setActiveAlternatives(prev => ({ ...prev, [activeExerciseIndex]: newAltIndex }));
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    
+    setTimeout(() => {
+      isScrollingHorizontalRef.current = false;
+    }, SCROLL_COOLDOWN);
+  }, [activeExerciseIndex, activeAlternatives, exercises, viewMode]);
+
+  // Effect para capturar wheel/touch events en web
+  useEffect(() => {
+    if (Platform.OS !== 'web' || viewMode !== 'FOCUS') return;
+
+    const handleWheel = (e: WheelEvent) => {
+      // Solo interceptar si el scroll es significativo
+      if (Math.abs(e.deltaY) < 10 && Math.abs(e.deltaX) < 10) return;
+      
+      e.preventDefault();
+      e.stopPropagation();
+      
+      // Scroll horizontal para alternativas tiene prioridad
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY) && Math.abs(e.deltaX) > 10) {
+        if (e.deltaX > 0) {
+          scrollToAlternative('right');
+        } else {
+          scrollToAlternative('left');
+        }
+      } else if (Math.abs(e.deltaY) > 10) {
+        // Scroll vertical para ejercicios
+        if (e.deltaY > 0) {
+          scrollToExerciseIndex('down');
+        } else {
+          scrollToExerciseIndex('up');
+        }
+      }
+    };
+
+    const handleTouchStart = (e: TouchEvent) => {
+      touchStartY.current = e.touches[0].clientY;
+      touchStartX.current = e.touches[0].clientX;
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      const deltaY = touchStartY.current - e.changedTouches[0].clientY;
+      const deltaX = touchStartX.current - e.changedTouches[0].clientX;
+      const SWIPE_THRESHOLD = 50;
+      
+      // Detectar dirección predominante
+      if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > SWIPE_THRESHOLD) {
+        // Swipe horizontal - cambiar alternativa
+        if (deltaX > 0) {
+          scrollToAlternative('right');
+        } else {
+          scrollToAlternative('left');
+        }
+      } else if (Math.abs(deltaY) > SWIPE_THRESHOLD) {
+        // Swipe vertical - cambiar ejercicio
+        if (deltaY > 0) {
+          scrollToExerciseIndex('down');
+        } else {
+          scrollToExerciseIndex('up');
+        }
+      }
+    };
+
+    // Agregar listeners al window
+    window.addEventListener('wheel', handleWheel, { passive: false });
+    window.addEventListener('touchstart', handleTouchStart, { passive: true });
+    window.addEventListener('touchend', handleTouchEnd, { passive: true });
+
+    return () => {
+      window.removeEventListener('wheel', handleWheel);
+      window.removeEventListener('touchstart', handleTouchStart);
+      window.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, [viewMode, scrollToExerciseIndex, scrollToAlternative]);
 
   // -------------------------------------------------------------------------
   // SPOTIFY: Cargar estado inicial para captura durante grabación
@@ -7918,7 +8056,12 @@ function GymScreen() {
         ref={exerciseListRef}
         data={exercises}
         keyExtractor={(item) => item.id}
-        pagingEnabled
+        pagingEnabled={Platform.OS !== 'web'}
+        scrollEnabled={Platform.OS !== 'web'}
+        decelerationRate="fast"
+        snapToInterval={CONTENT_HEIGHT}
+        snapToAlignment="start"
+        disableIntervalMomentum={true}
         getItemLayout={(_, index) => ({
           length: CONTENT_HEIGHT,
           offset: CONTENT_HEIGHT * index,
@@ -7928,9 +8071,15 @@ function GymScreen() {
         viewabilityConfig={viewabilityConfig.current}
         onViewableItemsChanged={onViewableItemsChanged.current}
         onMomentumScrollEnd={() => {
-          // Haptic Feedback al cambiar ejercicio
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          if (Platform.OS !== 'web') {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          }
         }}
+        style={Platform.OS === 'web' ? { overflow: 'hidden' } : undefined}
+        contentContainerStyle={Platform.OS === 'web' ? {
+          transform: `translateY(${-activeExerciseIndex * CONTENT_HEIGHT}px)`,
+          transition: 'transform 0.25s cubic-bezier(0.25, 0.1, 0.25, 1)',
+        } as any : undefined}
         ListEmptyComponent={
           <View style={{ height: CONTENT_HEIGHT }} className="justify-center items-center px-6">
             <View className="w-20 h-20 rounded-full bg-zinc-900 items-center justify-center mb-6">
@@ -8003,7 +8152,8 @@ function GymScreen() {
                 horizontal
                 data={allVariations}
                 keyExtractor={(variation) => variation.id}
-                pagingEnabled
+                pagingEnabled={Platform.OS !== 'web'}
+                scrollEnabled={Platform.OS !== 'web'}
                 showsHorizontalScrollIndicator={false}
                 initialScrollIndex={safeInitialIndex}
                 getItemLayout={(_, idx) => ({
@@ -8012,10 +8162,19 @@ function GymScreen() {
                   index: idx,
                 })}
                 onMomentumScrollEnd={(event) => {
-                  const newIndex = Math.round(event.nativeEvent.contentOffset.x / SCREEN_WIDTH);
-                  setActiveAlternatives((prev) => ({ ...prev, [index]: newIndex }));
+                  if (Platform.OS !== 'web') {
+                    const newIndex = Math.round(event.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+                    setActiveAlternatives((prev) => ({ ...prev, [index]: newIndex }));
+                  }
                 }}
-                style={{ height: SCREEN_WIDTH * 0.85 + 170 }}
+                style={{ 
+                  height: SCREEN_WIDTH * 0.85 + 170,
+                  overflow: 'hidden',
+                }}
+                contentContainerStyle={Platform.OS === 'web' ? {
+                  transform: `translateX(${-activeAltIndex * SCREEN_WIDTH}px)`,
+                  transition: 'transform 0.3s ease-out',
+                } as any : undefined}
                 renderItem={({ item: variation }) => (
                   <View
                     style={{
