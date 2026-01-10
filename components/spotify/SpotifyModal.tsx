@@ -668,15 +668,17 @@ export default function SpotifyModal({
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SpotifyPlaylistTrack[]>([]);
   const [loading, setLoading] = useState(false);
+  const [searchLoading, setSearchLoading] = useState(false);
   const [showPlaylistTracks, setShowPlaylistTracks] = useState(persistedShowTracks);
 
   // -------------------------------------------------------------------------
-  // SWIPEABLE TABS - Sistema robusto de navegación horizontal
+  // SWIPEABLE TABS - Sistema mecánico de navegación horizontal (estilo TikTok)
   // -------------------------------------------------------------------------
   const tabsScrollRef = useRef<Animated.ScrollView>(null);
   const tabsScrollX = useSharedValue(TABS.indexOf(activeTab) * SCREEN_WIDTH);
   const isTabScrolling = useRef(false);
   const lastVisibleTab = useRef<TabType>(activeTab);
+  const isDragging = useRef(false);
 
   // Cambiar tab programáticamente (cuando se toca un botón de tab)
   const handleTabChange = useCallback((tab: TabType) => {
@@ -695,7 +697,7 @@ export default function SpotifyModal({
     }
   }, []);
 
-  // Manejar scroll de tabs en UI thread (sin lag) usando Reanimated
+  // Manejar cambio de tab con snap mecánico
   const handleTabSwipe = useCallback((index: number) => {
     if (index >= 0 && index < TABS.length) {
       const newTab = TABS[index];
@@ -708,15 +710,44 @@ export default function SpotifyModal({
     }
   }, []);
 
+  // Funciones auxiliares para runOnJS (deben estar definidas fuera del worklet)
+  const setDraggingTrue = useCallback(() => {
+    isDragging.current = true;
+  }, []);
+
+  const setDraggingFalse = useCallback(() => {
+    isDragging.current = false;
+  }, []);
+
+  // Usar useAnimatedScrollHandler para tracking fluido en UI thread
   const handleTabsScroll = useAnimatedScrollHandler({
     onScroll: (event) => {
       tabsScrollX.value = event.contentOffset.x;
     },
-    onMomentumEnd: (event) => {
+    onBeginDrag: () => {
+      runOnJS(setDraggingTrue)();
+    },
+    onEndDrag: (event) => {
+      // Forzar snap al soltar el dedo
       const index = Math.round(event.contentOffset.x / SCREEN_WIDTH);
       runOnJS(handleTabSwipe)(index);
     },
+    onMomentumEnd: (event) => {
+      // Snap final después del momentum
+      const index = Math.round(event.contentOffset.x / SCREEN_WIDTH);
+      runOnJS(handleTabSwipe)(index);
+      runOnJS(setDraggingFalse)();
+    },
   });
+
+  // Handler nativo para respaldo (React Native estándar)
+  const handleNativeScrollEnd = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const index = Math.round(event.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+      handleTabSwipe(index);
+    },
+    [handleTabSwipe]
+  );
 
   // Sincronizar scroll inicial
   useEffect(() => {
@@ -928,37 +959,43 @@ export default function SpotifyModal({
   // -------------------------------------------------------------------------
   // CARGAR PLAYLISTS
   // -------------------------------------------------------------------------
+  const playlistsLoadedRef = useRef(false);
+
   const loadPlaylists = useCallback(
     async (reset = false) => {
-      if (!reset && playlists.length > 0) return; // Ya cargadas y no se forzó refresh
+      // Usar ref para evitar dependencias circulares
+      if (!reset && playlistsLoadedRef.current) return;
       setLoading(true);
       try {
         const data = await spotify.getMyPlaylists(50, 0);
         setPlaylists(data);
+        playlistsLoadedRef.current = true;
       } catch (error) {
         console.error('Error loading playlists:', error);
       } finally {
         setLoading(false);
       }
     },
-    [playlists.length]
+    [] // Sin dependencias - usa refs internamente
   );
 
   // -------------------------------------------------------------------------
   // CARGAR LIKED SONGS (con paginación)
   // -------------------------------------------------------------------------
+  const likedSongsLoadedRef = useRef(false);
+
   const loadLikedSongs = useCallback(
     async (reset = false) => {
       console.log(
         '🎵 loadLikedSongs llamado, reset=',
         reset,
-        'likedSongs.length=',
-        likedSongs.length
+        'loaded=',
+        likedSongsLoadedRef.current
       );
 
-      // Solo skip si ya hay canciones y no es un reset forzado
-      if (!reset && likedSongs.length > 0) {
-        console.log('🎵 loadLikedSongs: SKIP - ya hay canciones y no es reset');
+      // Usar ref para evitar dependencias circulares
+      if (!reset && likedSongsLoadedRef.current) {
+        console.log('🎵 loadLikedSongs: SKIP - ya cargadas');
         return;
       }
 
@@ -970,6 +1007,7 @@ export default function SpotifyModal({
       // IMPORTANTE: Limpiar canciones anteriores cuando es reset
       if (reset) {
         setLikedSongs([]);
+        likedSongsLoadedRef.current = false;
       }
 
       try {
@@ -980,6 +1018,7 @@ export default function SpotifyModal({
           console.log('🎵 Primera canción recibida:', data[0].name);
         }
         setLikedSongs(data);
+        likedSongsLoadedRef.current = true;
         setHasMoreLiked(data.length === 20);
         setLikedOffset(20);
         likedOffsetRef.current = 20;
@@ -989,7 +1028,7 @@ export default function SpotifyModal({
         setLoading(false);
       }
     },
-    [likedSongs.length]
+    [] // Sin dependencias - usa refs internamente
   );
 
   const loadMoreLikedSongs = useCallback(async () => {
@@ -1084,18 +1123,18 @@ export default function SpotifyModal({
   const performSearch = useCallback(async (query: string) => {
     if (!query.trim()) {
       setSearchResults([]);
-      setLoading(false);
+      setSearchLoading(false);
       return;
     }
 
-    setLoading(true);
+    setSearchLoading(true);
     try {
       const results = await spotify.searchTracks(query, 30);
       setSearchResults(results);
     } catch (error) {
       console.error('Error searching:', error);
     } finally {
-      setLoading(false);
+      setSearchLoading(false);
     }
   }, []);
 
@@ -1112,12 +1151,12 @@ export default function SpotifyModal({
     // Si no hay query, limpiar resultados inmediatamente
     if (!searchQuery.trim()) {
       setSearchResults([]);
-      setLoading(false);
+      setSearchLoading(false);
       return;
     }
 
     // Mostrar indicador de carga inmediatamente
-    setLoading(true);
+    setSearchLoading(true);
 
     // Ejecutar búsqueda después de 300ms de inactividad
     searchTimeoutRef.current = setTimeout(() => {
@@ -1267,7 +1306,11 @@ export default function SpotifyModal({
   // Recargar datos SOLO cuando el modal SE ABRE (transición de invisible a visible)
   useEffect(() => {
     if (visible && spotifyConnected && !wasVisibleRef.current) {
-      // Modal acaba de abrirse - refrescar la tab activa
+      // Modal acaba de abrirse - resetear refs de carga para forzar refresh
+      playlistsLoadedRef.current = false;
+      likedSongsLoadedRef.current = false;
+
+      // Refrescar la tab activa
       if (activeTab === 'playlists') {
         loadPlaylists(true);
       } else if (activeTab === 'liked') {
@@ -1275,22 +1318,22 @@ export default function SpotifyModal({
       }
     }
     wasVisibleRef.current = visible;
-  }, [visible, spotifyConnected]); // SIN activeTab para evitar recargas al cambiar de tab
+  }, [visible, spotifyConnected, activeTab, loadPlaylists, loadLikedSongs]);
 
-  // Cargar datos al cambiar de tab (solo si no hay datos)
+  // Cargar datos al cambiar de tab (lazy loading)
   useEffect(() => {
     if (visible && spotifyConnected) {
-      console.log('🎵 Tab cambió a:', activeTab, 'playlists.length:', playlists.length, 'likedSongs.length:', likedSongs.length);
+      console.log('🎵 Tab cambió a:', activeTab);
       // Pequeño delay para asegurar que el swipe termine antes de cargar
       const timer = setTimeout(() => {
-        if (activeTab === 'playlists') {
-          console.log('🎵 Cargando playlists...');
+        if (activeTab === 'playlists' && !playlistsLoadedRef.current) {
+          console.log('🎵 Cargando playlists (lazy)...');
           loadPlaylists();
-        } else if (activeTab === 'liked') {
-          console.log('🎵 Cargando liked songs...');
+        } else if (activeTab === 'liked' && !likedSongsLoadedRef.current) {
+          console.log('🎵 Cargando liked songs (lazy)...');
           loadLikedSongs();
         }
-      }, 150);
+      }, 100);
       return () => clearTimeout(timer);
     }
   }, [activeTab, visible, spotifyConnected, loadPlaylists, loadLikedSongs]);
@@ -1641,17 +1684,39 @@ export default function SpotifyModal({
           <Search size={20} color="#71717A" />
           <TextInput
             value={searchQuery}
-            onChangeText={setSearchQuery}
+            onChangeText={(text) => {
+              setSearchQuery(text);
+              if (text.trim()) {
+                setSearchLoading(true);
+              }
+            }}
             placeholder="¿Qué quieres escuchar?"
             placeholderTextColor="#71717A"
             className="flex-1 ml-3 text-white text-base"
+            style={{
+              color: '#fff',
+              fontSize: 16,
+              flex: 1,
+              marginLeft: 12,
+              // Estilos web para asegurar que funcione
+              ...(Platform.OS === 'web' ? { outlineStyle: 'none' as any } : {}),
+            }}
             returnKeyType="search"
             autoCorrect={false}
             autoCapitalize="none"
+            autoComplete="off"
+            selectTextOnFocus={true}
           />
-          {loading && <ActivityIndicator size="small" color="#1DB954" style={{ marginRight: 8 }} />}
-          {searchQuery.length > 0 && !loading && (
-            <TouchableOpacity onPress={() => setSearchQuery('')}>
+          {searchLoading && (
+            <ActivityIndicator size="small" color="#1DB954" style={{ marginRight: 8 }} />
+          )}
+          {searchQuery.length > 0 && !searchLoading && (
+            <TouchableOpacity
+              onPress={() => {
+                setSearchQuery('');
+                setSearchResults([]);
+              }}
+            >
               <X size={18} color="#71717A" />
             </TouchableOpacity>
           )}
@@ -1669,7 +1734,15 @@ export default function SpotifyModal({
             style={{ flex: 1 }}
             contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
             nestedScrollEnabled
+            keyboardShouldPersistTaps="always"
           />
+        </View>
+      ) : searchQuery.length > 0 && !searchLoading ? (
+        <View className="flex-1 items-center justify-center px-8">
+          <Search size={48} color="#71717A" />
+          <Text className="text-zinc-400 mt-4 text-center">
+            No se encontraron resultados para "{searchQuery}"
+          </Text>
         </View>
       ) : (
         <View className="flex-1 items-center justify-center px-8">
@@ -1685,7 +1758,7 @@ export default function SpotifyModal({
   const renderConnectedView = () => {
     return (
       <View className="flex-1">
-        {/* Animated.ScrollView horizontal para swipe entre secciones - UI thread */}
+        {/* Animated.ScrollView horizontal con snap mecánico estilo TikTok */}
         <Animated.ScrollView
           ref={tabsScrollRef}
           horizontal
@@ -1693,12 +1766,18 @@ export default function SpotifyModal({
           showsHorizontalScrollIndicator={false}
           bounces={false}
           scrollEventThrottle={16}
-          decelerationRate="fast"
+          decelerationRate={0.99}
+          snapToInterval={SCREEN_WIDTH}
+          snapToAlignment="start"
+          disableIntervalMomentum={true}
           onScroll={handleTabsScroll}
+          onScrollEndDrag={handleNativeScrollEnd}
+          onMomentumScrollEnd={handleNativeScrollEnd}
           contentContainerStyle={{ flexDirection: 'row' }}
           style={{ flex: 1 }}
           nestedScrollEnabled={true}
-          keyboardShouldPersistTaps="handled"
+          keyboardShouldPersistTaps="always"
+          keyboardDismissMode="none"
         >
           {/* Now Playing */}
           {renderNowPlayingContent()}

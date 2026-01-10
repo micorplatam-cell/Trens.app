@@ -1,6 +1,6 @@
 // ============================================================================
 // STACK CARD - Tarjeta de Suplementos/Fármacos
-// Compacta y expandible con hora editable
+// PREMIUM SAVAGE EDITION - Compacta y expandible con hora editable
 // ============================================================================
 
 import React, { useState } from 'react';
@@ -12,7 +12,16 @@ import Animated, {
   interpolate,
 } from 'react-native-reanimated';
 import { Haptics } from '../../lib/haptics';
-import { Pill, Syringe, Droplets, FlaskConical, Zap, Clock, Trash2 } from 'lucide-react-native';
+import {
+  Pill,
+  Syringe,
+  Droplets,
+  FlaskConical,
+  Zap,
+  Clock,
+  Trash2,
+  ChevronDown,
+} from 'lucide-react-native';
 import { useHankTarget } from '../../hooks/useHankTarget';
 import { HankInlineHighlight } from '../hank/HankInlineHighlight';
 
@@ -43,8 +52,8 @@ interface StackCardProps {
 // ============================================================================
 // HELPERS
 // ============================================================================
-const getTypeIcon = (type: string) => {
-  const iconProps = { size: 14, color: '#A855F7' };
+const getTypeIcon = (type: string, size = 14) => {
+  const iconProps = { size, color: '#A855F7' };
   switch (type) {
     case 'pill':
       return <Pill {...iconProps} />;
@@ -70,7 +79,7 @@ const formatTimeToAMPM = (time24: string): string => {
 };
 
 // ============================================================================
-// COMPONENT
+// COMPONENT - PREMIUM SAVAGE EDITION
 // ============================================================================
 export const StackCard: React.FC<StackCardProps> = ({
   stack,
@@ -89,11 +98,11 @@ export const StackCard: React.FC<StackCardProps> = ({
   });
 
   const toggleExpand = () => {
-    if (isCompressed) return; // No expandir si está comprimido
+    if (isCompressed) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const newState = !expanded;
     setExpanded(newState);
-    expandProgress.value = withTiming(newState ? 1 : 0, { duration: 200 });
+    expandProgress.value = withTiming(newState ? 1 : 0, { duration: 250 });
   };
 
   const handleTimePress = () => {
@@ -112,25 +121,55 @@ export const StackCard: React.FC<StackCardProps> = ({
   };
 
   const expandedStyle = useAnimatedStyle(() => ({
-    height: interpolate(expandProgress.value, [0, 1], [0, stack.items.length * 56]),
+    // Altura dinámica: 72px por item (p-3 + gap + contenido) + 32px padding contenedor
+    height: interpolate(expandProgress.value, [0, 1], [0, stack.items.length * 72 + 32]),
     opacity: expandProgress.value,
   }));
 
-  // Modo comprimido para drag & drop
+  const chevronStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${interpolate(expandProgress.value, [0, 1], [0, 180])}deg` }],
+  }));
+
+  // ============================================================================
+  // MODO COMPRIMIDO - Premium style
+  // ============================================================================
   if (isCompressed) {
     const itemNames = stack.items.map((i) => i.name).join(', ');
     return (
-      <View className="mb-3 pl-8 relative">
-        <View className="absolute left-2.5 top-3 w-3 h-3 rounded-full bg-purple-500/60 border-2 border-[#111111]" />
-        <View className="bg-[#161616] border border-purple-500/30 rounded-xl px-4 py-3 flex-row items-center justify-between">
+      <View className="mb-3 ml-6 relative">
+        {/* Timeline dot */}
+        <View
+          className="absolute -left-[14px] top-4 w-3 h-3 rounded-full border-2 border-black"
+          style={{
+            backgroundColor: '#A855F7',
+            shadowColor: '#A855F7',
+            shadowOffset: { width: 0, height: 0 },
+            shadowOpacity: 0.6,
+            shadowRadius: 4,
+          }}
+        />
+        <View
+          className="rounded-xl px-4 py-3 flex-row items-center justify-between"
+          style={{
+            backgroundColor: 'rgba(168, 85, 247, 0.05)',
+            borderWidth: 1,
+            borderColor: 'rgba(168, 85, 247, 0.2)',
+          }}
+        >
           <View className="flex-1 mr-3">
-            <Text className="text-purple-400 text-sm font-bold mb-1">💊 STACK</Text>
-            <Text className="text-zinc-400 text-sm" numberOfLines={1}>
+            <View className="flex-row items-center gap-2">
+              <Pill size={12} color="#A855F7" />
+              <Text className="text-purple-400 text-xs font-bold tracking-wider">STACK</Text>
+            </View>
+            <Text className="text-zinc-500 text-xs mt-1" numberOfLines={1}>
               {itemNames || 'Sin items'}
             </Text>
           </View>
-          <View className="bg-purple-500/20 px-3 py-1.5 rounded-lg">
-            <Text className="text-purple-400 text-sm font-bold">
+          <View
+            className="px-3 py-1.5 rounded-lg"
+            style={{ backgroundColor: 'rgba(168, 85, 247, 0.15)' }}
+          >
+            <Text className="text-purple-400 text-xs font-bold font-mono">
               {formatTimeToAMPM(stack.time)}
             </Text>
           </View>
@@ -139,75 +178,162 @@ export const StackCard: React.FC<StackCardProps> = ({
     );
   }
 
+  // ============================================================================
+  // RENDER FULL - PREMIUM SAVAGE EDITION
+  // ============================================================================
   return (
-    <View ref={targetRef} onLayout={onLayout} className="mb-8 pl-8 relative">
-      {/* Hank Inline Highlight - FUERA del Pressable */}
-      <HankInlineHighlight isActive={isHighlighted} phase={animationPhase} borderRadius={8} />
+    <View ref={targetRef} onLayout={onLayout} className="mb-6 ml-6 relative">
+      {/* Hank Inline Highlight */}
+      <HankInlineHighlight isActive={isHighlighted} phase={animationPhase} borderRadius={16} />
 
-      {/* Timeline marker */}
-      <View className="absolute left-2.5 top-3 w-3 h-3 rounded-full bg-purple-500 border-2 border-[#111111]" />
+      {/* Timeline marker - Premium glow */}
+      <View
+        className="absolute -left-[14px] top-4 w-3 h-3 rounded-full border-2 border-black z-10"
+        style={{
+          backgroundColor: '#A855F7',
+          shadowColor: '#A855F7',
+          shadowOffset: { width: 0, height: 0 },
+          shadowOpacity: 0.8,
+          shadowRadius: 6,
+        }}
+      />
 
-      <Pressable
-        onPress={toggleExpand}
-        className="bg-[#161616] border border-purple-500/30 rounded-lg p-3 active:scale-[0.98]"
-      >
-        {/* Header */}
-        <View className="flex-row justify-between items-center mb-1">
-          {/* Tiempo clickeable */}
-          <Pressable
-            onPress={handleTimePress}
-            className="flex-row items-center gap-1.5 bg-purple-500/10 px-2 py-1 rounded active:bg-purple-500/20"
-          >
-            <Clock size={12} color="#A855F7" />
-            <Text className="text-purple-400 text-xs font-bold tracking-widest uppercase">
-              {formatTimeToAMPM(stack.time)}
-            </Text>
-          </Pressable>
-          <Text className="text-zinc-500 text-xs">{stack.items.length} items</Text>
-        </View>
-
-        {/* Collapsed View (Summary) */}
-        {!expanded && (
-          <View className="flex-row flex-wrap gap-2 mt-2">
-            {stack.items.map((item) => (
-              <View key={item.id} className="flex-row items-center gap-1">
-                {getTypeIcon(item.type)}
-                <Text className="text-zinc-300 text-sm">{item.name}</Text>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {/* Expanded View (Details) */}
-        <Animated.View
-          style={expandedStyle}
-          className="mt-3 border-t border-white/5 pt-2 overflow-hidden"
+      <Pressable onPress={toggleExpand} className="active:scale-[0.99]">
+        <View
+          className="rounded-2xl overflow-hidden"
+          style={{
+            backgroundColor: '#0A0A0A',
+            borderWidth: 1,
+            borderColor: 'rgba(168, 85, 247, 0.15)',
+            shadowColor: '#A855F7',
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.08,
+            shadowRadius: 12,
+          }}
         >
-          {stack.items.map((item) => (
-            <View key={item.id} className="flex-row justify-between items-center py-2.5 px-1">
-              <View className="flex-row items-center gap-2 flex-1">
-                {getTypeIcon(item.type)}
-                <Text className="text-zinc-200 text-sm">{item.name}</Text>
-              </View>
-              <View className="items-end flex-row gap-3">
-                <View className="items-end">
-                  <Text className="text-white font-mono text-sm">{item.dose}</Text>
-                  {item.notes && (
-                    <Text className="text-purple-400/80 text-xs italic">{item.notes}</Text>
-                  )}
+          {/* Header */}
+          <View
+            className="p-4"
+            style={{
+              backgroundColor: 'rgba(168, 85, 247, 0.03)',
+              borderBottomWidth: expanded ? 1 : 0,
+              borderBottomColor: 'rgba(168, 85, 247, 0.1)',
+            }}
+          >
+            <View className="flex-row justify-between items-center">
+              {/* Left: Icon + Title */}
+              <View className="flex-row items-center gap-3">
+                <View
+                  className="w-10 h-10 rounded-xl items-center justify-center"
+                  style={{ backgroundColor: 'rgba(168, 85, 247, 0.1)' }}
+                >
+                  <Pill size={18} color="#A855F7" />
                 </View>
-                {onItemDelete && (
-                  <Pressable
-                    onPress={() => handleItemDelete(item.id)}
-                    className="p-1.5 bg-red-500/10 rounded active:bg-red-500/20"
-                  >
-                    <Trash2 size={14} color="#EF4444" />
-                  </Pressable>
-                )}
+                <View>
+                  <Text className="text-white font-bold text-sm tracking-wide">STACK</Text>
+                  <Text className="text-zinc-600 text-[10px] font-mono">
+                    {stack.items.length} SUPLEMENTO{stack.items.length !== 1 ? 'S' : ''}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Right: Time + Chevron */}
+              <View className="flex-row items-center gap-2">
+                <Pressable
+                  onPress={handleTimePress}
+                  className="flex-row items-center gap-1.5 px-3 py-2 rounded-xl active:scale-95"
+                  style={{
+                    backgroundColor: 'rgba(168, 85, 247, 0.08)',
+                    borderWidth: 1,
+                    borderColor: 'rgba(168, 85, 247, 0.2)',
+                  }}
+                >
+                  <Clock size={12} color="#A855F7" />
+                  <Text className="text-purple-400 text-xs font-mono font-bold">
+                    {formatTimeToAMPM(stack.time)}
+                  </Text>
+                </Pressable>
+                <Animated.View style={chevronStyle}>
+                  <ChevronDown size={16} color="#A855F7" />
+                </Animated.View>
               </View>
             </View>
-          ))}
-        </Animated.View>
+
+            {/* Collapsed Preview - Show items inline */}
+            {!expanded && stack.items.length > 0 && (
+              <View className="flex-row flex-wrap gap-2 mt-3">
+                {stack.items.slice(0, 4).map((item) => (
+                  <View
+                    key={item.id}
+                    className="flex-row items-center gap-1.5 px-2 py-1 rounded-lg"
+                    style={{ backgroundColor: 'rgba(168, 85, 247, 0.08)' }}
+                  >
+                    {getTypeIcon(item.type, 12)}
+                    <Text className="text-zinc-400 text-[11px]">{item.name}</Text>
+                  </View>
+                ))}
+                {stack.items.length > 4 && (
+                  <View
+                    className="px-2 py-1 rounded-lg"
+                    style={{ backgroundColor: 'rgba(168, 85, 247, 0.08)' }}
+                  >
+                    <Text className="text-purple-400 text-[11px]">+{stack.items.length - 4}</Text>
+                  </View>
+                )}
+              </View>
+            )}
+          </View>
+
+          {/* Expanded View (Details) - Premium */}
+          <Animated.View style={expandedStyle} className="overflow-hidden">
+            <View className="p-4 pt-2">
+              {stack.items.map((item, idx) => (
+                <View
+                  key={item.id}
+                  className="flex-row justify-between items-center py-3"
+                  style={{
+                    borderBottomWidth: idx < stack.items.length - 1 ? 1 : 0,
+                    borderBottomColor: 'rgba(255, 255, 255, 0.03)',
+                  }}
+                >
+                  <View className="flex-row items-center gap-3 flex-1">
+                    <View
+                      className="w-8 h-8 rounded-lg items-center justify-center"
+                      style={{ backgroundColor: 'rgba(168, 85, 247, 0.1)' }}
+                    >
+                      {getTypeIcon(item.type, 16)}
+                    </View>
+                    <View className="flex-1">
+                      <Text className="text-zinc-200 text-sm font-medium">{item.name}</Text>
+                      {item.notes && (
+                        <Text className="text-purple-400/60 text-[10px] mt-0.5">{item.notes}</Text>
+                      )}
+                    </View>
+                  </View>
+                  <View className="flex-row items-center gap-3">
+                    <View
+                      className="px-2.5 py-1 rounded-lg"
+                      style={{ backgroundColor: 'rgba(168, 85, 247, 0.1)' }}
+                    >
+                      <Text className="text-purple-300 font-mono text-xs font-bold">
+                        {item.dose}
+                      </Text>
+                    </View>
+                    {onItemDelete && (
+                      <Pressable
+                        onPress={() => handleItemDelete(item.id)}
+                        className="p-2 rounded-lg active:scale-95"
+                        style={{ backgroundColor: 'rgba(239, 68, 68, 0.08)' }}
+                      >
+                        <Trash2 size={14} color="#EF4444" />
+                      </Pressable>
+                    )}
+                  </View>
+                </View>
+              ))}
+            </View>
+          </Animated.View>
+        </View>
       </Pressable>
     </View>
   );

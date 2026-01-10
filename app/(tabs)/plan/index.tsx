@@ -395,6 +395,8 @@ function PlanScreen() {
   const isInternalUpdate = useRef(false);
   // Flag para saber si es la primera vez que se monta el componente
   const isFirstMount = useRef(true);
+  // Flag para evitar múltiples auto-scrolls en la misma sesión de focus
+  const hasScrolledThisFocus = useRef(false);
 
   // ============================================================================
   // HELPER: Obtener perfil completo con medidas corporales Y macros cacheados
@@ -1900,11 +1902,18 @@ function PlanScreen() {
       }
 
       // Solo hacer auto-scroll si venimos de otro módulo (no en el primer mount)
-      if (!isFirstMount.current && itemLayouts.current.length > 0 && timeline.length > 0) {
+      // Y si no hemos hecho scroll en este focus
+      if (
+        !isFirstMount.current &&
+        !hasScrolledThisFocus.current &&
+        itemLayouts.current.length > 0 &&
+        timeline.length > 0
+      ) {
         const currentIndex = getCurrentTimelineIndex();
         const layout = itemLayouts.current[currentIndex];
 
         if (layout && layout.y > 0) {
+          hasScrolledThisFocus.current = true; // Marcar que ya hicimos scroll
           setTimeout(() => {
             scrollViewRef.current?.scrollTo({
               y: Math.max(0, layout.y - 30),
@@ -1913,6 +1922,11 @@ function PlanScreen() {
           }, 200);
         }
       }
+
+      // Cuando pierda focus, resetear el flag para el próximo focus
+      return () => {
+        hasScrolledThisFocus.current = false;
+      };
     }, [timeline.length, getCurrentTimelineIndex])
   );
 
@@ -1929,42 +1943,108 @@ function PlanScreen() {
 
   return (
     <View className="flex-1 bg-black">
-      {/* Header - ED HARDY FIRE STYLE */}
-      <View className="px-5 pt-16 pb-4 flex-row justify-between items-center border-b border-fire-red/20 bg-black">
-        <View>
-          <Text className="text-zinc-500 text-xs tracking-widest uppercase mb-1 font-mono">
-            Tu Plan
-          </Text>
-          <Text
-            className="text-fire-orange text-xl font-bold font-mono tracking-tighter"
+      {/* Header - PREMIUM SAVAGE EDITION */}
+      <View
+        className="px-5 pt-14 pb-5"
+        style={{
+          backgroundColor: '#000000',
+          borderBottomWidth: 1,
+          borderBottomColor: 'rgba(220, 38, 38, 0.3)',
+          shadowColor: '#DC2626',
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.15,
+          shadowRadius: 12,
+        }}
+      >
+        {/* Línea decorativa superior - Savage Red */}
+        <View
+          className="absolute top-0 left-0 right-0 h-[2px]"
+          style={{
+            backgroundColor: '#DC2626',
+            shadowColor: '#DC2626',
+            shadowOffset: { width: 0, height: 0 },
+            shadowOpacity: 0.8,
+            shadowRadius: 6,
+          }}
+        />
+
+        <View className="flex-row justify-between items-center">
+          <View>
+            <Text className="text-zinc-600 text-[10px] tracking-[4px] uppercase mb-1 font-bold">
+              AGENDA METABÓLICA
+            </Text>
+            <View className="flex-row items-center gap-2">
+              <View
+                className="w-2 h-2 rounded-full"
+                style={{
+                  backgroundColor: '#DC2626',
+                  shadowColor: '#DC2626',
+                  shadowOffset: { width: 0, height: 0 },
+                  shadowOpacity: 1,
+                  shadowRadius: 4,
+                }}
+              />
+              <Text
+                className="text-white text-2xl font-black tracking-tight uppercase"
+                style={{
+                  textShadowColor: 'rgba(220, 38, 38, 0.5)',
+                  textShadowOffset: { width: 0, height: 0 },
+                  textShadowRadius: 12,
+                }}
+              >
+                {planName}
+              </Text>
+            </View>
+            {/* Daily Stats Badges */}
+            <View className="flex-row gap-3 mt-2">
+              <View className="flex-row items-center gap-1">
+                <View className="w-1.5 h-1.5 rounded-full bg-savage-red" />
+                <Text className="text-zinc-500 text-[10px] font-mono">{meals.length} COMIDAS</Text>
+              </View>
+              {mealMacros && (
+                <View className="flex-row items-center gap-1">
+                  <View className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+                  <Text className="text-zinc-500 text-[10px] font-mono">
+                    {mealMacros.protein * meals.length}P
+                  </Text>
+                </View>
+              )}
+            </View>
+          </View>
+
+          {/* Stack Button Premium */}
+          <Pressable
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setShowStackManager(true);
+            }}
+            className="items-center px-4 py-2.5 rounded-xl active:scale-95"
             style={{
-              textShadowColor: '#F97316',
-              textShadowOffset: { width: 0, height: 0 },
-              textShadowRadius: 8,
+              backgroundColor: 'rgba(168, 85, 247, 0.08)',
+              borderWidth: 1.5,
+              borderColor: 'rgba(168, 85, 247, 0.4)',
+              shadowColor: '#A855F7',
+              shadowOffset: { width: 0, height: 0 },
+              shadowOpacity: 0.3,
+              shadowRadius: 12,
             }}
           >
-            🔥 {planName}
-          </Text>
+            <View className="flex-row items-center gap-2">
+              <View
+                className="w-6 h-6 rounded-full items-center justify-center"
+                style={{ backgroundColor: 'rgba(168, 85, 247, 0.2)' }}
+              >
+                <Pill size={12} color="#A855F7" />
+              </View>
+              <Text className="text-purple-400 text-xs font-bold tracking-widest">STACK</Text>
+            </View>
+            {stackItems.length > 0 && (
+              <Text className="text-purple-500/60 text-[9px] font-mono mt-0.5">
+                {stackItems.length} SUPLEMENTOS
+              </Text>
+            )}
+          </Pressable>
         </View>
-        <Pressable
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            setShowStackManager(true);
-          }}
-          className="flex-row items-center gap-2 px-3 py-2 rounded-full active:opacity-80"
-          style={{
-            backgroundColor: '#0a0005',
-            borderWidth: 1,
-            borderColor: '#A855F7',
-            shadowColor: '#A855F7',
-            shadowOffset: { width: 0, height: 0 },
-            shadowOpacity: 0.5,
-            shadowRadius: 8,
-          }}
-        >
-          <Pill size={16} color="#A855F7" />
-          <Text className="text-purple-400 text-xs font-bold">STACK</Text>
-        </Pressable>
       </View>
 
       {/* Timeline */}
@@ -1973,21 +2053,40 @@ function PlanScreen() {
         className="flex-1 px-5"
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#F97316" />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#DC2626" />
         }
       >
-        {/* Timeline Line - Fire gradient effect */}
-        <View
-          className="absolute left-9 top-0 bottom-0 w-px"
-          style={{ backgroundColor: 'rgba(249, 115, 22, 0.2)' }}
-        />
+        <View className="pt-6 gap-2 relative">
+          {/* Timeline Line - Premium Savage Line - Solo dentro del contenedor de items */}
+          {timeline.length > 0 && (
+            <View
+              className="absolute left-[18px] top-0 bottom-0 w-[2px]"
+              style={{
+                backgroundColor: 'rgba(220, 38, 38, 0.15)',
+                shadowColor: '#DC2626',
+                shadowOffset: { width: 0, height: 0 },
+                shadowOpacity: 0.3,
+                shadowRadius: 4,
+              }}
+            />
+          )}
 
-        <View className="pt-6 gap-2">
           {timeline.length === 0 ? (
-            <View className="items-center justify-center py-20">
-              <Text className="text-zinc-500 text-center mb-2">No hay comidas configuradas</Text>
-              <Text className="text-zinc-600 text-sm text-center font-mono">
-                Agrega tu primera comida para comenzar
+            <View className="items-center justify-center py-16">
+              {/* Empty State Premium */}
+              <View
+                className="w-20 h-20 rounded-2xl items-center justify-center mb-4"
+                style={{
+                  backgroundColor: 'rgba(220, 38, 38, 0.08)',
+                  borderWidth: 1,
+                  borderColor: 'rgba(220, 38, 38, 0.15)',
+                }}
+              >
+                <Plus size={32} color="#DC2626" />
+              </View>
+              <Text className="text-white font-bold text-lg mb-1">Sin comidas configuradas</Text>
+              <Text className="text-zinc-600 text-sm text-center font-mono max-w-[240px]">
+                Agrega tu primera comida para comenzar tu plan metabólico
               </Text>
             </View>
           ) : (
@@ -2098,6 +2197,7 @@ function PlanScreen() {
                       }}
                       onPressRoutine={() => router.push('/(tabs)/gym')}
                       itemHeight={isDraggingWorkout ? 85 : 160}
+                      scrollRef={scrollViewRef}
                     />
                   </View>
                 );
@@ -2125,7 +2225,7 @@ function PlanScreen() {
           </View>
         )}
 
-        {/* Add Meal Button - ED HARDY FIRE STYLE */}
+        {/* Add Meal Button - PREMIUM SAVAGE */}
         <Pressable
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -2154,17 +2254,31 @@ function PlanScreen() {
             }
             setShowAddMeal(true);
           }}
-          className="w-full py-4 mt-4 mb-24 rounded-xl active:opacity-80"
+          className="w-full py-5 mt-6 mb-28 rounded-2xl active:scale-[0.98]"
           style={{
-            borderWidth: 2,
+            backgroundColor: 'rgba(220, 38, 38, 0.05)',
+            borderWidth: 1.5,
             borderStyle: 'dashed',
-            borderColor: '#F97316',
-            backgroundColor: '#0a0500',
+            borderColor: 'rgba(220, 38, 38, 0.3)',
+            shadowColor: '#DC2626',
+            shadowOffset: { width: 0, height: 0 },
+            shadowOpacity: 0.1,
+            shadowRadius: 20,
           }}
         >
-          <View className="flex-row items-center justify-center gap-2">
-            <Plus size={20} color="#F97316" />
-            <Text className="text-fire-orange font-bold tracking-widest">AGREGAR COMIDA 🔥</Text>
+          <View className="items-center">
+            <View
+              className="w-12 h-12 rounded-xl items-center justify-center mb-2"
+              style={{ backgroundColor: 'rgba(220, 38, 38, 0.1)' }}
+            >
+              <Plus size={24} color="#DC2626" />
+            </View>
+            <Text className="text-savage-red font-bold tracking-widest text-sm">
+              AGREGAR COMIDA
+            </Text>
+            <Text className="text-zinc-700 text-[10px] font-mono mt-1">
+              Nueva comida en tu plan
+            </Text>
           </View>
         </Pressable>
       </ScrollView>

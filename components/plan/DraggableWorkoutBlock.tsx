@@ -1,11 +1,12 @@
 // ============================================================================
-// DRAGGABLE WORKOUT BLOCK - Wrapper con Drag & Drop
-// Funciona en nativo con gesture-handler y en web con eventos de pointer
+// DRAGGABLE WORKOUT BLOCK - Implementación Profesional
+// Patrón usado: Single DOM element con CSS transforms
+// El drag se activa con long-press en el header "BLOQUE ENTRENO"
 // ============================================================================
 
-import React, { useState, useRef, useEffect } from 'react';
-import { Platform, View } from 'react-native';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import React, { useState, useRef, useEffect, useCallback, RefObject } from 'react';
+import { Platform, ScrollView, Dimensions } from 'react-native';
+import { Gesture } from 'react-native-gesture-handler';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -14,6 +15,13 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Haptics } from '../../lib/haptics';
 import { WorkoutBlock } from './WorkoutBlock';
+
+// Constantes
+const AUTO_SCROLL_THRESHOLD = 80;
+const AUTO_SCROLL_SPEED = 5; // Reducido de 8 para scroll más suave
+const LONG_PRESS_DELAY = 400;
+const ITEM_HEIGHT_COMPRESSED = 85;
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 interface StackItem {
   id: string;
@@ -38,7 +46,6 @@ interface WorkoutBlockData {
   preStack: StackItem[];
   postStack: StackItem[];
   exercises?: Exercise[];
-  // Workout time estimation
   estimatedTime?: string | null;
   isFasted?: boolean;
   timeDescription?: string;
@@ -56,10 +63,12 @@ interface DraggableWorkoutBlockProps {
   onPositionChange?: (targetIndex: number) => void;
   onPressRoutine?: () => void;
   itemHeight?: number;
+  scrollRef?: RefObject<ScrollView | null>;
 }
 
 // ============================================================================
-// WEB DRAGGABLE COMPONENT - Usa eventos de pointer (mouse + touch)
+// WEB DRAGGABLE COMPONENT
+// Principios: Sin render condicional, mismo DOM siempre, CSS transforms
 // ============================================================================
 const WebDraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
   data,
@@ -72,233 +81,382 @@ const WebDraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
   onDragCancel,
   onPositionChange,
   onPressRoutine,
-  itemHeight = 150,
 }) => {
+  // Estado mínimo
   const [isDragging, setIsDragging] = useState(false);
   const [translateY, setTranslateY] = useState(0);
-  const [scale, setScale] = useState(1);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const startYRef = useRef(0);
-  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastReportedIndexRef = useRef(currentIndex);
-  const isDraggingRef = useRef(false);
-  const currentTranslateRef = useRef(0);
-  const pointerIdRef = useRef<number | null>(null); // Guardar pointerId para capture
+  const [isHoveringHandle, setIsHoveringHandle] = useState(false);
 
-  // Cleanup on unmount
+  // Refs - Nunca cambian durante el ciclo de vida del componente
+  const containerRef = useRef<HTMLDivElement>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoScrollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isDraggingRef = useRef(false);
+  const activePointerId = useRef<number | null>(null);
+  const dragStartPointerY = useRef<number>(0); // Posición Y donde inició el drag (para ignorar auto-scroll inicial)
+  const dragStartIndex = useRef(currentIndex);
+  const lastReportedIndex = useRef(currentIndex);
+  const pressStartY = useRef(0);
+  const dragStartY = useRef(0);
+  const currentPointerY = useRef(0);
+  const scrollableParent = useRef<HTMLElement | null>(null);
+  const initialScrollTop = useRef(0);
+  const initialCompressionOffset = useRef(0); // Offset inicial por compresión de tarjetas anteriores
+
+  // Sincronizar cuando cambia el índice (solo si no estamos arrastrando)
+  useEffect(() => {
+    if (!isDraggingRef.current) {
+      dragStartIndex.current = currentIndex;
+      lastReportedIndex.current = currentIndex;
+    }
+  }, [currentIndex]);
+
+  // Cleanup
   useEffect(() => {
     return () => {
-      if (longPressTimerRef.current) {
-        clearTimeout(longPressTimerRef.current);
-      }
+      if (longPressTimer.current) clearTimeout(longPressTimer.current);
+      if (autoScrollTimer.current) clearInterval(autoScrollTimer.current);
     };
   }, []);
 
-  // Global pointer events for drag (works with mouse AND touch)
-  useEffect(() => {
-    if (!isDragging) return;
+  // Encontrar scrollable parent
+  const findScrollableParent = useCallback((): HTMLElement | null => {
+    if (!containerRef.current) return null;
 
-    const handleGlobalPointerMove = (e: PointerEvent) => {
-      if (!isDraggingRef.current) return;
-      e.preventDefault();
+    // Buscar por data attribute primero
+    const dataScroll = containerRef.current.closest('[data-scroll-container]') as HTMLElement;
+    if (dataScroll) return dataScroll;
 
-      const deltaY = e.clientY - startYRef.current;
-      currentTranslateRef.current = deltaY;
-      setTranslateY(deltaY);
-
-      // Calculate target position
-      const movedPositions = Math.round(deltaY / itemHeight);
-      let targetIndex = currentIndex + movedPositions;
-      targetIndex = Math.max(0, Math.min(totalItems - 1, targetIndex));
-
-      if (targetIndex !== lastReportedIndexRef.current) {
-        lastReportedIndexRef.current = targetIndex;
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        if (onPositionChange) onPositionChange(targetIndex);
+    // Buscar por overflow
+    let parent = containerRef.current.parentElement;
+    while (parent) {
+      const style = window.getComputedStyle(parent);
+      if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
+        return parent;
       }
-    };
-
-    const handleGlobalPointerUp = () => {
-      if (!isDraggingRef.current) return;
-
-      // Calculate final position
-      const movedPositions = Math.round(currentTranslateRef.current / itemHeight);
-      let newIndex = currentIndex + movedPositions;
-      newIndex = Math.max(0, Math.min(totalItems - 1, newIndex));
-
-      // Reset state
-      isDraggingRef.current = false;
-      setIsDragging(false);
-      setTranslateY(0);
-      setScale(1);
-      currentTranslateRef.current = 0;
-
-      if (newIndex !== currentIndex) {
-        onDragEnd(newIndex);
-      } else if (onDragCancel) {
-        onDragCancel();
-      }
-    };
-
-    // Add global listeners
-    window.addEventListener('pointermove', handleGlobalPointerMove, { passive: false });
-    window.addEventListener('pointerup', handleGlobalPointerUp);
-    window.addEventListener('pointercancel', handleGlobalPointerUp);
-
-    return () => {
-      window.removeEventListener('pointermove', handleGlobalPointerMove);
-      window.removeEventListener('pointerup', handleGlobalPointerUp);
-      window.removeEventListener('pointercancel', handleGlobalPointerUp);
-    };
-  }, [isDragging, currentIndex, totalItems, itemHeight, onDragEnd, onDragCancel, onPositionChange]);
-
-  const handlePointerDown = (e: React.PointerEvent) => {
-    // Guardar pointerId para usar en capture después del long-press
-    pointerIdRef.current = e.pointerId;
-    startYRef.current = e.clientY;
-
-    // Long press detection (400ms)
-    longPressTimerRef.current = setTimeout(() => {
-      // Capturar pointer en el contenedor para recibir todos los eventos
-      if (containerRef.current && pointerIdRef.current !== null) {
-        containerRef.current.setPointerCapture(pointerIdRef.current);
-      }
-      isDraggingRef.current = true;
-      setIsDragging(true);
-      setScale(0.95);
-      lastReportedIndexRef.current = currentIndex;
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-      if (onDragStart) onDragStart();
-    }, 400);
-  };
-
-  // Ref para rastrear si estamos en modo scroll simulado
-  const isScrollingRef = useRef(false);
-  const lastScrollYRef = useRef(0);
-
-  const handlePointerMove = (e: React.PointerEvent) => {
-    // Si estamos arrastrando, manejar el movimiento aquí directamente
-    if (isDraggingRef.current) {
-      e.preventDefault();
-      const deltaY = e.clientY - startYRef.current;
-      currentTranslateRef.current = deltaY;
-      setTranslateY(deltaY);
-
-      // Calculate target position
-      const movedPositions = Math.round(deltaY / itemHeight);
-      let targetIndex = currentIndex + movedPositions;
-      targetIndex = Math.max(0, Math.min(totalItems - 1, targetIndex));
-
-      if (targetIndex !== lastReportedIndexRef.current) {
-        lastReportedIndexRef.current = targetIndex;
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        if (onPositionChange) onPositionChange(targetIndex);
-      }
-      return;
+      parent = parent.parentElement;
     }
+    return null;
+  }, []);
 
-    // Si aún no estamos arrastrando, verificar si debemos cancelar el long-press
-    if (longPressTimerRef.current) {
-      const deltaY = Math.abs(e.clientY - startYRef.current);
-      if (deltaY > 10) {
-        clearTimeout(longPressTimerRef.current);
-        longPressTimerRef.current = null;
-        // Activar modo scroll simulado
-        isScrollingRef.current = true;
-        lastScrollYRef.current = e.clientY;
-      }
+  // Calcular índice objetivo
+  const calculateTargetIndex = useCallback((): number => {
+    if (!isDraggingRef.current) return currentIndex;
+
+    const fingerMovement = currentPointerY.current - dragStartY.current;
+    const scrollDelta = (scrollableParent.current?.scrollTop || 0) - initialScrollTop.current;
+    // IMPORTANTE: Incluir el offset de compresión para que las tarjetas
+    // reaccionen a la posición VISUAL del bloque (donde está el dedo)
+    const totalMovement = initialCompressionOffset.current + fingerMovement + scrollDelta;
+
+    const positions = Math.round(totalMovement / ITEM_HEIGHT_COMPRESSED);
+    const newIndex = dragStartIndex.current + positions;
+
+    return Math.max(0, Math.min(totalItems - 1, newIndex));
+  }, [currentIndex, totalItems]);
+
+  // Actualizar translateY para seguir al dedo
+  const updateTranslateY = useCallback(() => {
+    const fingerMovement = currentPointerY.current - dragStartY.current;
+    const scrollDelta = (scrollableParent.current?.scrollTop || 0) - initialScrollTop.current;
+    // Incluir el offset inicial de compresión para mantener el bloque en el dedo
+    setTranslateY(initialCompressionOffset.current + fingerMovement + scrollDelta);
+  }, []);
+
+  // Parar auto-scroll
+  const stopAutoScroll = useCallback(() => {
+    if (autoScrollTimer.current) {
+      clearInterval(autoScrollTimer.current);
+      autoScrollTimer.current = null;
     }
+  }, []);
 
-    // Si estamos en modo scroll simulado, hacer scroll del contenedor padre
-    if (isScrollingRef.current) {
-      const scrollDelta = lastScrollYRef.current - e.clientY;
-      lastScrollYRef.current = e.clientY;
+  // Iniciar auto-scroll
+  const startAutoScroll = useCallback(() => {
+    if (autoScrollTimer.current) return;
 
-      // Buscar el ScrollView padre y hacer scroll
-      const scrollableParent = containerRef.current?.closest(
-        '[data-scroll-container]'
-      ) as HTMLElement;
-      if (scrollableParent) {
-        scrollableParent.scrollTop += scrollDelta;
-      } else {
-        // Fallback: buscar cualquier contenedor con overflow scroll
-        let parent = containerRef.current?.parentElement;
-        while (parent) {
-          const style = window.getComputedStyle(parent);
-          if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
-            parent.scrollTop += scrollDelta;
-            break;
+    autoScrollTimer.current = setInterval(() => {
+      if (!isDraggingRef.current || !scrollableParent.current) {
+        stopAutoScroll();
+        return;
+      }
+
+      const pointerY = currentPointerY.current;
+      const headerHeight = 140;
+      const bottomPadding = 100;
+      const topZone = headerHeight + AUTO_SCROLL_THRESHOLD;
+      const bottomZone = window.innerHeight - bottomPadding - AUTO_SCROLL_THRESHOLD;
+
+      // IMPORTANTE: Solo activar auto-scroll si el usuario ha MOVIDO el dedo
+      // hacia la zona de scroll (no si empezó el drag ahí)
+      const fingerMovement = Math.abs(pointerY - dragStartPointerY.current);
+      const MIN_MOVEMENT_FOR_AUTOSCROLL = 30; // Mínimo 30px de movimiento
+      
+      if (fingerMovement < MIN_MOVEMENT_FOR_AUTOSCROLL) {
+        return; // No hacer auto-scroll hasta que el usuario mueva el dedo
+      }
+
+      let scrollDelta = 0;
+
+      if (pointerY < topZone && pointerY > headerHeight) {
+        const intensity = 1 - (pointerY - headerHeight) / AUTO_SCROLL_THRESHOLD;
+        scrollDelta = -AUTO_SCROLL_SPEED * Math.max(0.3, intensity);
+      } else if (pointerY > bottomZone) {
+        const intensity = (pointerY - bottomZone) / AUTO_SCROLL_THRESHOLD;
+        scrollDelta = AUTO_SCROLL_SPEED * Math.max(0.3, intensity);
+      }
+
+      if (scrollDelta !== 0) {
+        const oldScrollTop = scrollableParent.current.scrollTop;
+        const maxScroll = scrollableParent.current.scrollHeight - scrollableParent.current.clientHeight;
+        
+        // Limitar el scroll para no ir más allá del contenido
+        const newScrollTop = Math.max(0, Math.min(maxScroll, oldScrollTop + scrollDelta));
+        scrollableParent.current.scrollTop = newScrollTop;
+
+        // Si realmente scrolleó, actualizar
+        if (scrollableParent.current.scrollTop !== oldScrollTop) {
+          updateTranslateY();
+
+          const targetIndex = calculateTargetIndex();
+          if (targetIndex !== lastReportedIndex.current) {
+            lastReportedIndex.current = targetIndex;
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            if (onPositionChange) onPositionChange(targetIndex);
           }
-          parent = parent.parentElement;
         }
       }
+    }, 16);
+  }, [calculateTargetIndex, onPositionChange, stopAutoScroll, updateTranslateY]);
+
+  // Limpiar todo
+  const cleanup = useCallback(() => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
     }
+    stopAutoScroll();
+  }, [stopAutoScroll]);
+
+  // Finalizar drag
+  const finishDrag = useCallback(() => {
+    if (!isDraggingRef.current) return;
+
+    stopAutoScroll();
+
+    const finalIndex = calculateTargetIndex();
+    const startIndex = dragStartIndex.current;
+
+    // Resetear estado
+    isDraggingRef.current = false;
+    setIsDragging(false);
+    setTranslateY(0);
+    activePointerId.current = null;
+
+    // Callback
+    if (finalIndex !== startIndex) {
+      onDragEnd(finalIndex);
+    } else if (onDragCancel) {
+      onDragCancel();
+    }
+  }, [calculateTargetIndex, onDragCancel, onDragEnd, stopAutoScroll]);
+
+  // POINTER DOWN en el handle
+  const handlePointerDownOnHandle = useCallback(
+    (e: React.PointerEvent) => {
+      // Prevenir comportamiento por defecto
+      e.stopPropagation();
+      e.preventDefault();
+
+      // Si ya hay un pointer activo, ignorar
+      if (activePointerId.current !== null) return;
+
+      activePointerId.current = e.pointerId;
+      const pointerY = e.clientY;
+      pressStartY.current = pointerY;
+      currentPointerY.current = pointerY;
+
+      // Preparar scroll tracking
+      scrollableParent.current = findScrollableParent();
+      initialScrollTop.current = scrollableParent.current?.scrollTop || 0;
+
+      // Sincronizar índices
+      dragStartIndex.current = currentIndex;
+      lastReportedIndex.current = currentIndex;
+
+      // Capturar pointer inmediatamente en el container
+      if (containerRef.current) {
+        try {
+          containerRef.current.setPointerCapture(e.pointerId);
+        } catch {
+          // Ignorar errores de captura
+        }
+      }
+
+      // Timer de long-press
+      longPressTimer.current = setTimeout(() => {
+        // Verificar que seguimos con el mismo pointer
+        if (activePointerId.current !== e.pointerId) return;
+
+        // Activar drag ANTES de onDragStart para que el estado local esté listo
+        isDraggingRef.current = true;
+        setIsDragging(true);
+
+        // Haptic feedback
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+
+        // Llamar onDragStart - esto causa que el padre comprima las tarjetas
+        if (onDragStart) onDragStart();
+
+        // CRÍTICO: Esperar a que React re-renderice después de la compresión
+        // Usamos DOBLE requestAnimationFrame para asegurar que el DOM está actualizado
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            // IMPORTANTE: Después de la compresión, el elemento puede haber SUBIDO
+            // porque las tarjetas anteriores se encogieron.
+            // Necesitamos calcular el offset inicial para que el bloque
+            // aparezca EXACTAMENTE donde está el dedo.
+            
+            if (!containerRef.current) return;
+            
+            // Obtener la posición REAL del elemento después de la compresión
+            const elementRect = containerRef.current.getBoundingClientRect();
+            const elementCenterY = elementRect.top + elementRect.height / 2;
+            
+            // El dedo está en currentPointerY.current
+            // El elemento está en elementCenterY
+            // El offset inicial es la diferencia (para que el centro del elemento
+            // esté donde está el dedo)
+            const initialOffset = currentPointerY.current - elementCenterY;
+            
+            // Guardar el offset inicial de compresión para usarlo en updateTranslateY
+            initialCompressionOffset.current = initialOffset;
+            
+            // Establecer dragStartY
+            dragStartY.current = currentPointerY.current;
+            
+            // Guardar posición inicial para control de auto-scroll
+            dragStartPointerY.current = currentPointerY.current;
+
+            // Actualizar scroll inicial
+            initialScrollTop.current = scrollableParent.current?.scrollTop || 0;
+
+            // CLAVE: Empezar con el offset inicial para que el bloque
+            // aparezca donde está el dedo, no donde quedó después de comprimir
+            setTranslateY(initialOffset);
+
+            // Iniciar auto-scroll
+            startAutoScroll();
+          });
+        });
+      }, LONG_PRESS_DELAY);
+    },
+    [currentIndex, findScrollableParent, onDragStart, startAutoScroll]
+  );
+
+  // POINTER MOVE (en el container para capturar todo el movimiento)
+  const handlePointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      // Solo procesar nuestro pointer
+      if (activePointerId.current !== e.pointerId) return;
+
+      currentPointerY.current = e.clientY;
+
+      // Si estamos arrastrando
+      if (isDraggingRef.current) {
+        e.preventDefault();
+        updateTranslateY();
+
+        const targetIndex = calculateTargetIndex();
+        if (targetIndex !== lastReportedIndex.current) {
+          lastReportedIndex.current = targetIndex;
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          if (onPositionChange) onPositionChange(targetIndex);
+        }
+        return;
+      }
+
+      // Si aún no arrastramos, cancelar si se movió mucho
+      if (longPressTimer.current) {
+        const moved = Math.abs(e.clientY - pressStartY.current);
+        if (moved > 15) {
+          clearTimeout(longPressTimer.current);
+          longPressTimer.current = null;
+
+          // Liberar pointer
+          if (containerRef.current) {
+            try {
+              containerRef.current.releasePointerCapture(e.pointerId);
+            } catch {
+              // Ignorar
+            }
+          }
+          activePointerId.current = null;
+        }
+      }
+    },
+    [calculateTargetIndex, onPositionChange, updateTranslateY]
+  );
+
+  // POINTER UP
+  const handlePointerUp = useCallback(
+    (e: React.PointerEvent) => {
+      if (activePointerId.current !== e.pointerId) return;
+
+      cleanup();
+
+      // Liberar pointer
+      if (containerRef.current) {
+        try {
+          containerRef.current.releasePointerCapture(e.pointerId);
+        } catch {
+          // Ignorar
+        }
+      }
+
+      if (isDraggingRef.current) {
+        finishDrag();
+      } else {
+        activePointerId.current = null;
+      }
+    },
+    [cleanup, finishDrag]
+  );
+
+  // POINTER CANCEL
+  const handlePointerCancel = useCallback(
+    (e: React.PointerEvent) => {
+      handlePointerUp(e);
+    },
+    [handlePointerUp]
+  );
+
+  // Estilos del handle
+  const handleStyle: React.CSSProperties = {
+    cursor: isDragging ? 'grabbing' : isHoveringHandle ? 'grab' : 'default',
+    touchAction: 'none',
   };
 
-  const handlePointerUp = (e: React.PointerEvent) => {
-    // Reset scroll mode
-    isScrollingRef.current = false;
-
-    // Release pointer capture del contenedor
-    if (containerRef.current && pointerIdRef.current !== null) {
-      try {
-        containerRef.current.releasePointerCapture(pointerIdRef.current);
-      } catch {
-        // Ignorar error si no hay capture activo
-      }
-    }
-    pointerIdRef.current = null;
-
-    // Cancelar long-press timer si existe
-    if (longPressTimerRef.current) {
-      clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
-    }
-
-    // Si estábamos arrastrando, finalizar el drag
-    if (isDraggingRef.current) {
-      const movedPositions = Math.round(currentTranslateRef.current / itemHeight);
-      let newIndex = currentIndex + movedPositions;
-      newIndex = Math.max(0, Math.min(totalItems - 1, newIndex));
-
-      // Reset state
-      isDraggingRef.current = false;
-      setIsDragging(false);
-      setTranslateY(0);
-      setScale(1);
-      currentTranslateRef.current = 0;
-
-      if (newIndex !== currentIndex) {
-        onDragEnd(newIndex);
-      } else if (onDragCancel) {
-        onDragCancel();
-      }
-    }
-  };
-
-  const handlePointerCancel = (e: React.PointerEvent) => {
-    handlePointerUp(e);
+  // Estilos del container
+  const containerStyle: React.CSSProperties = {
+    transform: isDragging ? `translateY(${translateY}px) scale(0.98)` : 'none',
+    zIndex: isDragging ? 1000 : 1,
+    position: 'relative',
+    opacity: isDragging ? 0.95 : 1,
+    boxShadow: isDragging ? '0 10px 40px rgba(220, 38, 38, 0.5)' : 'none',
+    transition: isDragging ? 'none' : 'transform 0.15s ease-out, box-shadow 0.15s ease-out',
+    willChange: isDragging ? 'transform' : 'auto',
+    userSelect: 'none',
+    touchAction: isDragging ? 'none' : 'auto',
   };
 
   return (
     <div
       ref={containerRef}
-      onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerCancel}
-      style={{
-        transform: `translateY(${translateY}px) scale(${scale})`,
-        zIndex: isDragging ? 100 : 1,
-        opacity: isDragging ? 0.95 : 1,
-        cursor: isDragging ? 'grabbing' : 'default',
-        userSelect: 'none',
-        position: 'relative',
-        // Usar touch-action: none para tener control total, pero cancelar long-press si detectamos scroll
-        touchAction: 'none',
-        boxShadow: isDragging ? '0 8px 30px rgba(220, 38, 38, 0.4)' : 'none',
-        transition: isDragging ? 'none' : 'transform 0.2s ease-out, box-shadow 0.2s ease-out',
-      }}
+      style={containerStyle}
     >
       <WorkoutBlock
         data={data}
@@ -308,13 +466,20 @@ const WebDraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
         isLast={currentIndex >= totalItems - 1}
         onPressRoutine={onPressRoutine}
         isCompressed={isDragging}
+        dragHandleProps={{
+          onPointerDown: handlePointerDownOnHandle,
+          onPointerEnter: () => setIsHoveringHandle(true),
+          onPointerLeave: () => setIsHoveringHandle(false),
+          style: handleStyle,
+          isDragging,
+        }}
       />
     </div>
   );
 };
 
 // ============================================================================
-// NATIVE DRAGGABLE COMPONENT - Usa react-native-gesture-handler
+// NATIVE DRAGGABLE COMPONENT
 // ============================================================================
 const NativeDraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
   data,
@@ -328,6 +493,7 @@ const NativeDraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
   onPositionChange,
   onPressRoutine,
   itemHeight = 150,
+  scrollRef,
 }) => {
   const translateY = useSharedValue(0);
   const scale = useSharedValue(1);
@@ -335,85 +501,116 @@ const NativeDraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
   const isDraggingShared = useSharedValue(false);
   const [isDraggingState, setIsDraggingState] = useState(false);
   const lastReportedIndex = useSharedValue(currentIndex);
+  const autoScrollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const currentAbsoluteYRef = useRef(0);
+  const scrollOffsetRef = useRef(0);
 
-  const triggerHaptic = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+  useEffect(() => {
+    return () => {
+      if (autoScrollIntervalRef.current) {
+        clearInterval(autoScrollIntervalRef.current);
+      }
+    };
+  }, []);
+
+  const startAutoScroll = () => {
+    if (autoScrollIntervalRef.current || !scrollRef?.current) return;
+
+    autoScrollIntervalRef.current = setInterval(() => {
+      if (!isDraggingState || !scrollRef?.current) {
+        if (autoScrollIntervalRef.current) {
+          clearInterval(autoScrollIntervalRef.current);
+          autoScrollIntervalRef.current = null;
+        }
+        return;
+      }
+
+      const absoluteY = currentAbsoluteYRef.current;
+      const headerHeight = 140;
+      const bottomPadding = 100;
+
+      const topZone = headerHeight + AUTO_SCROLL_THRESHOLD;
+      const bottomZone = SCREEN_HEIGHT - bottomPadding - AUTO_SCROLL_THRESHOLD;
+
+      let scrollDelta = 0;
+
+      if (absoluteY < topZone && absoluteY > headerHeight) {
+        const intensity = 1 - (absoluteY - headerHeight) / AUTO_SCROLL_THRESHOLD;
+        scrollDelta = -AUTO_SCROLL_SPEED * Math.max(0.3, intensity);
+      } else if (absoluteY > bottomZone) {
+        const intensity = (absoluteY - bottomZone) / AUTO_SCROLL_THRESHOLD;
+        scrollDelta = AUTO_SCROLL_SPEED * Math.max(0.3, intensity);
+      }
+
+      if (scrollDelta !== 0) {
+        scrollOffsetRef.current += scrollDelta;
+        scrollRef.current.scrollTo({
+          y: scrollOffsetRef.current,
+          animated: false,
+        });
+      }
+    }, 16);
   };
 
-  const triggerLightHaptic = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  const stopAutoScroll = () => {
+    if (autoScrollIntervalRef.current) {
+      clearInterval(autoScrollIntervalRef.current);
+      autoScrollIntervalRef.current = null;
+    }
   };
 
-  const setDragging = (value: boolean) => {
-    setIsDraggingState(value);
+  const triggerHaptic = (style: 'heavy' | 'light') => {
+    Haptics.impactAsync(
+      style === 'heavy' ? Haptics.ImpactFeedbackStyle.Heavy : Haptics.ImpactFeedbackStyle.Light
+    );
   };
 
-  const handleDragStartInternal = () => {
-    if (onDragStart) onDragStart();
-  };
-
-  const handleDragEndInternal = (newIndex: number) => {
-    if (onDragCancel) onDragCancel();
-    onDragEnd(newIndex);
-  };
-
-  const handleDragCancelInternal = () => {
-    if (onDragCancel) onDragCancel();
-  };
-
-  const reportPositionChange = (targetIndex: number) => {
-    if (onPositionChange) onPositionChange(targetIndex);
-  };
-
-  const panGesture = Gesture.Pan()
-    .activateAfterLongPress(400)
+  const gesture = Gesture.Pan()
+    .activateAfterLongPress(LONG_PRESS_DELAY)
     .onStart(() => {
+      'worklet';
       isDraggingShared.value = true;
+      scale.value = withSpring(0.98);
+      zIndex.value = 1000;
       lastReportedIndex.value = currentIndex;
-      zIndex.value = 100;
-      scale.value = withSpring(0.95, { damping: 15 });
-      runOnJS(setDragging)(true);
-      runOnJS(triggerHaptic)();
-      runOnJS(handleDragStartInternal)();
+      runOnJS(triggerHaptic)('heavy');
+      runOnJS(setIsDraggingState)(true);
+      if (onDragStart) runOnJS(onDragStart)();
+      runOnJS(startAutoScroll)();
     })
     .onUpdate((event) => {
+      'worklet';
       translateY.value = event.translationY;
+      runOnJS((y: number) => {
+        currentAbsoluteYRef.current = y;
+      })(event.absoluteY);
 
-      const movedPositions = Math.round(event.translationY / itemHeight);
-      let targetIndex = currentIndex + movedPositions;
-      targetIndex = Math.max(0, Math.min(totalItems - 1, targetIndex));
+      const positions = Math.round(event.translationY / itemHeight);
+      const newIndex = Math.max(0, Math.min(totalItems - 1, currentIndex + positions));
 
-      if (targetIndex !== lastReportedIndex.value) {
-        lastReportedIndex.value = targetIndex;
-        runOnJS(reportPositionChange)(targetIndex);
-        runOnJS(triggerLightHaptic)();
+      if (newIndex !== lastReportedIndex.value) {
+        lastReportedIndex.value = newIndex;
+        runOnJS(triggerHaptic)('light');
+        if (onPositionChange) runOnJS(onPositionChange)(newIndex);
       }
     })
     .onEnd((event) => {
-      const movedPositions = Math.round(event.translationY / itemHeight);
-      let newIndex = currentIndex + movedPositions;
-      newIndex = Math.max(0, Math.min(totalItems - 1, newIndex));
+      'worklet';
+      runOnJS(stopAutoScroll)();
 
-      translateY.value = withSpring(0, { damping: 15, stiffness: 150 });
+      const positions = Math.round(event.translationY / itemHeight);
+      const newIndex = Math.max(0, Math.min(totalItems - 1, currentIndex + positions));
+
+      translateY.value = withSpring(0);
       scale.value = withSpring(1);
       zIndex.value = 1;
       isDraggingShared.value = false;
-      runOnJS(setDragging)(false);
+      runOnJS(setIsDraggingState)(false);
 
       if (newIndex !== currentIndex) {
-        runOnJS(handleDragEndInternal)(newIndex);
-      } else {
-        runOnJS(handleDragCancelInternal)();
-      }
-    })
-    .onFinalize(() => {
-      if (isDraggingShared.value) {
-        translateY.value = withSpring(0, { damping: 15, stiffness: 150 });
-        scale.value = withSpring(1);
-        zIndex.value = 1;
-        isDraggingShared.value = false;
-        runOnJS(setDragging)(false);
-        runOnJS(handleDragCancelInternal)();
+        runOnJS(onDragEnd)(newIndex);
+      } else if (onDragCancel) {
+        runOnJS(onDragCancel)();
       }
     });
 
@@ -421,32 +618,37 @@ const NativeDraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
     transform: [{ translateY: translateY.value }, { scale: scale.value }],
     zIndex: zIndex.value,
     opacity: isDraggingShared.value ? 0.95 : 1,
-    shadowOpacity: isDraggingShared.value ? 0.4 : 0,
-    shadowRadius: isDraggingShared.value ? 15 : 0,
-    shadowOffset: { width: 0, height: isDraggingShared.value ? 8 : 0 },
-    shadowColor: '#DC2626',
-    elevation: isDraggingShared.value ? 10 : 0,
   }));
 
   return (
-    <GestureDetector gesture={panGesture}>
-      <Animated.View style={animatedStyle}>
-        <WorkoutBlock
-          data={data}
-          onMoveUp={onMoveUp}
-          onMoveDown={onMoveDown}
-          isFirst={currentIndex === 0}
-          isLast={currentIndex >= totalItems - 1}
-          onPressRoutine={onPressRoutine}
-          isCompressed={isDraggingState}
-        />
-      </Animated.View>
-    </GestureDetector>
+    <Animated.View
+      style={[
+        {
+          shadowColor: '#DC2626',
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: isDraggingState ? 0.4 : 0,
+          shadowRadius: 15,
+          elevation: isDraggingState ? 10 : 0,
+        },
+        animatedStyle,
+      ]}
+    >
+      <WorkoutBlock
+        data={data}
+        onMoveUp={onMoveUp}
+        onMoveDown={onMoveDown}
+        isFirst={currentIndex === 0}
+        isLast={currentIndex >= totalItems - 1}
+        onPressRoutine={onPressRoutine}
+        isCompressed={isDraggingState}
+        nativeGesture={gesture}
+      />
+    </Animated.View>
   );
 };
 
 // ============================================================================
-// MAIN EXPORT - Platform-specific
+// EXPORT
 // ============================================================================
 export const DraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = (props) => {
   if (Platform.OS === 'web') {

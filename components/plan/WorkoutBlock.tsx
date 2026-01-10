@@ -1,11 +1,13 @@
 // ============================================================================
 // WORKOUT BLOCK - Bloque de Entrenamiento Flotante
 // PRE + Rutina + POST, cada uno expande independientemente
+// El drag se activa SOLO desde el header "BLOQUE ENTRENO"
 // ============================================================================
 
 import React, { useState } from 'react';
-import { View, Text, Pressable, ScrollView, Image } from 'react-native';
+import { View, Text, Pressable, ScrollView, Image, Platform } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
+import { GestureDetector, GestureType } from 'react-native-gesture-handler';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -70,6 +72,16 @@ interface WorkoutBlockProps {
   isLast: boolean;
   onPressRoutine?: () => void;
   isCompressed?: boolean;
+  // Props para drag desde el header (Web)
+  dragHandleProps?: {
+    onPointerDown?: (e: React.PointerEvent) => void;
+    onPointerEnter?: () => void;
+    onPointerLeave?: () => void;
+    style?: React.CSSProperties;
+    isDragging?: boolean;
+  };
+  // Gesture para el header (Native)
+  nativeGesture?: GestureType;
 }
 
 // ============================================================================
@@ -100,7 +112,7 @@ interface ExerciseCardProps {
   onPress?: () => void;
 }
 
-const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, onPress }) => {
+const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index: _index, onPress }) => {
   // Si tiene video, crear player pausado para mostrar primer frame
   const videoPlayer = useVideoPlayer(exercise.videoUrl || null, (player) => {
     player.loop = false;
@@ -150,6 +162,8 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
   isLast,
   onPressRoutine,
   isCompressed = false,
+  dragHandleProps,
+  nativeGesture,
 }) => {
   // ============================================================================
   // HOOKS - Siempre deben llamarse primero
@@ -167,8 +181,9 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
     label: data.routineName,
   });
 
-  const preHeight = Math.max(data.preStack.length * 48 + 24, 80);
-  const postHeight = Math.max(data.postStack.length * 48 + 24, 80);
+  // Altura dinámica: 72px por item (p-3 + gap + contenido) + 32px padding contenedor
+  const preHeight = Math.max(data.preStack.length * 72 + 32, 100);
+  const postHeight = Math.max(data.postStack.length * 72 + 32, 100);
 
   const preExpandedStyle = useAnimatedStyle(() => ({
     height: interpolate(preProgress.value, [0, 1], [0, preHeight]),
@@ -191,40 +206,56 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
   }));
 
   // ============================================================================
-  // MODO COMPRIMIDO - Para drag & drop - ED HARDY FIRE
+  // MODO COMPRIMIDO - PREMIUM SAVAGE
   // ============================================================================
   if (isCompressed) {
     return (
-      <View className="mb-3">
+      <View className="mb-3 ml-6">
+        {/* Timeline dot for workout */}
         <View
-          className="rounded-xl px-4 py-4 flex-row items-center justify-between"
+          className="absolute -left-[14px] top-5 w-4 h-4 rounded-full border-2 border-black z-10"
           style={{
-            backgroundColor: '#0a0505',
-            borderWidth: 2,
-            borderColor: '#DC262660',
+            backgroundColor: '#DC2626',
             shadowColor: '#DC2626',
             shadowOffset: { width: 0, height: 0 },
-            shadowOpacity: 0.3,
-            shadowRadius: 10,
-            elevation: 5,
+            shadowOpacity: 1,
+            shadowRadius: 8,
+          }}
+        />
+        <View
+          className="rounded-2xl px-4 py-4 flex-row items-center justify-between"
+          style={{
+            backgroundColor: '#0A0505',
+            borderWidth: 1.5,
+            borderColor: 'rgba(220, 38, 38, 0.3)',
+            shadowColor: '#DC2626',
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.2,
+            shadowRadius: 16,
+            elevation: 8,
           }}
         >
           <View className="flex-row items-center gap-3">
-            <View className="p-2 rounded-lg" style={{ backgroundColor: '#DC262630' }}>
-              <GripHorizontal size={18} color="#F97316" />
+            <View
+              className="w-10 h-10 rounded-xl items-center justify-center"
+              style={{ backgroundColor: 'rgba(220, 38, 38, 0.15)' }}
+            >
+              <Dumbbell size={18} color="#DC2626" />
             </View>
             <View>
-              <Text
-                style={{ color: '#F97316' }}
-                className="text-xs font-bold tracking-widest uppercase"
-              >
-                🔥 BLOQUE ENTRENO
+              <Text className="text-savage-red text-[10px] font-bold tracking-[2px] uppercase">
+                BLOQUE ENTRENO
               </Text>
-              <Text className="text-white font-bold text-base mt-0.5">{data.routineName}</Text>
+              <Text className="text-white font-black text-base tracking-tight">
+                {data.routineName}
+              </Text>
             </View>
           </View>
-          <View className="px-3 py-1.5 rounded-lg" style={{ backgroundColor: '#F9731620' }}>
-            <Text style={{ color: '#F97316' }} className="text-sm font-mono font-bold">
+          <View
+            className="px-3 py-2 rounded-xl"
+            style={{ backgroundColor: 'rgba(220, 38, 38, 0.1)' }}
+          >
+            <Text className="text-savage-red text-xs font-mono font-bold">
               {data.exercises?.length || 0} ejercicios
             </Text>
           </View>
@@ -304,9 +335,10 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
             </View>
             <Pressable
               onPress={onPressRoutine}
-              className="bg-zinc-800/50 px-3 py-1.5 rounded-full active:bg-zinc-700/50"
+              className="px-4 py-2 rounded-xl active:scale-95"
+              style={{ backgroundColor: 'rgba(161, 161, 170, 0.1)' }}
             >
-              <Text className="text-zinc-400 text-xs font-medium">Configurar</Text>
+              <Text className="text-zinc-400 text-xs font-bold tracking-wide">CONFIGURAR</Text>
             </Pressable>
           </View>
         </View>
@@ -314,135 +346,308 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
     );
   }
 
+  // ============================================================================
+  // RENDER FULL - PREMIUM SAVAGE EDITION
+  // ============================================================================
   return (
-    <View ref={targetRef} onLayout={onLayout} className="mb-6">
-      {/* Hank Inline Highlight - FUERA del contenedor */}
-      <HankInlineHighlight isActive={isHighlighted} phase={animationPhase} borderRadius={0} />
+    <View ref={targetRef} onLayout={onLayout} className="mb-6 ml-6">
+      {/* Hank Inline Highlight */}
+      <HankInlineHighlight isActive={isHighlighted} phase={animationPhase} borderRadius={16} />
 
-      <View className="bg-[#1a1a1a] border-y-2 border-red-500/50 shadow-lg">
-        {/* Control Handle */}
-        <View className="flex-row justify-between items-center bg-red-500/10 px-4 py-2 border-b border-white/5">
-          <View className="flex-row gap-3">
-            <Pressable
-              onPress={handleMoveUp}
-              disabled={isFirst}
-              className={`p-1 ${isFirst ? 'opacity-20' : ''}`}
+      {/* Timeline dot - Premium workout marker */}
+      <View
+        className="absolute -left-[14px] top-6 w-4 h-4 rounded-full border-2 border-black z-10"
+        style={{
+          backgroundColor: '#DC2626',
+          shadowColor: '#DC2626',
+          shadowOffset: { width: 0, height: 0 },
+          shadowOpacity: 1,
+          shadowRadius: 8,
+        }}
+      />
+
+      <View
+        className="rounded-2xl overflow-hidden"
+        style={{
+          backgroundColor: '#0A0A0A',
+          borderWidth: 1,
+          borderColor: 'rgba(220, 38, 38, 0.2)',
+          shadowColor: '#DC2626',
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.15,
+          shadowRadius: 20,
+        }}
+      >
+        {/* Control Handle - Premium - ZONA ARRASTRABLE */}
+        {Platform.OS === 'web' ? (
+          <div
+            onPointerDown={dragHandleProps?.onPointerDown}
+            onPointerEnter={dragHandleProps?.onPointerEnter}
+            onPointerLeave={dragHandleProps?.onPointerLeave}
+            style={{
+              ...dragHandleProps?.style,
+              display: 'flex',
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '12px 16px',
+              backgroundColor: dragHandleProps?.isDragging
+                ? 'rgba(220, 38, 38, 0.15)'
+                : 'rgba(220, 38, 38, 0.05)',
+              borderBottom: '1px solid rgba(220, 38, 38, 0.1)',
+              transition: 'background-color 0.2s ease',
+            }}
+          >
+            <View className="flex-row gap-2">
+              <Pressable
+                onPress={handleMoveUp}
+                disabled={isFirst}
+                className={`p-2 rounded-lg ${isFirst ? 'opacity-20' : ''}`}
+                style={{ backgroundColor: isFirst ? 'transparent' : 'rgba(220, 38, 38, 0.1)' }}
+              >
+                <ChevronUp size={16} color={isFirst ? '#666' : '#DC2626'} />
+              </Pressable>
+              <Pressable
+                onPress={handleMoveDown}
+                disabled={isLast}
+                className={`p-2 rounded-lg ${isLast ? 'opacity-20' : ''}`}
+                style={{ backgroundColor: isLast ? 'transparent' : 'rgba(220, 38, 38, 0.1)' }}
+              >
+                <ChevronDown size={16} color={isLast ? '#666' : '#DC2626'} />
+              </Pressable>
+            </View>
+            <View className="flex-row items-center gap-2">
+              <View
+                className="w-6 h-6 rounded-md items-center justify-center"
+                style={{ backgroundColor: 'rgba(220, 38, 38, 0.15)' }}
+              >
+                <GripHorizontal size={12} color="#DC2626" />
+              </View>
+              <Text className="text-savage-red text-[10px] font-bold tracking-[2px] uppercase">
+                ✊ MANTÉN PARA MOVER
+              </Text>
+            </View>
+          </div>
+        ) : nativeGesture ? (
+          <GestureDetector gesture={nativeGesture}>
+            <View
+              className="flex-row justify-between items-center px-4 py-3"
+              style={{
+                backgroundColor: 'rgba(220, 38, 38, 0.05)',
+                borderBottomWidth: 1,
+                borderBottomColor: 'rgba(220, 38, 38, 0.1)',
+              }}
             >
-              <ChevronUp size={18} color={isFirst ? '#666' : '#FFF'} />
-            </Pressable>
-            <Pressable
-              onPress={handleMoveDown}
-              disabled={isLast}
-              className={`p-1 ${isLast ? 'opacity-20' : ''}`}
-            >
-              <ChevronDown size={18} color={isLast ? '#666' : '#FFF'} />
-            </Pressable>
+              <View className="flex-row gap-2">
+                <Pressable
+                  onPress={handleMoveUp}
+                  disabled={isFirst}
+                  className={`p-2 rounded-lg ${isFirst ? 'opacity-20' : ''}`}
+                  style={{ backgroundColor: isFirst ? 'transparent' : 'rgba(220, 38, 38, 0.1)' }}
+                >
+                  <ChevronUp size={16} color={isFirst ? '#666' : '#DC2626'} />
+                </Pressable>
+                <Pressable
+                  onPress={handleMoveDown}
+                  disabled={isLast}
+                  className={`p-2 rounded-lg ${isLast ? 'opacity-20' : ''}`}
+                  style={{ backgroundColor: isLast ? 'transparent' : 'rgba(220, 38, 38, 0.1)' }}
+                >
+                  <ChevronDown size={16} color={isLast ? '#666' : '#DC2626'} />
+                </Pressable>
+              </View>
+              <View className="flex-row items-center gap-2">
+                <View
+                  className="w-6 h-6 rounded-md items-center justify-center"
+                  style={{ backgroundColor: 'rgba(220, 38, 38, 0.15)' }}
+                >
+                  <GripHorizontal size={12} color="#DC2626" />
+                </View>
+                <Text className="text-savage-red text-[10px] font-bold tracking-[2px] uppercase">
+                  ✊ MANTÉN PARA MOVER
+                </Text>
+              </View>
+            </View>
+          </GestureDetector>
+        ) : (
+          <View
+            className="flex-row justify-between items-center px-4 py-3"
+            style={{
+              backgroundColor: 'rgba(220, 38, 38, 0.05)',
+              borderBottomWidth: 1,
+              borderBottomColor: 'rgba(220, 38, 38, 0.1)',
+            }}
+          >
+            <View className="flex-row gap-2">
+              <Pressable
+                onPress={handleMoveUp}
+                disabled={isFirst}
+                className={`p-2 rounded-lg ${isFirst ? 'opacity-20' : ''}`}
+                style={{ backgroundColor: isFirst ? 'transparent' : 'rgba(220, 38, 38, 0.1)' }}
+              >
+                <ChevronUp size={16} color={isFirst ? '#666' : '#DC2626'} />
+              </Pressable>
+              <Pressable
+                onPress={handleMoveDown}
+                disabled={isLast}
+                className={`p-2 rounded-lg ${isLast ? 'opacity-20' : ''}`}
+                style={{ backgroundColor: isLast ? 'transparent' : 'rgba(220, 38, 38, 0.1)' }}
+              >
+                <ChevronDown size={16} color={isLast ? '#666' : '#DC2626'} />
+              </Pressable>
+            </View>
+            <View className="flex-row items-center gap-2">
+              <View
+                className="w-6 h-6 rounded-md items-center justify-center"
+                style={{ backgroundColor: 'rgba(220, 38, 38, 0.15)' }}
+              >
+                <GripHorizontal size={12} color="#DC2626" />
+              </View>
+              <Text className="text-savage-red text-[10px] font-bold tracking-[2px] uppercase">
+                BLOQUE ENTRENO
+              </Text>
+            </View>
           </View>
-          <View className="flex-row items-center gap-1">
-            <GripHorizontal size={14} color="#DC2626" />
-            <Text className="text-red-500 text-xs font-bold tracking-widest uppercase">
-              BLOQUE ENTRENO
-            </Text>
-          </View>
-        </View>
+        )}
 
         {/* Main Content */}
         <View className="p-4">
           {/* ============================================ */}
-          {/* PRE-WORKOUT - Expandible independiente */}
+          {/* PRE-WORKOUT - Premium Style */}
           {/* ============================================ */}
           <Pressable
             onPress={togglePre}
-            className="flex-row items-center gap-3 p-3 bg-red-500/10 rounded-lg active:bg-red-500/20"
+            className="flex-row items-center gap-3 p-3 rounded-xl active:scale-[0.99]"
+            style={{ backgroundColor: 'rgba(220, 38, 38, 0.06)' }}
           >
-            <View className="bg-red-500/30 p-2 rounded">
-              <Zap size={16} color="#DC2626" />
+            <View
+              className="w-10 h-10 rounded-xl items-center justify-center"
+              style={{ backgroundColor: 'rgba(220, 38, 38, 0.15)' }}
+            >
+              <Zap size={18} color="#DC2626" />
             </View>
             <View className="flex-1">
-              <Text className="text-red-500 font-bold text-sm">PRE-WORKOUT</Text>
-              <Text className="text-zinc-400 text-xs" numberOfLines={1}>
+              <Text className="text-savage-red font-bold text-xs tracking-wide">PRE-WORKOUT</Text>
+              <Text className="text-zinc-500 text-[11px] mt-0.5" numberOfLines={1}>
                 {data.preStack.length > 0
                   ? data.preStack.map((i) => i.name).join(', ')
-                  : 'Sin suplementos'}
+                  : 'Sin suplementos configurados'}
               </Text>
             </View>
             <Animated.View style={preChevronStyle}>
-              <ChevronRight size={18} color="#DC2626" />
+              <ChevronRight size={16} color="#DC2626" />
             </Animated.View>
           </Pressable>
 
           {/* PRE Expanded Detail */}
           <Animated.View
-            style={preExpandedStyle}
-            className="overflow-hidden bg-red-500/5 rounded-b-lg mx-1"
+            className="overflow-hidden rounded-xl mx-1 mt-2"
+            style={[preExpandedStyle, { backgroundColor: 'rgba(220, 38, 38, 0.03)' }]}
           >
             <View className="p-3">
               {data.preStack.map((item) => (
                 <View
                   key={item.id}
-                  className="flex-row items-center gap-3 p-2 bg-black/20 rounded-lg mb-2"
+                  className="flex-row items-center gap-3 p-3 rounded-xl mb-2"
+                  style={{ backgroundColor: 'rgba(0, 0, 0, 0.3)' }}
                 >
                   <View className="bg-red-500/20 p-1.5 rounded">
                     {getTypeIcon(item.type, '#DC2626')}
                   </View>
                   <View className="flex-1">
                     <Text className="text-white text-sm font-medium">{item.name}</Text>
-                    <Text className="text-red-500/80 text-xs">{item.dose}</Text>
+                    <Text className="text-savage-red/70 text-xs font-mono">{item.dose}</Text>
                   </View>
                   {item.notes && (
-                    <Text className="text-zinc-500 text-xs italic max-w-[80px]" numberOfLines={1}>
+                    <Text
+                      className="text-zinc-600 text-[10px] italic max-w-[80px]"
+                      numberOfLines={1}
+                    >
                       {item.notes}
                     </Text>
                   )}
                 </View>
               ))}
               {data.preStack.length === 0 && (
-                <Text className="text-zinc-600 text-xs text-center py-2">
-                  No hay suplementos pre-entreno
+                <Text className="text-zinc-700 text-xs text-center py-3">
+                  Sin suplementos pre-entreno
                 </Text>
               )}
             </View>
           </Animated.View>
 
           {/* ============================================ */}
-          {/* ROUTINE - Slider de ejercicios */}
+          {/* ROUTINE - Premium Slider */}
           {/* ============================================ */}
-          <View className="my-4 py-4 border-y border-red-500/20 bg-[#0a0505] -mx-4 px-4">
-            {/* Workout time estimation - muestra hora aproximada */}
+          <View
+            className="my-4 py-4 -mx-4 px-4"
+            style={{
+              backgroundColor: '#050505',
+              borderTopWidth: 1,
+              borderBottomWidth: 1,
+              borderColor: 'rgba(220, 38, 38, 0.1)',
+            }}
+          >
+            {/* Workout time estimation */}
             {data.estimatedTime && (
-              <View className="flex-row items-center justify-between mb-2 px-1">
+              <View className="flex-row items-center justify-between mb-3 px-1">
                 <View className="flex-row items-center gap-2">
-                  <Text className="text-zinc-500 text-xs font-mono">⏰ ~{data.estimatedTime}</Text>
+                  <Text className="text-zinc-600 text-[11px] font-mono">
+                    ⏰ ~{data.estimatedTime}
+                  </Text>
                   {data.isFasted && (
-                    <View className="bg-yellow-500/20 px-2 py-0.5 rounded">
-                      <Text className="text-yellow-500 text-[10px] font-bold">EN AYUNAS</Text>
+                    <View
+                      className="px-2 py-0.5 rounded-md"
+                      style={{ backgroundColor: 'rgba(234, 179, 8, 0.15)' }}
+                    >
+                      <Text className="text-yellow-500 text-[9px] font-bold tracking-wide">
+                        EN AYUNAS
+                      </Text>
                     </View>
                   )}
                 </View>
-                <Text className="text-zinc-600 text-[10px] font-mono">{data.timeDescription}</Text>
+                <Text className="text-zinc-700 text-[9px] font-mono">{data.timeDescription}</Text>
               </View>
             )}
 
-            {/* Header con nombre de rutina y contador */}
+            {/* Header con nombre de rutina */}
             <View className="flex-row items-center justify-between mb-3 px-1">
-              <View className="flex-row items-center gap-2">
-                <Dumbbell size={18} color="#DC2626" />
-                <Text className="text-xl text-white font-black italic uppercase tracking-tight">
+              <View className="flex-row items-center gap-3">
+                <View
+                  className="w-8 h-8 rounded-lg items-center justify-center"
+                  style={{ backgroundColor: 'rgba(220, 38, 38, 0.15)' }}
+                >
+                  <Dumbbell size={16} color="#DC2626" />
+                </View>
+                <Text
+                  className="text-xl text-white font-black uppercase tracking-tight"
+                  style={{
+                    textShadowColor: 'rgba(220, 38, 38, 0.3)',
+                    textShadowOffset: { width: 0, height: 0 },
+                    textShadowRadius: 8,
+                  }}
+                >
                   {data.routineName || 'DÍA DE DESCANSO'}
                 </Text>
               </View>
-              {/* Badge: Ejercicios (modo GYM) o Personalizado */}
+              {/* Badge */}
               {hasExercises && !data.isExternalMode && (
-                <View className="bg-red-500/20 px-2 py-1 rounded-lg">
-                  <Text className="text-red-500 text-xs font-mono font-bold">
-                    {data.exercises!.length} ejercicios
+                <View
+                  className="px-3 py-1.5 rounded-lg"
+                  style={{ backgroundColor: 'rgba(220, 38, 38, 0.1)' }}
+                >
+                  <Text className="text-savage-red text-[10px] font-mono font-bold">
+                    {data.exercises!.length} EJERCICIOS
                   </Text>
                 </View>
               )}
               {data.isExternalMode && data.routineName !== 'DESCANSO' && (
-                <View className="bg-purple-500/20 px-2 py-1 rounded-lg">
-                  <Text className="text-purple-400 text-xs font-mono font-bold">
-                    ⚡ PERSONALIZADO
+                <View
+                  className="px-3 py-1.5 rounded-lg"
+                  style={{ backgroundColor: 'rgba(168, 85, 247, 0.1)' }}
+                >
+                  <Text className="text-purple-400 text-[10px] font-mono font-bold">
+                    PERSONALIZADO
                   </Text>
                 </View>
               )}
@@ -461,26 +666,32 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
                 ))}
               </ScrollView>
             ) : data.isExternalMode && data.routineName !== 'DESCANSO' ? (
-              /* Modo PERSONALIZADO: Invitar a agregar ejercicios */
-              <View className="items-center py-4">
-                <Text className="text-zinc-400 text-xs font-mono text-center">
-                  ⚡ Tu entrenamiento personalizado
+              /* Modo PERSONALIZADO */
+              <View className="items-center py-5">
+                <Text className="text-zinc-600 text-xs font-mono text-center mb-3">
+                  Tu entrenamiento personalizado
                 </Text>
-                <Pressable onPress={onPressRoutine} className="mt-2 active:opacity-70">
-                  <View className="flex-row items-center gap-2 bg-purple-500/10 px-4 py-2 rounded-full">
+                <Pressable onPress={onPressRoutine} className="active:scale-95">
+                  <View
+                    className="flex-row items-center gap-2 px-5 py-2.5 rounded-xl"
+                    style={{ backgroundColor: 'rgba(168, 85, 247, 0.1)' }}
+                  >
                     <Dumbbell size={14} color="#a855f7" />
-                    <Text className="text-purple-400 text-xs font-medium">
-                      Agregar ejercicios a mi rutina
+                    <Text className="text-purple-400 text-xs font-bold tracking-wide">
+                      AGREGAR EJERCICIOS
                     </Text>
                   </View>
                 </Pressable>
               </View>
             ) : (
-              <Pressable onPress={onPressRoutine} className="items-center py-4 active:opacity-70">
-                <View className="flex-row items-center gap-2 bg-red-500/10 px-4 py-2 rounded-full">
+              <Pressable onPress={onPressRoutine} className="items-center py-5 active:scale-95">
+                <View
+                  className="flex-row items-center gap-2 px-5 py-2.5 rounded-xl"
+                  style={{ backgroundColor: 'rgba(220, 38, 38, 0.1)' }}
+                >
                   <Dumbbell size={14} color="#DC2626" />
-                  <Text className="text-red-500 text-xs font-medium">
-                    Toca para configurar rutina
+                  <Text className="text-savage-red text-xs font-bold tracking-wide">
+                    CONFIGURAR RUTINA
                   </Text>
                 </View>
               </Pressable>
@@ -488,56 +699,67 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
           </View>
 
           {/* ============================================ */}
-          {/* POST-WORKOUT - Expandible independiente */}
+          {/* POST-WORKOUT - Premium Style */}
           {/* ============================================ */}
           <Pressable
             onPress={togglePost}
-            className="flex-row items-center gap-3 p-3 bg-green-500/10 rounded-lg active:bg-green-500/20"
+            className="flex-row items-center gap-3 p-3 rounded-xl active:scale-[0.99]"
+            style={{ backgroundColor: 'rgba(34, 197, 94, 0.06)' }}
           >
-            <View className="bg-green-500/30 p-2 rounded">
-              <Flame size={16} color="#22C55E" />
+            <View
+              className="w-10 h-10 rounded-xl items-center justify-center"
+              style={{ backgroundColor: 'rgba(34, 197, 94, 0.15)' }}
+            >
+              <Flame size={18} color="#22C55E" />
             </View>
             <View className="flex-1">
-              <Text className="text-green-500 font-bold text-sm">POST-WORKOUT</Text>
-              <Text className="text-zinc-400 text-xs" numberOfLines={1}>
+              <Text className="text-green-500 font-bold text-xs tracking-wide">POST-WORKOUT</Text>
+              <Text className="text-zinc-500 text-[11px] mt-0.5" numberOfLines={1}>
                 {data.postStack.length > 0
                   ? data.postStack.map((i) => i.name).join(', ')
-                  : 'Sin suplementos'}
+                  : 'Sin suplementos configurados'}
               </Text>
             </View>
             <Animated.View style={postChevronStyle}>
-              <ChevronRight size={18} color="#22C55E" />
+              <ChevronRight size={16} color="#22C55E" />
             </Animated.View>
           </Pressable>
 
           {/* POST Expanded Detail */}
           <Animated.View
-            style={postExpandedStyle}
-            className="overflow-hidden bg-green-500/5 rounded-b-lg mx-1"
+            className="overflow-hidden rounded-xl mx-1 mt-2"
+            style={[postExpandedStyle, { backgroundColor: 'rgba(34, 197, 94, 0.03)' }]}
           >
             <View className="p-3">
               {data.postStack.map((item) => (
                 <View
                   key={item.id}
-                  className="flex-row items-center gap-3 p-2 bg-black/20 rounded-lg mb-2"
+                  className="flex-row items-center gap-3 p-3 rounded-xl mb-2"
+                  style={{ backgroundColor: 'rgba(0, 0, 0, 0.3)' }}
                 >
-                  <View className="bg-green-500/20 p-1.5 rounded">
+                  <View
+                    className="w-8 h-8 rounded-lg items-center justify-center"
+                    style={{ backgroundColor: 'rgba(34, 197, 94, 0.2)' }}
+                  >
                     {getTypeIcon(item.type, '#22C55E')}
                   </View>
                   <View className="flex-1">
                     <Text className="text-white text-sm font-medium">{item.name}</Text>
-                    <Text className="text-green-500/80 text-xs">{item.dose}</Text>
+                    <Text className="text-green-500/70 text-xs font-mono">{item.dose}</Text>
                   </View>
                   {item.notes && (
-                    <Text className="text-zinc-500 text-xs italic max-w-[80px]" numberOfLines={1}>
+                    <Text
+                      className="text-zinc-600 text-[10px] italic max-w-[80px]"
+                      numberOfLines={1}
+                    >
                       {item.notes}
                     </Text>
                   )}
                 </View>
               ))}
               {data.postStack.length === 0 && (
-                <Text className="text-zinc-600 text-xs text-center py-2">
-                  No hay suplementos post-entreno
+                <Text className="text-zinc-700 text-xs text-center py-3">
+                  Sin suplementos post-entreno
                 </Text>
               )}
             </View>

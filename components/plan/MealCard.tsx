@@ -3,17 +3,16 @@
 // Diseño industrial con opciones intercambiables
 // ============================================================================
 
-import React, { useRef, useCallback } from 'react';
-import { View, Text, Pressable, ScrollView, Dimensions } from 'react-native';
+import React, { useRef, useCallback, useMemo } from 'react';
+import { View, Text, Pressable, ScrollView, useWindowDimensions, Platform } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { Haptics } from '../../lib/haptics';
 import { Clock, Plus, ChevronLeft, ChevronRight } from 'lucide-react-native';
 import { useHankTarget } from '../../hooks/useHankTarget';
 import { HankInlineHighlight } from '../hank/HankInlineHighlight';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const CARD_PADDING = 32; // padding horizontal del contenedor
-const OPTION_WIDTH = SCREEN_WIDTH - CARD_PADDING - 16; // Ancho de cada opción
+const CARD_PADDING = 48; // padding total (ml-6 del timeline + px-5 del scroll)
+const MAX_CARD_WIDTH = 600; // Ancho máximo para web
 
 // ============================================================================
 // TYPES
@@ -90,6 +89,16 @@ export const MealCard: React.FC<MealCardProps> = ({
   const scrollViewRef = useRef<ScrollView>(null);
   const scaleAnim = useSharedValue(1);
 
+  // Dimensiones dinámicas para responsividad en web
+  const { width: windowWidth } = useWindowDimensions();
+  const optionWidth = useMemo(() => {
+    const effectiveWidth =
+      Platform.OS === 'web'
+        ? Math.min(windowWidth - 40, MAX_CARD_WIDTH) // En web, restar padding del contenedor
+        : windowWidth - CARD_PADDING;
+    return effectiveWidth - 16; // Padding interno del slider
+  }, [windowWidth]);
+
   // Hank Target - Registrar esta tarjeta como target para animaciones
   const { targetRef, onLayout, isHighlighted, animationPhase } = useHankTarget({
     id: `meal-${meal.id}`,
@@ -102,25 +111,25 @@ export const MealCard: React.FC<MealCardProps> = ({
     (index: number) => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       scrollViewRef.current?.scrollTo({
-        x: index * OPTION_WIDTH,
+        x: index * optionWidth,
         animated: true,
       });
       onSwap(meal.id, index);
     },
-    [meal.id, onSwap]
+    [meal.id, onSwap, optionWidth]
   );
 
   // Handle scroll end
   const handleScrollEnd = useCallback(
     (event: { nativeEvent: { contentOffset: { x: number } } }) => {
       const offsetX = event.nativeEvent.contentOffset.x;
-      const newIndex = Math.round(offsetX / OPTION_WIDTH);
+      const newIndex = Math.round(offsetX / optionWidth);
       if (newIndex !== meal.selectedOption && newIndex >= 0 && newIndex < meal.options.length) {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         onSwap(meal.id, newIndex);
       }
     },
-    [meal.id, meal.selectedOption, meal.options.length, onSwap]
+    [meal.id, meal.selectedOption, meal.options.length, onSwap, optionWidth]
   );
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -141,17 +150,37 @@ export const MealCard: React.FC<MealCardProps> = ({
     const currentOption = meal.options[meal.selectedOption] || meal.options[0];
     const ingredientNames = currentOption?.ingredients?.map((i) => i.name).join(', ') || '';
     return (
-      <View className="mb-3 pl-8 relative">
-        <View className="absolute left-2.5 top-3 w-3 h-3 rounded-full bg-savage-red/60 border-2 border-[#111111]" />
-        <View className="bg-[#161616] border border-savage-red/30 rounded-xl px-4 py-3 flex-row items-center justify-between">
+      <View className="mb-3 ml-6 relative">
+        {/* Timeline dot */}
+        <View
+          className="absolute -left-[14px] top-4 w-3 h-3 rounded-full border-2 border-black"
+          style={{
+            backgroundColor: '#DC2626',
+            shadowColor: '#DC2626',
+            shadowOffset: { width: 0, height: 0 },
+            shadowOpacity: 0.6,
+            shadowRadius: 4,
+          }}
+        />
+        <View
+          className="rounded-xl px-4 py-3 flex-row items-center justify-between"
+          style={{
+            backgroundColor: 'rgba(220, 38, 38, 0.05)',
+            borderWidth: 1,
+            borderColor: 'rgba(220, 38, 38, 0.2)',
+          }}
+        >
           <View className="flex-1 mr-3">
-            <Text className="text-white text-sm font-bold uppercase mb-1">{mealName}</Text>
-            <Text className="text-zinc-400 text-sm" numberOfLines={1}>
+            <Text className="text-white text-sm font-bold uppercase tracking-wide">{mealName}</Text>
+            <Text className="text-zinc-500 text-xs mt-0.5" numberOfLines={1}>
               {ingredientNames || 'Sin ingredientes'}
             </Text>
           </View>
-          <View className="bg-savage-red/20 px-3 py-1.5 rounded-lg">
-            <Text className="text-savage-red text-sm font-bold">{displayTime}</Text>
+          <View
+            className="px-3 py-1.5 rounded-lg"
+            style={{ backgroundColor: 'rgba(220, 38, 38, 0.15)' }}
+          >
+            <Text className="text-savage-red text-xs font-bold font-mono">{displayTime}</Text>
           </View>
         </View>
       </View>
@@ -182,7 +211,7 @@ export const MealCard: React.FC<MealCardProps> = ({
   };
 
   // ============================================================================
-  // RENDER OPTION CARD
+  // RENDER OPTION CARD - ULTRA PREMIUM SAVAGE EDITION
   // ============================================================================
   const renderOptionCard = (option: MealOption, index: number) => (
     <Pressable
@@ -193,36 +222,122 @@ export const MealCard: React.FC<MealCardProps> = ({
       }}
       onLongPress={() => handleLongPress(option.id)}
       delayLongPress={500}
-      style={{ width: OPTION_WIDTH }}
+      style={{ width: optionWidth }}
       className="px-2"
     >
-      <View className="bg-[#0a0a0a] rounded-lg p-4 min-h-[120px]">
-        {/* Option name badge */}
+      <View
+        className="rounded-2xl overflow-hidden"
+        style={{
+          backgroundColor: '#080808',
+          borderWidth: 1,
+          borderColor: 'rgba(220, 38, 38, 0.08)',
+        }}
+      >
+        {/* Option Header - only if multiple options */}
         {hasMultipleOptions && (
-          <View className="flex-row items-center gap-2 mb-3">
-            <View className="bg-zinc-800 px-2 py-0.5 rounded">
-              <Text className="text-zinc-400 text-xs font-mono">OPCIÓN {index + 1}</Text>
+          <View
+            className="px-4 py-2.5 flex-row items-center justify-between"
+            style={{
+              backgroundColor: 'rgba(220, 38, 38, 0.04)',
+              borderBottomWidth: 1,
+              borderBottomColor: 'rgba(220, 38, 38, 0.08)',
+            }}
+          >
+            <View className="flex-row items-center gap-2">
+              <View
+                className="w-5 h-5 rounded-md items-center justify-center"
+                style={{ backgroundColor: 'rgba(220, 38, 38, 0.15)' }}
+              >
+                <Text className="text-savage-red text-[10px] font-black">{index + 1}</Text>
+              </View>
+              <Text className="text-zinc-400 text-[10px] font-bold tracking-[2px] uppercase">
+                OPCIÓN
+              </Text>
+            </View>
+            <View className="flex-row items-center gap-1">
+              <View className="w-1.5 h-1.5 rounded-full bg-savage-red/40" />
+              <Text className="text-zinc-600 text-[9px] font-mono">
+                {option.ingredients.length} items
+              </Text>
             </View>
           </View>
         )}
 
-        {/* Ingredients */}
-        {option.ingredients.map((ingredient, idx) => (
-          <View key={ingredient.id || idx} className="flex-row justify-between items-start py-1.5">
-            <Text className="text-zinc-300 font-medium flex-1 pr-2">{ingredient.name}</Text>
-            <View className="items-end">
-              <Text className="text-white font-bold font-mono">{ingredient.quantity}</Text>
-              {ingredient.portion && (
-                <Text className="text-zinc-500 text-xs">{ingredient.portion}</Text>
-              )}
-            </View>
-          </View>
-        ))}
+        {/* Ingredients List - Ultra Premium */}
+        <View className="p-3">
+          {option.ingredients.map((ingredient, idx) => (
+            <View
+              key={ingredient.id || idx}
+              className="flex-row items-center gap-3 py-2.5 px-2 rounded-xl mb-1.5"
+              style={{
+                backgroundColor: idx % 2 === 0 ? 'rgba(255, 255, 255, 0.02)' : 'transparent',
+              }}
+            >
+              {/* Ingredient Number Badge */}
+              <View
+                className="w-6 h-6 rounded-lg items-center justify-center"
+                style={{
+                  backgroundColor: 'rgba(220, 38, 38, 0.08)',
+                  borderWidth: 1,
+                  borderColor: 'rgba(220, 38, 38, 0.12)',
+                }}
+              >
+                <Text className="text-savage-red/80 text-[10px] font-bold">{idx + 1}</Text>
+              </View>
 
-        {(!option.ingredients || option.ingredients.length === 0) && (
-          <View className="flex-1 justify-center items-center py-4">
-            <Text className="text-zinc-600 text-center">Sin ingredientes</Text>
-            <Text className="text-zinc-700 text-xs mt-1">Toca para editar</Text>
+              {/* Ingredient Name */}
+              <View className="flex-1">
+                <Text className="text-white font-semibold text-[13px] tracking-tight">
+                  {ingredient.name}
+                </Text>
+                {ingredient.portion && (
+                  <Text className="text-zinc-600 text-[10px] mt-0.5">{ingredient.portion}</Text>
+                )}
+              </View>
+
+              {/* Quantity Badge */}
+              <View
+                className="px-3 py-1.5 rounded-lg"
+                style={{
+                  backgroundColor: 'rgba(220, 38, 38, 0.06)',
+                  borderWidth: 1,
+                  borderColor: 'rgba(220, 38, 38, 0.1)',
+                }}
+              >
+                <Text className="text-white font-bold font-mono text-xs tracking-tight">
+                  {ingredient.quantity}
+                </Text>
+              </View>
+            </View>
+          ))}
+
+          {/* Empty State - Premium */}
+          {(!option.ingredients || option.ingredients.length === 0) && (
+            <View className="items-center py-8">
+              <View
+                className="w-14 h-14 rounded-2xl items-center justify-center mb-3"
+                style={{
+                  backgroundColor: 'rgba(220, 38, 38, 0.08)',
+                  borderWidth: 1,
+                  borderColor: 'rgba(220, 38, 38, 0.15)',
+                }}
+              >
+                <Plus size={24} color="#DC2626" />
+              </View>
+              <Text className="text-zinc-400 text-xs font-bold tracking-wide">
+                SIN INGREDIENTES
+              </Text>
+              <Text className="text-zinc-700 text-[10px] mt-1">Toca para configurar</Text>
+            </View>
+          )}
+        </View>
+
+        {/* Footer hint - only if has ingredients */}
+        {option.ingredients && option.ingredients.length > 0 && (
+          <View className="px-4 py-2" style={{ backgroundColor: 'rgba(0, 0, 0, 0.3)' }}>
+            <Text className="text-zinc-700 text-[9px] text-center tracking-wider uppercase">
+              Toca para editar ingredientes
+            </Text>
           </View>
         )}
       </View>
@@ -230,88 +345,132 @@ export const MealCard: React.FC<MealCardProps> = ({
   );
 
   // ============================================================================
-  // RENDER ADD OPTION CARD
+  // RENDER ADD OPTION CARD - PREMIUM
   // ============================================================================
   const renderAddOptionCard = () => (
     <Pressable
       onPress={handleAddOption}
-      style={{ width: OPTION_WIDTH * 0.4 }}
+      style={{ width: optionWidth * 0.45 }}
       className="px-2 justify-center"
     >
-      <View className="bg-zinc-900/50 border border-dashed border-zinc-700 rounded-lg p-4 min-h-[120px] justify-center items-center">
-        <View className="bg-zinc-800 p-3 rounded-full mb-2">
-          <Plus size={24} color="#71717a" />
+      <View
+        className="rounded-xl p-4 min-h-[130px] justify-center items-center"
+        style={{
+          backgroundColor: 'rgba(220, 38, 38, 0.03)',
+          borderWidth: 1.5,
+          borderStyle: 'dashed',
+          borderColor: 'rgba(220, 38, 38, 0.2)',
+        }}
+      >
+        <View
+          className="w-12 h-12 rounded-full items-center justify-center mb-2"
+          style={{ backgroundColor: 'rgba(220, 38, 38, 0.1)' }}
+        >
+          <Plus size={22} color="#DC2626" />
         </View>
-        <Text className="text-zinc-500 text-xs font-medium text-center">AÑADIR{'\n'}PLATILLO</Text>
+        <Text className="text-savage-red/60 text-[10px] font-bold text-center tracking-wider">
+          AÑADIR PLATILLO
+        </Text>
       </View>
     </Pressable>
   );
 
   // ============================================================================
-  // RENDER - ED HARDY STYLE
+  // RENDER - PREMIUM SAVAGE EDITION
   // ============================================================================
   return (
-    <Animated.View ref={targetRef} onLayout={onLayout} style={animatedStyle} className="mb-8">
-      {/* Hank Inline Highlight - DEBE estar fuera del View con overflow:hidden */}
-      <HankInlineHighlight isActive={isHighlighted} phase={animationPhase} borderRadius={12} />
+    <Animated.View ref={targetRef} onLayout={onLayout} style={animatedStyle} className="mb-6 ml-6">
+      {/* Hank Inline Highlight */}
+      <HankInlineHighlight isActive={isHighlighted} phase={animationPhase} borderRadius={16} />
 
+      {/* Timeline Connector Dot */}
       <View
-        className="rounded-xl overflow-hidden"
+        className="absolute -left-[14px] top-6 w-3 h-3 rounded-full border-2 border-black z-10"
         style={{
-          backgroundColor: '#0a0a0a',
-          borderWidth: 1,
-          borderColor: '#DC262640',
+          backgroundColor: '#DC2626',
           shadowColor: '#DC2626',
           shadowOffset: { width: 0, height: 0 },
-          shadowOpacity: 0.15,
-          shadowRadius: 10,
-          elevation: 5,
+          shadowOpacity: 0.8,
+          shadowRadius: 6,
+        }}
+      />
+
+      <View
+        className="rounded-2xl overflow-hidden"
+        style={{
+          backgroundColor: '#0A0A0A',
+          borderWidth: 1,
+          borderColor: 'rgba(220, 38, 38, 0.15)',
+          shadowColor: '#DC2626',
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.1,
+          shadowRadius: 16,
+          elevation: 8,
         }}
       >
-        {/* Header - ED HARDY FIRE GRADIENT */}
+        {/* Header - PREMIUM SAVAGE */}
         <View
-          className="flex-row justify-between items-center p-4 border-b"
+          className="p-4"
           style={{
-            backgroundColor: '#0f0505',
-            borderBottomColor: '#DC262650',
-            borderBottomWidth: 2,
+            backgroundColor: '#0C0505',
+            borderBottomWidth: 1,
+            borderBottomColor: 'rgba(220, 38, 38, 0.1)',
           }}
         >
-          <View className="flex-1">
-            <Text
-              className="font-bold tracking-wider text-lg uppercase"
-              style={{ color: '#F97316' }}
+          <View className="flex-row justify-between items-start">
+            <View className="flex-1">
+              <Text
+                className="font-black tracking-wider text-lg uppercase text-white"
+                style={{
+                  textShadowColor: 'rgba(220, 38, 38, 0.3)',
+                  textShadowOffset: { width: 0, height: 0 },
+                  textShadowRadius: 8,
+                }}
+              >
+                {mealName}
+              </Text>
+              {/* Macros Display - Premium Style */}
+              {meal.targetMacros && (
+                <View className="flex-row gap-3 mt-2">
+                  <View className="flex-row items-center gap-1">
+                    <View className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+                    <Text className="text-purple-400 text-[11px] font-mono font-bold">
+                      {meal.targetMacros.protein}P
+                    </Text>
+                  </View>
+                  <View className="flex-row items-center gap-1">
+                    <View className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                    <Text className="text-amber-400 text-[11px] font-mono font-bold">
+                      {meal.targetMacros.carbs}C
+                    </Text>
+                  </View>
+                  <View className="flex-row items-center gap-1">
+                    <View className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                    <Text className="text-blue-400 text-[11px] font-mono font-bold">
+                      {meal.targetMacros.fat}G
+                    </Text>
+                  </View>
+                  <Text className="text-zinc-600 text-[11px] font-mono">
+                    {meal.targetMacros.calories} kcal
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* Time Button Premium */}
+            <Pressable
+              onPress={() => onTimeChange(meal.id)}
+              className="flex-row items-center gap-2 px-3 py-2 rounded-xl active:scale-95"
+              style={{
+                backgroundColor: 'rgba(220, 38, 38, 0.08)',
+                borderWidth: 1,
+                borderColor: 'rgba(220, 38, 38, 0.2)',
+              }}
             >
-              {mealName}
-            </Text>
-            {/* Macros objetivo si existen */}
-            {meal.targetMacros && (
-              <View className="flex-row gap-3 mt-1">
-                <Text className="text-xs font-mono" style={{ color: '#A855F7' }}>
-                  {meal.targetMacros.protein}P
-                </Text>
-                <Text className="text-xs font-mono" style={{ color: '#FBBF24' }}>
-                  {meal.targetMacros.carbs}C
-                </Text>
-                <Text className="text-xs font-mono" style={{ color: '#3B82F6' }}>
-                  {meal.targetMacros.fat}G
-                </Text>
-                <Text className="text-zinc-500 text-xs font-mono">
-                  {meal.targetMacros.calories} kcal
-                </Text>
-              </View>
-            )}
+              <Clock size={12} color="#DC2626" />
+              <Text className="text-savage-red text-xs font-mono font-bold">{displayTime}</Text>
+            </Pressable>
           </View>
-          <Pressable
-            onPress={() => onTimeChange(meal.id)}
-            className="flex-row items-center gap-2 px-3 py-1.5 rounded-full active:opacity-70"
-            style={{ backgroundColor: '#F9731620' }}
-          >
-            <Clock size={14} color="#F97316" />
-            <Text className="text-sm font-mono font-bold" style={{ color: '#F97316' }}>
-              {displayTime}
-            </Text>
-          </Pressable>
         </View>
 
         {/* Slider de opciones */}
@@ -320,7 +479,7 @@ export const MealCard: React.FC<MealCardProps> = ({
           horizontal
           pagingEnabled={false}
           showsHorizontalScrollIndicator={false}
-          snapToInterval={OPTION_WIDTH}
+          snapToInterval={optionWidth}
           decelerationRate="fast"
           contentContainerStyle={{ paddingVertical: 12 }}
           onMomentumScrollEnd={handleScrollEnd}
@@ -330,37 +489,48 @@ export const MealCard: React.FC<MealCardProps> = ({
           {canAddMore && onAddOption && renderAddOptionCard()}
         </ScrollView>
 
-        {/* Footer / Pagination + Navigation - FIRE ACCENT */}
+        {/* Footer / Pagination - PREMIUM SAVAGE */}
         <View
-          className="py-2 px-4 flex-row items-center justify-between"
-          style={{ backgroundColor: '#0a0505' }}
+          className="py-3 px-4 flex-row items-center justify-between"
+          style={{ backgroundColor: 'rgba(0, 0, 0, 0.4)' }}
         >
           {/* Navigation arrows */}
           <Pressable
             onPress={() => navigateToOption(Math.max(0, meal.selectedOption - 1))}
             disabled={meal.selectedOption === 0}
-            className={`p-1 ${meal.selectedOption === 0 ? 'opacity-20' : 'opacity-100'}`}
+            className={`p-2 rounded-lg ${meal.selectedOption === 0 ? 'opacity-20' : 'opacity-100'}`}
+            style={{
+              backgroundColor: meal.selectedOption === 0 ? 'transparent' : 'rgba(220, 38, 38, 0.1)',
+            }}
           >
-            <ChevronLeft size={18} color="#F97316" />
+            <ChevronLeft size={18} color="#DC2626" />
           </Pressable>
 
-          {/* Dots - FIRE COLORS */}
+          {/* Dots - Savage Red Style */}
           <View className="flex-row gap-2 flex-1 justify-center">
             {meal.options.map((_, idx) => (
               <Pressable key={idx} onPress={() => navigateToOption(idx)} className="p-1">
                 <View
-                  className="rounded-full"
+                  className="rounded-full transition-all"
                   style={{
-                    backgroundColor: idx === meal.selectedOption ? '#F97316' : '#3F3F46',
-                    width: idx === meal.selectedOption ? 24 : 6,
+                    backgroundColor:
+                      idx === meal.selectedOption ? '#DC2626' : 'rgba(255, 255, 255, 0.1)',
+                    width: idx === meal.selectedOption ? 20 : 6,
                     height: 6,
+                    shadowColor: idx === meal.selectedOption ? '#DC2626' : 'transparent',
+                    shadowOffset: { width: 0, height: 0 },
+                    shadowOpacity: 0.8,
+                    shadowRadius: 4,
                   }}
                 />
               </Pressable>
             ))}
             {canAddMore && onAddOption && (
               <Pressable onPress={handleAddOption} className="p-1">
-                <View className="bg-zinc-700 w-1.5 h-1.5 rounded-full" />
+                <View
+                  className="w-1.5 h-1.5 rounded-full"
+                  style={{ backgroundColor: 'rgba(220, 38, 38, 0.3)' }}
+                />
               </Pressable>
             )}
           </View>
@@ -371,16 +541,22 @@ export const MealCard: React.FC<MealCardProps> = ({
               navigateToOption(Math.min(meal.options.length - 1, meal.selectedOption + 1))
             }
             disabled={meal.selectedOption === meal.options.length - 1}
-            className={`p-1 ${meal.selectedOption === meal.options.length - 1 ? 'opacity-20' : 'opacity-100'}`}
+            className={`p-2 rounded-lg ${meal.selectedOption === meal.options.length - 1 ? 'opacity-20' : 'opacity-100'}`}
+            style={{
+              backgroundColor:
+                meal.selectedOption === meal.options.length - 1
+                  ? 'transparent'
+                  : 'rgba(220, 38, 38, 0.1)',
+            }}
           >
-            <ChevronRight size={18} color="#F97316" />
+            <ChevronRight size={18} color="#DC2626" />
           </Pressable>
         </View>
 
-        {/* Hint */}
-        <View style={{ backgroundColor: '#050505' }} className="py-1.5">
-          <Text className="text-zinc-600 text-[10px] text-center font-medium tracking-wide">
-            🔥 Desliza para ver opciones • Toca para editar
+        {/* Hint - Minimal */}
+        <View className="py-2" style={{ backgroundColor: '#050505' }}>
+          <Text className="text-zinc-700 text-[9px] text-center tracking-wider uppercase">
+            Desliza • Toca para editar • Mantén para eliminar
           </Text>
         </View>
       </View>
