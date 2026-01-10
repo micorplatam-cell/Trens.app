@@ -1,9 +1,10 @@
 // ============================================================================
 // DRAGGABLE EXERCISE CARD - Ejercicio con Drag & Drop y Swipe to Delete
+// Implementación Web: Single DOM element con CSS transforms (igual que WorkoutBlock)
 // ============================================================================
 
-import React, { useState } from 'react';
-import { View, Text } from 'react-native';
+import React, { useState, useRef, useCallback } from 'react';
+import { View, Text, Platform } from 'react-native';
 import { Alert } from '../../lib/alert';
 import { Image } from 'expo-image';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -16,7 +17,7 @@ import Animated, {
   interpolate,
   Extrapolation,
 } from 'react-native-reanimated';
-import * as Haptics from '../../lib/haptics';
+import { Haptics } from '../../lib/haptics';
 import { Trash2, GripVertical } from 'lucide-react-native';
 import { useHankTarget } from '../../hooks/useHankTarget';
 import { HankInlineHighlight } from '../hank/HankInlineHighlight';
@@ -60,12 +61,10 @@ interface DraggableExerciseCardProps {
 // SERIES TYPE COLORS - ESPAÑOL
 // ============================================================================
 const TYPE_COLORS: Record<string, { bg: string; border: string; text: string; label: string }> = {
-  // Nombres en español
   CALENTAMIENTO: { bg: '#1e3a5f', border: '#3b82f6', text: '#60a5fa', label: 'C' },
   APROXIMACION: { bg: '#422006', border: '#f59e0b', text: '#fbbf24', label: 'A' },
   EFECTIVA: { bg: '#052e16', border: '#22c55e', text: '#4ade80', label: 'E' },
   FALLO: { bg: '#450a0a', border: '#ef4444', text: '#f87171', label: 'F' },
-  // Fallback para datos legacy en inglés
   WARMUP: { bg: '#1e3a5f', border: '#3b82f6', text: '#60a5fa', label: 'C' },
   FEEDER: { bg: '#422006', border: '#f59e0b', text: '#fbbf24', label: 'A' },
   EFFECTIVE: { bg: '#052e16', border: '#22c55e', text: '#4ade80', label: 'E' },
@@ -73,14 +72,451 @@ const TYPE_COLORS: Record<string, { bg: string; border: string; text: string; la
 };
 
 // ============================================================================
-// DELETE THRESHOLD
+// CONSTANTS
 // ============================================================================
 const DELETE_THRESHOLD = -100;
+const LONG_PRESS_DELAY = 300;
+const AUTO_SCROLL_THRESHOLD = 80;
+const AUTO_SCROLL_SPEED = 5;
+const ITEM_HEIGHT_DEFAULT = 88;
 
 // ============================================================================
-// COMPONENT
+// WEB DRAGGABLE COMPONENT
+// Principios: Sin render condicional, mismo DOM siempre, CSS transforms
 // ============================================================================
-export const DraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
+const WebDraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
+  exercise,
+  index,
+  totalItems,
+  onEdit,
+  onDelete,
+  onDragEnd,
+  onDragStart,
+  onDragCancel,
+  onPositionChange,
+  itemHeight = ITEM_HEIGHT_DEFAULT,
+}) => {
+  // Estado mínimo
+  const [isDragging, setIsDragging] = useState(false);
+  const [translateY, setTranslateY] = useState(0);
+  const [translateX, setTranslateX] = useState(0);
+  const [isHoveringHandle, setIsHoveringHandle] = useState(false);
+  const [isSwiping, setIsSwiping] = useState(false);
+
+  // Refs
+  const containerRef = useRef<HTMLDivElement>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoScrollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isDraggingRef = useRef(false);
+  const activePointerId = useRef<number | null>(null);
+  const dragStartPointerY = useRef<number>(0);
+  const dragStartIndex = useRef(index);
+  const lastReportedIndex = useRef(index);
+  const pressStartY = useRef(0);
+  const pressStartX = useRef(0);
+  const dragStartY = useRef(0);
+  const currentPointerY = useRef(0);
+  const currentPointerX = useRef(0);
+  const scrollableParent = useRef<HTMLElement | null>(null);
+  const initialScrollTop = useRef(0);
+  const initialCompressionOffset = useRef(0);
+
+  // Hank Target
+  const { targetRef, onLayout, isHighlighted, animationPhase } = useHankTarget({
+    id: `exercise-${exercise.id}`,
+    type: 'exercise',
+    label: exercise.name,
+  });
+
+  // Encontrar scrollable parent
+  const findScrollableParent = useCallback((): HTMLElement | null => {
+    if (!containerRef.current) return null;
+    const dataScroll = containerRef.current.closest('[data-scroll-container]') as HTMLElement;
+    if (dataScroll) return dataScroll;
+    let parent = containerRef.current.parentElement;
+    while (parent) {
+      const style = window.getComputedStyle(parent);
+      if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
+        return parent;
+      }
+      parent = parent.parentElement;
+    }
+    return null;
+  }, []);
+
+  // Calcular índice objetivo
+  const calculateTargetIndex = useCallback((): number => {
+    if (!isDraggingRef.current) return index;
+    const fingerMovement = currentPointerY.current - dragStartY.current;
+    const scrollDelta = (scrollableParent.current?.scrollTop || 0) - initialScrollTop.current;
+    const totalMovement = initialCompressionOffset.current + fingerMovement + scrollDelta;
+    const positions = Math.round(totalMovement / itemHeight);
+    const newIndex = dragStartIndex.current + positions;
+    return Math.max(0, Math.min(totalItems - 1, newIndex));
+  }, [index, totalItems, itemHeight]);
+
+  // Actualizar translateY
+  const updateTranslateY = useCallback(() => {
+    const fingerMovement = currentPointerY.current - dragStartY.current;
+    const scrollDelta = (scrollableParent.current?.scrollTop || 0) - initialScrollTop.current;
+    setTranslateY(initialCompressionOffset.current + fingerMovement + scrollDelta);
+  }, []);
+
+  // Parar auto-scroll
+  const stopAutoScroll = useCallback(() => {
+    if (autoScrollTimer.current) {
+      clearInterval(autoScrollTimer.current);
+      autoScrollTimer.current = null;
+    }
+  }, []);
+
+  // Iniciar auto-scroll
+  const startAutoScroll = useCallback(() => {
+    if (autoScrollTimer.current) return;
+    autoScrollTimer.current = setInterval(() => {
+      if (!isDraggingRef.current || !scrollableParent.current) {
+        stopAutoScroll();
+        return;
+      }
+      const pointerY = currentPointerY.current;
+      const headerHeight = 140;
+      const bottomPadding = 100;
+      const topZone = headerHeight + AUTO_SCROLL_THRESHOLD;
+      const bottomZone = window.innerHeight - bottomPadding - AUTO_SCROLL_THRESHOLD;
+
+      const fingerMovement = Math.abs(pointerY - dragStartPointerY.current);
+      const MIN_MOVEMENT_FOR_AUTOSCROLL = 30;
+      if (fingerMovement < MIN_MOVEMENT_FOR_AUTOSCROLL) return;
+
+      let scrollDelta = 0;
+      if (pointerY < topZone && pointerY > headerHeight) {
+        const intensity = 1 - (pointerY - headerHeight) / AUTO_SCROLL_THRESHOLD;
+        scrollDelta = -AUTO_SCROLL_SPEED * Math.max(0.3, intensity);
+      } else if (pointerY > bottomZone) {
+        const intensity = (pointerY - bottomZone) / AUTO_SCROLL_THRESHOLD;
+        scrollDelta = AUTO_SCROLL_SPEED * Math.max(0.3, intensity);
+      }
+
+      if (scrollDelta !== 0) {
+        const oldScrollTop = scrollableParent.current.scrollTop;
+        const maxScroll = scrollableParent.current.scrollHeight - scrollableParent.current.clientHeight;
+        const newScrollTop = Math.max(0, Math.min(maxScroll, oldScrollTop + scrollDelta));
+        scrollableParent.current.scrollTop = newScrollTop;
+        if (scrollableParent.current.scrollTop !== oldScrollTop) {
+          updateTranslateY();
+          const targetIndex = calculateTargetIndex();
+          if (targetIndex !== lastReportedIndex.current) {
+            lastReportedIndex.current = targetIndex;
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            if (onPositionChange) onPositionChange(targetIndex);
+          }
+        }
+      }
+    }, 16);
+  }, [calculateTargetIndex, onPositionChange, stopAutoScroll, updateTranslateY]);
+
+  // Cleanup
+  const cleanup = useCallback(() => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+    stopAutoScroll();
+  }, [stopAutoScroll]);
+
+  // Finalizar drag
+  const finishDrag = useCallback(() => {
+    if (!isDraggingRef.current) return;
+    stopAutoScroll();
+    const finalIndex = calculateTargetIndex();
+    isDraggingRef.current = false;
+    setIsDragging(false);
+    setTranslateY(0);
+    activePointerId.current = null;
+    initialCompressionOffset.current = 0;
+
+    if (finalIndex !== index) {
+      onDragEnd(finalIndex);
+    } else {
+      if (onDragCancel) onDragCancel();
+    }
+  }, [calculateTargetIndex, index, onDragCancel, onDragEnd, stopAutoScroll]);
+
+  // POINTER DOWN en el handle
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      if (activePointerId.current !== null) return;
+      activePointerId.current = e.pointerId;
+      pressStartY.current = e.clientY;
+      pressStartX.current = e.clientX;
+      currentPointerY.current = e.clientY;
+      currentPointerX.current = e.clientX;
+      scrollableParent.current = findScrollableParent();
+      dragStartIndex.current = index;
+      lastReportedIndex.current = index;
+
+      if (containerRef.current) {
+        try {
+          containerRef.current.setPointerCapture(e.pointerId);
+        } catch {
+          // Ignorar
+        }
+      }
+
+      longPressTimer.current = setTimeout(() => {
+        if (activePointerId.current !== e.pointerId) return;
+        isDraggingRef.current = true;
+        setIsDragging(true);
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+        if (onDragStart) onDragStart();
+
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            if (!containerRef.current) return;
+            const elementRect = containerRef.current.getBoundingClientRect();
+            const elementCenterY = elementRect.top + elementRect.height / 2;
+            const initialOffset = currentPointerY.current - elementCenterY;
+            initialCompressionOffset.current = initialOffset;
+            dragStartY.current = currentPointerY.current;
+            dragStartPointerY.current = currentPointerY.current;
+            initialScrollTop.current = scrollableParent.current?.scrollTop || 0;
+            setTranslateY(initialOffset);
+            startAutoScroll();
+          });
+        });
+      }, LONG_PRESS_DELAY);
+    },
+    [index, findScrollableParent, onDragStart, startAutoScroll]
+  );
+
+  // POINTER MOVE
+  const handlePointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      if (activePointerId.current !== e.pointerId) return;
+      currentPointerY.current = e.clientY;
+      currentPointerX.current = e.clientX;
+
+      // Si estamos arrastrando
+      if (isDraggingRef.current) {
+        updateTranslateY();
+        const targetIndex = calculateTargetIndex();
+        if (targetIndex !== lastReportedIndex.current) {
+          lastReportedIndex.current = targetIndex;
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          if (onPositionChange) onPositionChange(targetIndex);
+        }
+        return;
+      }
+
+      // Detectar swipe horizontal antes de que se active el long-press
+      const deltaX = e.clientX - pressStartX.current;
+      const deltaY = Math.abs(e.clientY - pressStartY.current);
+      
+      if (Math.abs(deltaX) > 10 && deltaY < 20 && !isDraggingRef.current) {
+        // Cancelar long-press timer
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+          longPressTimer.current = null;
+        }
+        setIsSwiping(true);
+        // Solo permitir swipe hacia la izquierda
+        if (deltaX < 0) {
+          setTranslateX(Math.max(deltaX, -150));
+        }
+      }
+
+      // Cancelar long-press si hay mucho movimiento vertical
+      if (deltaY > 15 && longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+      }
+    },
+    [calculateTargetIndex, onPositionChange, updateTranslateY]
+  );
+
+  // POINTER UP
+  const handlePointerUp = useCallback(
+    (e: React.PointerEvent) => {
+      if (activePointerId.current !== e.pointerId) return;
+      cleanup();
+
+      if (containerRef.current) {
+        try {
+          containerRef.current.releasePointerCapture(e.pointerId);
+        } catch {
+          // Ignorar
+        }
+      }
+
+      // Si estaba haciendo swipe
+      if (isSwiping) {
+        setIsSwiping(false);
+        if (translateX < DELETE_THRESHOLD) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+          Alert.alert('🗑️ Eliminar ejercicio', `¿Eliminar "${exercise.name}" de este día?`, [
+            {
+              text: 'Cancelar',
+              style: 'cancel',
+              onPress: () => setTranslateX(0),
+            },
+            {
+              text: 'Eliminar',
+              style: 'destructive',
+              onPress: () => {
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                onDelete();
+              },
+            },
+          ]);
+        } else {
+          setTranslateX(0);
+        }
+        activePointerId.current = null;
+        return;
+      }
+
+      if (isDraggingRef.current) {
+        finishDrag();
+      } else {
+        // Tap = editar
+        const deltaX = Math.abs(e.clientX - pressStartX.current);
+        const deltaY = Math.abs(e.clientY - pressStartY.current);
+        if (deltaX < 10 && deltaY < 10) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          onEdit();
+        }
+        activePointerId.current = null;
+      }
+    },
+    [cleanup, finishDrag, isSwiping, translateX, exercise.name, onDelete, onEdit]
+  );
+
+  // POINTER CANCEL
+  const handlePointerCancel = useCallback(
+    (e: React.PointerEvent) => {
+      handlePointerUp(e);
+    },
+    [handlePointerUp]
+  );
+
+  // Estilos del container
+  const containerStyle: React.CSSProperties = {
+    transform: isDragging
+      ? `translateY(${translateY}px) scale(1.02)`
+      : `translateX(${translateX}px)`,
+    zIndex: isDragging ? 1000 : 1,
+    position: 'relative',
+    opacity: isDragging ? 0.95 : 1,
+    boxShadow: isDragging ? '0 10px 40px rgba(249, 115, 22, 0.5)' : 'none',
+    transition: isDragging || isSwiping ? 'none' : 'transform 0.2s ease-out',
+    touchAction: 'none',
+    userSelect: 'none',
+    cursor: isDragging ? 'grabbing' : isHoveringHandle ? 'grab' : 'pointer',
+  };
+
+  const series = exercise.series || [];
+
+  return (
+    <div
+      ref={containerRef}
+      style={containerStyle}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
+      onPointerLeave={handlePointerCancel}
+      onMouseEnter={() => setIsHoveringHandle(true)}
+      onMouseLeave={() => setIsHoveringHandle(false)}
+      className="mb-2 relative"
+    >
+      {/* DELETE BACKGROUND */}
+      <div
+        className="absolute right-0 top-0 bottom-0 w-24 bg-red-600 rounded-2xl flex items-center justify-center"
+        style={{
+          opacity: Math.min(1, Math.abs(translateX) / 100),
+          transform: `scale(${0.8 + (Math.abs(translateX) / 100) * 0.2})`,
+        }}
+      >
+        <div className="flex flex-col items-center">
+          <Trash2 size={24} color="#fff" />
+          <Text className="text-white text-[10px] font-bold mt-1">ELIMINAR</Text>
+        </div>
+      </div>
+
+      {/* MAIN CARD */}
+      <View
+        ref={targetRef as any}
+        onLayout={onLayout}
+        className="rounded-2xl overflow-hidden"
+        style={{
+          backgroundColor: isDragging ? '#1a1a1a' : '#0a0a0a',
+          borderWidth: isDragging ? 2 : 1,
+          borderColor: isDragging ? '#F97316' : '#27272a',
+        }}
+      >
+        <HankInlineHighlight isActive={isHighlighted} phase={animationPhase} borderRadius={16} />
+        <View className="flex-row items-center p-3">
+          {/* DRAG HANDLE */}
+          <View className="mr-2 opacity-30">
+            <GripVertical size={16} color="#71717a" />
+          </View>
+
+          {/* EXERCISE IMAGE */}
+          <Image
+            source={{ uri: exercise.image_url }}
+            className="w-12 h-12 rounded-xl mr-3"
+            contentFit="cover"
+            style={{ borderWidth: 1, borderColor: '#27272a' }}
+          />
+
+          {/* EXERCISE INFO */}
+          <View className="flex-1">
+            <Text className="text-white font-bold text-sm mb-1" numberOfLines={1}>
+              {exercise.name}
+            </Text>
+
+            {/* SERIES PILLS */}
+            {series.length > 0 ? (
+              <View className="flex-row flex-wrap gap-1">
+                {series.map((s, idx) => {
+                  const typeConfig = TYPE_COLORS[s.type] || TYPE_COLORS.EFECTIVA;
+                  return (
+                    <View
+                      key={String(idx)}
+                      className="rounded-md px-1.5 py-0.5 flex-row items-center gap-0.5"
+                      style={{
+                        backgroundColor: typeConfig.bg,
+                        borderWidth: 1,
+                        borderColor: typeConfig.border,
+                      }}
+                    >
+                      <Text className="text-[8px] font-bold" style={{ color: typeConfig.text }}>
+                        {typeConfig.label}
+                      </Text>
+                      <Text className="text-white text-[9px] font-mono">{s.reps}</Text>
+                    </View>
+                  );
+                })}
+              </View>
+            ) : (
+              <Text className="text-zinc-600 text-[10px]">Toca para configurar</Text>
+            )}
+          </View>
+
+          {/* CHEVRON */}
+          <View className="opacity-30">
+            <Text className="text-zinc-500 text-lg">›</Text>
+          </View>
+        </View>
+      </View>
+    </div>
+  );
+};
+
+// ============================================================================
+// NATIVE DRAGGABLE COMPONENT (Original)
+// ============================================================================
+const NativeDraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
   exercise,
   index,
   totalItems,
@@ -104,7 +540,7 @@ export const DraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
   const translateX = useSharedValue(0);
   const isSwipingShared = useSharedValue(false);
 
-  // Hank Target - Registrar este ejercicio como target para animaciones
+  // Hank Target
   const { targetRef, onLayout, isHighlighted, animationPhase } = useHankTarget({
     id: `exercise-${exercise.id}`,
     type: 'exercise',
@@ -160,7 +596,7 @@ export const DraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
     ]);
   };
 
-  // Pan gesture for reordering (long press + drag vertical)
+  // Pan gesture for reordering
   const panGesture = Gesture.Pan()
     .activateAfterLongPress(300)
     .onStart(() => {
@@ -174,11 +610,9 @@ export const DraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
     })
     .onUpdate((event) => {
       translateY.value = event.translationY;
-
       const movedPositions = Math.round(event.translationY / itemHeight);
       let targetIndex = index + movedPositions;
       targetIndex = Math.max(0, Math.min(totalItems - 1, targetIndex));
-
       if (targetIndex !== lastReportedIndex.value) {
         lastReportedIndex.value = targetIndex;
         runOnJS(reportPositionChange)(targetIndex);
@@ -189,13 +623,11 @@ export const DraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
       const movedPositions = Math.round(event.translationY / itemHeight);
       let newIndex = index + movedPositions;
       newIndex = Math.max(0, Math.min(totalItems - 1, newIndex));
-
       translateY.value = withSpring(0, { damping: 15, stiffness: 150 });
       scale.value = withSpring(1);
       zIndex.value = 1;
       isDraggingShared.value = false;
       runOnJS(setDraggingState)(false);
-
       if (newIndex !== index) {
         runOnJS(handleDragEnd)(newIndex);
       } else {
@@ -213,7 +645,7 @@ export const DraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
       }
     });
 
-  // Swipe gesture for delete (horizontal swipe left)
+  // Swipe gesture for delete
   const swipeGesture = Gesture.Pan()
     .activeOffsetX([-10, 10])
     .failOffsetY([-5, 5])
@@ -234,28 +666,20 @@ export const DraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
       } else {
         translateX.value = withSpring(0, { damping: 20 });
       }
-    })
-    .onFinalize(() => {
-      // Mantener el flag un poco más para evitar que el tap se active
-      // El flag se resetea en onEnd, así que aquí solo lo forzamos a false
     });
 
-  // Tap gesture for edit - Solo si NO hubo swipe
+  // Tap gesture for edit
   const tapGesture = Gesture.Tap()
     .maxDuration(250)
     .onEnd(() => {
-      // Solo ejecutar edit si no estamos en medio de un swipe
       if (!isSwipingShared.value && Math.abs(translateX.value) < 10) {
         runOnJS(triggerLightHaptic)();
         runOnJS(onEdit)();
       }
     });
 
-  // Compose gestures: Pan (reorder) tiene prioridad, luego Swipe, luego Tap
-  // Usamos Exclusive para que Swipe y Tap no se ejecuten simultáneamente
   const composedGesture = Gesture.Race(panGesture, Gesture.Exclusive(swipeGesture, tapGesture));
 
-  // Animated styles for main card
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [
       { translateX: translateX.value },
@@ -265,23 +689,19 @@ export const DraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
     zIndex: zIndex.value,
   }));
 
-  // Animated styles for delete background
   const deleteBackgroundStyle = useAnimatedStyle(() => ({
     opacity: interpolate(translateX.value, [0, DELETE_THRESHOLD], [0, 1], Extrapolation.CLAMP),
     transform: [
-      {
-        scale: interpolate(translateX.value, [0, DELETE_THRESHOLD], [0.8, 1], Extrapolation.CLAMP),
-      },
+      { scale: interpolate(translateX.value, [0, DELETE_THRESHOLD], [0.8, 1], Extrapolation.CLAMP) },
     ],
   }));
 
-  const series = exercise.series || [];
-
-  // Animated wrapper style - z-index debe aplicarse al contenedor exterior
   const wrapperAnimatedStyle = useAnimatedStyle(() => ({
     zIndex: zIndex.value,
     elevation: zIndex.value,
   }));
+
+  const series = exercise.series || [];
 
   return (
     <Animated.View className="mb-2" style={[wrapperAnimatedStyle, { position: 'relative' }]}>
@@ -309,7 +729,6 @@ export const DraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
       {/* MAIN CARD */}
       <GestureDetector gesture={composedGesture}>
         <Animated.View ref={targetRef} onLayout={onLayout} style={animatedStyle}>
-          {/* Hank Inline Highlight - FUERA de overflow:hidden */}
           <HankInlineHighlight isActive={isHighlighted} phase={animationPhase} borderRadius={16} />
           <View
             className="rounded-2xl overflow-hidden"
@@ -335,10 +754,7 @@ export const DraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
                 source={{ uri: exercise.image_url }}
                 className="w-12 h-12 rounded-xl mr-3"
                 contentFit="cover"
-                style={{
-                  borderWidth: 1,
-                  borderColor: '#27272a',
-                }}
+                style={{ borderWidth: 1, borderColor: '#27272a' }}
               />
 
               {/* EXERCISE INFO */}
@@ -385,4 +801,14 @@ export const DraggableExerciseCard: React.FC<DraggableExerciseCardProps> = ({
       </GestureDetector>
     </Animated.View>
   );
+};
+
+// ============================================================================
+// EXPORT
+// ============================================================================
+export const DraggableExerciseCard: React.FC<DraggableExerciseCardProps> = (props) => {
+  if (Platform.OS === 'web') {
+    return <WebDraggableExerciseCard {...props} />;
+  }
+  return <NativeDraggableExerciseCard {...props} />;
 };
