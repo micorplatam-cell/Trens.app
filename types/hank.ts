@@ -297,6 +297,9 @@ export interface HankContextState {
   refreshTrigger: number;
   triggerRefresh: () => void;
 
+  // NOTA: isChatOpen se movió a lib/hankChatState.ts para evitar re-renders
+  // Usar setHankChatOpen(), isHankChatOpen(), subscribeToHankChat() en su lugar
+
   // Macro cache invalidation (incrementa cuando se actualizan datos del perfil)
   macroCacheInvalidate: number;
   invalidateMacroCache: () => void;

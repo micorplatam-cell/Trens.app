@@ -636,7 +636,7 @@ export function SpotifyOverlay() {
       };
 
       const moduleName = moduleNames[screenContext.module] || screenContext.module;
-      
+
       // Construir contexto del ejercicio/asset incluyendo si es alternativa
       let assetContext = '';
       if (activeAsset) {

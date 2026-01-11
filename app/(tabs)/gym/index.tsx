@@ -64,6 +64,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import Slider from '@react-native-community/slider';
 import { useHank } from '../../../context/HankContext';
+import { subscribeToHankChat } from '../../../lib/hankChatState';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import spotify, { SpotifyVideoMetadata, SpotifyTrack } from '../../../services/spotify/spotify';
@@ -1063,9 +1064,19 @@ function GymScreen() {
   // BUGFIX: Memoizar onViewableItemsChanged para evitar error "Changing onViewableItemsChanged on the fly"
   // Ref para trackear el último índice visible y evitar haptics redundantes
   const lastVisibleIndexRef = useRef<number | null>(null);
+  // Ref para saber si hay un modal abierto - se sincroniza en el useEffect de isAnyModalOpen
+  const isAnyModalOpenRef = useRef(false);
+  // Ref para bloquear actualizaciones de índice temporalmente después de cerrar modal
+  const modalCloseCooldownRef = useRef(false);
 
   const onViewableItemsChanged = useRef(
     ({ viewableItems }: { viewableItems: Array<{ index: number | null }> }) => {
+      // BUGFIX: No actualizar el índice si hay un modal abierto o en cooldown
+      // Esto evita que el scroll se resetee cuando se abre/cierra el chat de Hank
+      if (isAnyModalOpenRef.current || modalCloseCooldownRef.current) {
+        return;
+      }
+
       if (viewableItems.length > 0 && viewableItems[0].index !== null) {
         const newIndex = viewableItems[0].index;
 
@@ -1218,12 +1229,10 @@ function GymScreen() {
     [activeExerciseIndex, activeAlternatives, exercises, viewMode]
   );
 
-  // Ref para saber si hay algún modal abierto (evitar que gestos de modal muevan ejercicios)
-  const isAnyModalOpenRef = useRef(false);
-
-  // Actualizar ref cuando cambian los modales
+  // Actualizar ref cuando cambian los modales locales
   useEffect(() => {
-    isAnyModalOpenRef.current =
+    const wasOpen = isAnyModalOpenRef.current;
+    const isNowOpen =
       notesModalVisible ||
       videoNotesModalVisible ||
       historialModalVisible ||
@@ -1234,6 +1243,16 @@ function GymScreen() {
       cameraModalVisible ||
       modalVisible ||
       hankModalVisible;
+    
+    isAnyModalOpenRef.current = isNowOpen;
+    
+    // Si un modal se cerró, activar cooldown para evitar saltos en el índice
+    if (wasOpen && !isNowOpen) {
+      modalCloseCooldownRef.current = true;
+      setTimeout(() => {
+        modalCloseCooldownRef.current = false;
+      }, 300);
+    }
   }, [
     notesModalVisible,
     videoNotesModalVisible,
@@ -1246,6 +1265,28 @@ function GymScreen() {
     modalVisible,
     hankModalVisible,
   ]);
+
+  // Suscribirse al estado del chat de HANK (sin causar re-renders)
+  useEffect(() => {
+    const unsubscribe = subscribeToHankChat((isOpen) => {
+      if (isOpen) {
+        // Modal se abre: marcar como abierto
+        isAnyModalOpenRef.current = true;
+        modalCloseCooldownRef.current = false;
+      } else {
+        // Modal se cierra: activar cooldown para evitar que onViewableItemsChanged
+        // actualice el índice durante el cierre del modal
+        modalCloseCooldownRef.current = true;
+        // Después de 300ms, desactivar cooldown y sincronizar con otros modales
+        setTimeout(() => {
+          modalCloseCooldownRef.current = false;
+          // Solo poner en false si no hay otros modales locales abiertos
+          // (el useEffect de modales locales se encarga de esto)
+        }, 300);
+      }
+    });
+    return unsubscribe;
+  }, []);
 
   // Helper: verificar si el elemento o sus ancestros tienen scroll horizontal
   const isInsideHorizontalScroll = (element: HTMLElement | null): boolean => {
@@ -1302,8 +1343,8 @@ function GymScreen() {
     if (Platform.OS !== 'web' || viewMode !== 'FOCUS') return;
 
     const handleWheel = (e: WheelEvent) => {
-      // Ignorar si hay un modal abierto (detectado por estado)
-      if (isAnyModalOpenRef.current) return;
+      // Ignorar si hay un modal abierto o en cooldown después de cerrar
+      if (isAnyModalOpenRef.current || modalCloseCooldownRef.current) return;
 
       // Ignorar si el evento viene de dentro de un modal/overlay (detectado por DOM)
       if (isInsideModalOrOverlay(e.target as HTMLElement)) return;
@@ -1335,8 +1376,8 @@ function GymScreen() {
     };
 
     const handleTouchStart = (e: TouchEvent) => {
-      // Ignorar si hay un modal abierto (detectado por estado)
-      if (isAnyModalOpenRef.current) return;
+      // Ignorar si hay un modal abierto o en cooldown después de cerrar
+      if (isAnyModalOpenRef.current || modalCloseCooldownRef.current) return;
 
       // Verificar si el touch empezó dentro de un modal/overlay
       touchStartedInModalRef.current = isInsideModalOrOverlay(e.target as HTMLElement);
@@ -1350,8 +1391,8 @@ function GymScreen() {
     };
 
     const handleTouchEnd = (e: TouchEvent) => {
-      // Ignorar si hay un modal abierto (detectado por estado)
-      if (isAnyModalOpenRef.current) return;
+      // Ignorar si hay un modal abierto o en cooldown después de cerrar
+      if (isAnyModalOpenRef.current || modalCloseCooldownRef.current) return;
 
       // Ignorar si el touch empezó dentro de un modal/overlay
       if (touchStartedInModalRef.current) {
@@ -2685,11 +2726,21 @@ function GymScreen() {
     loadExercises(selectedDayIndex);
   }, [selectedDayIndex, user]);
 
+  // Ref para mantener el índice del ejercicio activo de forma persistente
+  // Esto evita que se pierda cuando se recarga la lista
+  const savedExerciseIndexRef = useRef(0);
+
+  // Actualizar la ref cada vez que cambia activeExerciseIndex
+  useEffect(() => {
+    savedExerciseIndexRef.current = activeExerciseIndex;
+  }, [activeExerciseIndex]);
+
   // Recargar ejercicios cuando HANK modifica datos (mantener posición)
   useEffect(() => {
     console.warn('🔄 refreshTrigger cambió a:', refreshTrigger);
     if (user && refreshTrigger > 0) {
-      const previousIndex = activeExerciseIndex;
+      // Usar la ref que mantiene el índice de forma persistente
+      const previousIndex = savedExerciseIndexRef.current;
       console.warn(
         '🔄 HANK modificó datos, recargando ejercicios del día:',
         selectedDayIndex,
@@ -2701,13 +2752,17 @@ function GymScreen() {
         // Después de cargar, hacer scroll al mismo índice (o al último si el índice ya no existe)
         setTimeout(() => {
           if (exerciseListRef.current && previousIndex >= 0) {
+            // Usar Math.min para asegurar que el índice es válido
+            const safeIndex = Math.min(previousIndex, Math.max(0, exercises.length - 1));
             exerciseListRef.current.scrollToIndex({
-              index: previousIndex,
+              index: safeIndex,
               animated: false,
             });
-            console.warn('🔄 Scroll restaurado a índice:', previousIndex);
+            // Actualizar el estado del índice también
+            setActiveExerciseIndex(safeIndex);
+            console.warn('🔄 Scroll restaurado a índice:', safeIndex);
           }
-        }, 100);
+        }, 150); // Aumentar un poco el timeout para dar tiempo al render
       });
     }
   }, [refreshTrigger]);
@@ -2755,7 +2810,7 @@ function GymScreen() {
             thumbnail_url,
             video_url,
             sport_id,
-            alternative_exercises
+            alternatives
           )
         `
         )
@@ -2821,7 +2876,7 @@ function GymScreen() {
               description: exercise?.description,
               equipment: exercise?.equipment,
               video_url: exercise?.video_url,
-              alternative_exercises: exercise?.alternative_exercises || [],
+              alternatives: exercise?.alternatives || [],
             },
           };
         }) || [];
@@ -2858,11 +2913,11 @@ function GymScreen() {
       }
 
       if (filteredData && filteredData.length > 0) {
-        // NUEVA ARQUITECTURA: Las alternativas están en exercises.alternative_exercises (array de UUIDs)
+        // NUEVA ARQUITECTURA: Las alternativas están en exercises.alternatives (array de UUIDs)
         // Recopilar todos los IDs de alternativas de todos los ejercicios filtrados
         const allAlternativeIds: string[] = [];
         filteredData.forEach((item: any) => {
-          const altIds = item.metadata?.alternative_exercises || [];
+          const altIds = item.metadata?.alternatives || [];
           altIds.forEach((id: string) => {
             if (id && !allAlternativeIds.includes(id)) {
               allAlternativeIds.push(id);
@@ -3048,8 +3103,13 @@ function GymScreen() {
 
         const mappedExercises: Exercise[] = filteredData.map((item, index) => {
           try {
-            // Obtener IDs de alternativas de este ejercicio
-            const alternativeIds = item.metadata?.alternative_exercises || [];
+            // Obtener IDs de alternativas de este ejercicio (viene de exercises.alternatives en BD)
+            const alternativeIds = item.metadata?.alternatives || [];
+
+            // BUGFIX: Filtrar el ID del ejercicio principal para evitar que sea alternativa de sí mismo
+            const filteredAlternativeIds = alternativeIds.filter(
+              (altId: string) => altId !== item.exercise_id
+            );
 
             // Cargar estructura personalizada del DÍA ACTUAL
             // Nueva estructura: series_by_day[day] | Fallback: custom_series (legacy)
@@ -3079,18 +3139,19 @@ function GymScreen() {
                   }))
                 : generateDefaultSeries(item.metadata?.sets || '4x10');
 
-            // Mapear alternativas desde exercises.alternative_exercises
-            const alternatives: ExerciseAlternative[] = alternativeIds
+            // Mapear alternativas desde exercises.alternatives
+            const alternatives: ExerciseAlternative[] = filteredAlternativeIds
               .map((altId: string) => {
                 // Buscar primero en alternativeExercisesData
                 let altExercise = alternativeExercisesData.find((a: any) => a.id === altId);
 
                 // Si no está ahí, puede ser un ejercicio principal usado como alternativa
                 if (!altExercise) {
-                  const mainExercise = filteredData.find((e: any) => e.id === altId);
+                  // BUGFIX: Buscar por exercise_id (ID de tabla exercises), no por id (user_exercise_config.id)
+                  const mainExercise = filteredData.find((e: any) => e.exercise_id === altId);
                   if (mainExercise) {
                     altExercise = {
-                      id: mainExercise.id,
+                      id: mainExercise.exercise_id, // Usar exercise_id para consistencia
                       name: mainExercise.name,
                       default_media_url: mainExercise.media_url,
                       thumbnail_url: mainExercise.media_url,
@@ -3114,6 +3175,16 @@ function GymScreen() {
                 };
               })
               .filter(Boolean) as ExerciseAlternative[];
+
+            // Debug: Log alternativas cargadas para cada ejercicio
+            if (alternatives.length > 0 || filteredAlternativeIds.length > 0) {
+              console.log(`🔄 Ejercicio "${item.name}" (${item.exercise_id?.substring(0, 8)}):`, {
+                idsOriginales: alternativeIds.length,
+                idsFiltrados: filteredAlternativeIds.length,
+                alternativasCargadas: alternatives.length,
+                detalles: alternatives.map((a) => ({ id: a.id?.substring(0, 8), name: a.name })),
+              });
+            }
 
             return {
               id: item.id,
@@ -3155,7 +3226,34 @@ function GymScreen() {
           '   Nombres:',
           mappedExercises.map((e) => e.name)
         );
+        // DEBUG: Mostrar alternativas de cada ejercicio
+        console.log('📋 ALTERNATIVAS POR EJERCICIO:');
+        mappedExercises.forEach((e, i) => {
+          console.log(
+            `   [${i}] ${e.name}: ${e.alternatives?.length || 0} alternativas`,
+            e.alternatives?.map((a) => a.name) || []
+          );
+        });
+
         setExercises(mappedExercises);
+
+        // BUGFIX: Validar y limpiar activeAlternatives para evitar índices fuera de rango
+        // Esto corrige el bug donde al cambiar de STRUCTURE a FOCUS, las alternativas
+        // seleccionadas anteriormente podrían no existir en el nuevo array de ejercicios
+        setActiveAlternatives((prev) => {
+          const validated: Record<number, number> = {};
+          Object.entries(prev).forEach(([idxStr, altIdx]) => {
+            const exerciseIndex = parseInt(idxStr, 10);
+            const exercise = mappedExercises[exerciseIndex];
+            if (exercise) {
+              const maxAltIndex = exercise.alternatives?.length || 0;
+              // Clampear el índice de alternativa al rango válido (0 = principal, 1+ = alternativas)
+              validated[exerciseIndex] = Math.min(altIdx, maxAltIndex);
+            }
+            // Si el ejercicio no existe en el nuevo array, simplemente no lo incluimos
+          });
+          return validated;
+        });
 
         // Solo cambiar a FOCUS si no estamos ya en algún modo
         if (viewMode === 'LOADING') {
@@ -8270,24 +8368,51 @@ function GymScreen() {
           // Preparar array de ejercicios: principal + alternativas
           // IMPORTANTE: Para notas usamos exercise_id (de tabla exercises)
           // BUGFIX: Usar fallback seguro para evitar keys vacíos que crashean React Native
+          const mainExerciseId = item.exercise_id || item.id || `main-${index}`;
+
+          // BUGFIX: Filtrar alternativas que tengan el mismo ID que el ejercicio principal
+          // y filtrar alternativas con datos inválidos (sin id o sin nombre)
+          const validAlternatives = (item.alternatives || []).filter((alt: ExerciseAlternative) => {
+            if (!alt || !alt.id || !alt.name) {
+              console.warn(`⚠️ Alternativa inválida filtrada para ejercicio ${item.name}:`, alt);
+              return false;
+            }
+            if (alt.id === mainExerciseId) {
+              console.warn(`⚠️ Alternativa con mismo ID que principal filtrada: ${alt.name}`);
+              return false;
+            }
+            return true;
+          });
+
           const allVariations = [
             {
-              id: item.exercise_id || item.id || `main-${index}`, // Fallback seguro para evitar keys vacíos
+              id: mainExerciseId,
               configId: item.id, // Guardar el user_exercise_config.id por si se necesita
               name: item.name || 'Sin nombre',
               image_url: item.image_url || '',
               videos: item.videos || [],
               isMain: true,
             },
-            ...(item.alternatives || []).map((alt: ExerciseAlternative) => ({
+            ...validAlternatives.map((alt: ExerciseAlternative) => ({
               ...alt,
               isMain: false,
             })),
           ];
 
+          // Debug log para identificar problemas - SIEMPRE mostrar para todos los ejercicios
+          console.log(`📊 Ejercicio[${index}] "${item.name}":`, {
+            mainId: mainExerciseId?.substring(0, 8),
+            alternativasEnItem: item.alternatives?.length || 0,
+            alternativasValidas: validAlternatives.length,
+            variacionesTotales: allVariations.length,
+            nombres: allVariations.map((v) => v.name),
+          });
+
           const activeAltIndex = activeAlternatives[index] || 0;
-          // BUGFIX: Validar que initialScrollIndex no exceda el número de elementos
-          const safeInitialIndex = Math.min(activeAltIndex, Math.max(0, allVariations.length - 1));
+          // BUGFIX: Validar que el índice no exceda el número de elementos disponibles
+          // Esto corrige el bug donde al volver de STRUCTURE a FOCUS, el índice guardado
+          // podría apuntar a una alternativa que no existe
+          const safeAltIndex = Math.min(activeAltIndex, Math.max(0, allVariations.length - 1));
 
           return (
             <View
@@ -8317,14 +8442,17 @@ function GymScreen() {
               )}
 
               {/* PARTE SUPERIOR SCROLLEABLE - Imagen, nombre, historial */}
+              {/* Key solo usa ejercicio y cantidad de alternativas - NO incluir safeAltIndex
+                  porque causaría remontaje en cada scroll horizontal */}
               <FlatList
+                key={`variations-${item.id}-${allVariations.length}`}
                 horizontal
                 data={allVariations}
                 keyExtractor={(variation) => variation.id}
                 pagingEnabled={Platform.OS !== 'web'}
                 scrollEnabled={Platform.OS !== 'web'}
                 showsHorizontalScrollIndicator={false}
-                initialScrollIndex={safeInitialIndex}
+                initialScrollIndex={safeAltIndex}
                 getItemLayout={(_, idx) => ({
                   length: SCREEN_WIDTH,
                   offset: SCREEN_WIDTH * idx,
@@ -8343,7 +8471,7 @@ function GymScreen() {
                 contentContainerStyle={
                   Platform.OS === 'web'
                     ? ({
-                        transform: `translateX(${-activeAltIndex * SCREEN_WIDTH}px)`,
+                        transform: `translateX(${-safeAltIndex * SCREEN_WIDTH}px)`,
                         transition: 'transform 0.3s ease-out',
                       } as any)
                     : undefined
@@ -8365,7 +8493,7 @@ function GymScreen() {
                           isActive={
                             isFocused &&
                             index === activeExerciseIndex &&
-                            activeAltIndex ===
+                            safeAltIndex ===
                               allVariations.findIndex((v) => v.id === variation.id) &&
                             !editorVisible &&
                             !cameraModalVisible &&
@@ -8410,7 +8538,7 @@ function GymScreen() {
                             <View
                               key={dotIndex}
                               className={`h-1.5 rounded-full ${
-                                dotIndex === activeAltIndex
+                                dotIndex === safeAltIndex
                                   ? 'w-6 bg-fire-orange'
                                   : 'w-1.5 bg-white/40'
                               }`}

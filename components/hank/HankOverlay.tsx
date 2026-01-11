@@ -51,6 +51,7 @@ import { supabase } from '../../lib/supabase';
 import { useSaveGuard } from '../../context/SaveGuardContext';
 import { calculateFabPositions } from '../../constants/floatingTools';
 import { HankTargetHighlight } from './HankTargetHighlight';
+import { setHankChatOpen } from '../../lib/hankChatState';
 import type {
   HankToolResult,
   HankToolCall,
@@ -1238,6 +1239,14 @@ export const HankOverlay: React.FC = () => {
       translateY.value = 0;
     }
   }, [isOpen, translateY]);
+
+  // -------------------------------------------------------------------------
+  // SINCRONIZAR isOpen CON EL MÓDULO GLOBAL (sin causar re-renders en otros componentes)
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    // Actualizar el estado global (ref) sin causar re-renders
+    setHankChatOpen(isOpen);
+  }, [isOpen]);
 
   // -------------------------------------------------------------------------
   // CERRAR CHAT CUANDO SE DETECTA UN WRITE TOOL (para ver la animación)

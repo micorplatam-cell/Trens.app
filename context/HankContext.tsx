@@ -268,6 +268,9 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
   // Verificar si el userId es válido para operaciones de DB
   const isValidUser = isValidUUID(userId);
 
+  // NOTA: isChatOpen se movió a lib/hankChatState.ts para evitar re-renders
+  // El estado local aquí causaba re-renders de todos los componentes que usan useHank()
+
   // Obtener deporte activo del SportContext
   const sportContext = useSport();
   const activeSportCode = sportContext?.activeSport?.code || 'GYM';
@@ -2526,6 +2529,8 @@ HISTORIAL DE PROGRESO (FOTOS):
       refreshTrigger,
       triggerRefresh,
 
+      // NOTA: isChatOpen se movió a lib/hankChatState.ts para evitar re-renders
+
       // Macro cache invalidation
       macroCacheInvalidate,
       invalidateMacroCache,
@@ -2569,6 +2574,7 @@ HISTORIAL DE PROGRESO (FOTOS):
       saveMessageToSupabase,
       refreshTrigger,
       triggerRefresh,
+      // NOTA: isChatOpen removido - ahora usa lib/hankChatState.ts
       macroCacheInvalidate,
       invalidateMacroCache,
       getToolDefinitions,
@@ -2624,6 +2630,7 @@ const defaultHankState: HankContextState = {
   saveMessageToSupabase: async () => {},
   refreshTrigger: 0,
   triggerRefresh: () => {},
+  // NOTA: isChatOpen removido - ahora usa lib/hankChatState.ts
   macroCacheInvalidate: 0,
   invalidateMacroCache: () => {},
   getToolDefinitions: () => [],
