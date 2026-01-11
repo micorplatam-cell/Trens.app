@@ -1338,7 +1338,8 @@ function AdnScreenContent() {
                   publicVideos.map((vid) => (
                     <TouchableOpacity
                       key={vid.id}
-                      className="w-1/3 aspect-[9/16] bg-zinc-900 relative overflow-hidden"
+                      className="w-1/3 bg-zinc-900 relative overflow-hidden"
+                      style={{ aspectRatio: 9 / 16 }}
                       onPress={() => {
                         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                         if (vid.video_url) {

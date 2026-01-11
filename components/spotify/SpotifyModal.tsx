@@ -702,7 +702,24 @@ export default function SpotifyModal({
   const tabsScrollX = useSharedValue(TABS.indexOf(activeTab) * SCREEN_WIDTH);
   const isTabScrolling = useRef(false);
   const lastVisibleTab = useRef<TabType>(activeTab);
+  const activeTabRef = useRef<TabType>(activeTab); // Ref para tener siempre el valor actual
   const isDragging = useRef(false);
+
+  // Mantener activeTabRef sincronizado con activeTab
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+    // TAMBIÉN sincronizar tabsScrollX para que el indicador siempre coincida
+    const index = TABS.indexOf(activeTab);
+    if (tabsScrollX.value !== index * SCREEN_WIDTH) {
+      console.log('[SpotifyModal] Syncing tabsScrollX with activeTab:', {
+        activeTab,
+        index,
+        newValue: index * SCREEN_WIDTH,
+        oldValue: tabsScrollX.value,
+      });
+      tabsScrollX.value = index * SCREEN_WIDTH;
+    }
+  }, [activeTab]);
 
   // -------------------------------------------------------------------------
   // WEB: Control de scroll mecánico con gestos touch/wheel
@@ -788,7 +805,8 @@ export default function SpotifyModal({
   useEffect(() => {
     const index = TABS.indexOf(activeTab);
     tabsScrollX.value = index * SCREEN_WIDTH;
-  }, [activeTab, tabsScrollX]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]); // tabsScrollX es estable (SharedValue)
 
   // Cambiar tab programáticamente (cuando se toca un botón de tab)
   const handleTabChange = useCallback((tab: TabType) => {
@@ -869,17 +887,42 @@ export default function SpotifyModal({
     [handleTabSwipe]
   );
 
-  // Sincronizar scroll inicial
+  // Sincronizar scroll inicial cuando el modal se abre
   useEffect(() => {
-    if (visible && tabsScrollRef.current) {
-      const index = TABS.indexOf(activeTab);
-      lastVisibleTab.current = activeTab;
-      tabsScrollX.value = index * SCREEN_WIDTH;
-      setTimeout(() => {
-        (tabsScrollRef.current as any)?.scrollTo({ x: index * SCREEN_WIDTH, animated: false });
-      }, 100);
+    console.log('[SpotifyModal] useEffect visible:', {
+      visible,
+      activeTab,
+      persistedTab,
+      activeTabRef: activeTabRef.current,
+    });
+    if (visible) {
+      // Forzar sincronización del tab activo con la posición visual
+      // Usar un pequeño delay para asegurar que el layout esté listo
+      const syncTabs = () => {
+        // IMPORTANTE: Usar activeTabRef.current para obtener el valor ACTUAL
+        // No usar activeTab directo porque el setTimeout captura un closure stale
+        const currentTab = activeTabRef.current;
+        const index = TABS.indexOf(currentTab);
+        console.log('[SpotifyModal] Syncing tabs:', {
+          activeTab: currentTab,
+          index,
+          screenWidth: SCREEN_WIDTH,
+        });
+        lastVisibleTab.current = currentTab;
+        tabsScrollX.value = index * SCREEN_WIDTH;
+
+        // También sincronizar el ScrollView nativo si existe
+        if (tabsScrollRef.current) {
+          (tabsScrollRef.current as any)?.scrollTo({ x: index * SCREEN_WIDTH, animated: false });
+        }
+      };
+
+      // Ejecutar inmediatamente y también con delay para garantizar sincronización
+      syncTabs();
+      const timer = setTimeout(syncTabs, 100);
+      return () => clearTimeout(timer);
     }
-  }, [visible]);
+  }, [visible]); // Solo depende de visible - activeTabRef.current da el valor actual
 
   // Guardar estado en variables de módulo cuando cambia
   useEffect(() => {
@@ -1501,7 +1544,7 @@ export default function SpotifyModal({
   // Cargar datos al cambiar de tab (lazy loading)
   useEffect(() => {
     if (visible && spotifyConnected) {
-      console.log('🎵 Tab cambió a:', activeTab);
+      console.log('🎵 Tab cambió a:', activeTab, 'persistedTab:', persistedTab);
       // Pequeño delay para asegurar que el swipe termine antes de cargar
       const timer = setTimeout(() => {
         if (activeTab === 'playlists' && !playlistsLoadedRef.current) {
@@ -1947,6 +1990,11 @@ export default function SpotifyModal({
 
   const renderConnectedView = () => {
     const tabIndex = TABS.indexOf(activeTab);
+    console.log('[SpotifyModal] renderConnectedView:', {
+      activeTab,
+      tabIndex,
+      transform: -tabIndex * SCREEN_WIDTH,
+    });
 
     return (
       <View className="flex-1">

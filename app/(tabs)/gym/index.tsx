@@ -1247,13 +1247,69 @@ function GymScreen() {
     hankModalVisible,
   ]);
 
+  // Helper: verificar si el elemento o sus ancestros tienen scroll horizontal
+  const isInsideHorizontalScroll = (element: HTMLElement | null): boolean => {
+    let current = element;
+    while (current) {
+      const style = window.getComputedStyle(current);
+      const overflowX = style.overflowX;
+      // Si el elemento tiene scroll horizontal habilitado
+      if (overflowX === 'scroll' || overflowX === 'auto') {
+        // Y tiene contenido que puede scrollear horizontalmente
+        if (current.scrollWidth > current.clientWidth) {
+          return true;
+        }
+      }
+      current = current.parentElement;
+    }
+    return false;
+  };
+
+  // Helper: verificar si el elemento está dentro de un modal/overlay (position fixed con z-index alto)
+  const isInsideModalOrOverlay = (element: HTMLElement | null): boolean => {
+    let current = element;
+    while (current) {
+      const style = window.getComputedStyle(current);
+      // Detectar modales/overlays por position fixed/absolute con z-index alto
+      if (
+        (style.position === 'fixed' || style.position === 'absolute') &&
+        parseInt(style.zIndex || '0', 10) >= 40
+      ) {
+        return true;
+      }
+      // También detectar por role de accesibilidad
+      if (
+        current.getAttribute('role') === 'dialog' ||
+        current.getAttribute('aria-modal') === 'true'
+      ) {
+        return true;
+      }
+      // Detectar por clases comunes de modales de React Native Web
+      if (current.className?.includes?.('modal') || current.className?.includes?.('overlay')) {
+        return true;
+      }
+      current = current.parentElement;
+    }
+    return false;
+  };
+
+  // Ref para guardar si el touch empezó dentro de un scroll horizontal o modal
+  const touchStartedInScrollRef = useRef(false);
+  const touchStartedInModalRef = useRef(false);
+
   // Effect para capturar wheel/touch events en web
   useEffect(() => {
     if (Platform.OS !== 'web' || viewMode !== 'FOCUS') return;
 
     const handleWheel = (e: WheelEvent) => {
-      // Ignorar si hay un modal abierto
+      // Ignorar si hay un modal abierto (detectado por estado)
       if (isAnyModalOpenRef.current) return;
+
+      // Ignorar si el evento viene de dentro de un modal/overlay (detectado por DOM)
+      if (isInsideModalOrOverlay(e.target as HTMLElement)) return;
+
+      // Ignorar si el evento viene de dentro de un scroll horizontal (ej: SeriesCard)
+      if (isInsideHorizontalScroll(e.target as HTMLElement)) return;
 
       // Solo interceptar si el scroll es significativo
       if (Math.abs(e.deltaY) < 10 && Math.abs(e.deltaX) < 10) return;
@@ -1279,15 +1335,35 @@ function GymScreen() {
     };
 
     const handleTouchStart = (e: TouchEvent) => {
-      // Ignorar si hay un modal abierto
+      // Ignorar si hay un modal abierto (detectado por estado)
       if (isAnyModalOpenRef.current) return;
+
+      // Verificar si el touch empezó dentro de un modal/overlay
+      touchStartedInModalRef.current = isInsideModalOrOverlay(e.target as HTMLElement);
+      if (touchStartedInModalRef.current) return;
+
+      // Verificar si el touch empezó dentro de un scroll horizontal
+      touchStartedInScrollRef.current = isInsideHorizontalScroll(e.target as HTMLElement);
+
       touchStartY.current = e.touches[0].clientY;
       touchStartX.current = e.touches[0].clientX;
     };
 
     const handleTouchEnd = (e: TouchEvent) => {
-      // Ignorar si hay un modal abierto
+      // Ignorar si hay un modal abierto (detectado por estado)
       if (isAnyModalOpenRef.current) return;
+
+      // Ignorar si el touch empezó dentro de un modal/overlay
+      if (touchStartedInModalRef.current) {
+        touchStartedInModalRef.current = false;
+        return;
+      }
+
+      // Ignorar si el touch empezó dentro de un scroll horizontal
+      if (touchStartedInScrollRef.current) {
+        touchStartedInScrollRef.current = false;
+        return;
+      }
 
       const deltaY = touchStartY.current - e.changedTouches[0].clientY;
       const deltaX = touchStartX.current - e.changedTouches[0].clientX;
@@ -6938,7 +7014,7 @@ function GymScreen() {
         {/* Preview cuadrado centrado */}
         <View className="flex-1 justify-center items-center px-4">
           {imageToEdit && (
-            <View className="w-full aspect-square max-w-[90%]">
+            <View className="w-full max-w-[90%]" style={{ aspectRatio: 1 }}>
               {mediaType === 'video' ? (
                 // Para videos, usar VideoView
                 <VideoView
@@ -7051,7 +7127,10 @@ function GymScreen() {
 
               {/* Video Preview */}
               <View className="flex-1 justify-center items-center px-4">
-                <View className="w-full aspect-square overflow-hidden bg-zinc-900 rounded-lg">
+                <View
+                  className="w-full overflow-hidden bg-zinc-900 rounded-lg"
+                  style={{ aspectRatio: 1 }}
+                >
                   <VideoView
                     player={videoPlayer}
                     style={{ flex: 1, width: '100%', height: '100%' }}
@@ -7563,7 +7642,10 @@ function GymScreen() {
                     className="flex-row bg-zinc-900 rounded-xl mb-3 border border-zinc-800 overflow-hidden"
                   >
                     {/* Thumbnail - usa VideoView pausado para mostrar primer frame */}
-                    <View className="bg-zinc-800 w-24 aspect-[3/4] justify-center items-center overflow-hidden">
+                    <View
+                      className="bg-zinc-800 w-24 justify-center items-center overflow-hidden"
+                      style={{ aspectRatio: 3 / 4 }}
+                    >
                       {video.videoUrl || video.video_url ? (
                         <VideoThumbnail
                           videoUrl={video.videoUrl || video.video_url || ''}
