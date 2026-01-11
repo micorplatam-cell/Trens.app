@@ -636,7 +636,16 @@ export function SpotifyOverlay() {
       };
 
       const moduleName = moduleNames[screenContext.module] || screenContext.module;
-      const assetContext = activeAsset ? ` mientras reviso "${activeAsset.name}"` : '';
+      
+      // Construir contexto del ejercicio/asset incluyendo si es alternativa
+      let assetContext = '';
+      if (activeAsset) {
+        if (activeAsset.isAlternative && activeAsset.parentExerciseName) {
+          assetContext = ` mientras hago "${activeAsset.name}" (alternativa de ${activeAsset.parentExerciseName})`;
+        } else {
+          assetContext = ` mientras hago "${activeAsset.name}"`;
+        }
+      }
 
       const insightPrompt = `[SPOTIFY_INSIGHT] Estoy escuchando "${currentTrack.name}" de ${currentTrack.artist} en ${moduleName}${assetContext}. Dame un comentario SAVAGE y motivacional de máximo 2 oraciones que conecte la canción con lo que estoy haciendo. Sé creativo, usa emojis, y que sea memorable. NO uses herramientas, solo responde con el mensaje.`;
 

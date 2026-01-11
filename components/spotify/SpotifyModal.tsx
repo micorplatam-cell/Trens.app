@@ -896,7 +896,17 @@ export default function SpotifyModal({
       activeTabRef: activeTabRef.current,
     });
     if (visible) {
-      // Forzar sincronización del tab activo con la posición visual
+      // WEB: Siempre abrir en "Ahora" (now-playing) para evitar desincronización
+      if (Platform.OS === 'web') {
+        setActiveTab('now-playing');
+        activeTabRef.current = 'now-playing';
+        lastVisibleTab.current = 'now-playing';
+        tabsScrollX.value = 0;
+        console.log('[SpotifyModal] Web: Reset to now-playing');
+        return;
+      }
+
+      // NATIVO: Forzar sincronización del tab activo con la posición visual
       // Usar un pequeño delay para asegurar que el layout esté listo
       const syncTabs = () => {
         // IMPORTANTE: Usar activeTabRef.current para obtener el valor ACTUAL
