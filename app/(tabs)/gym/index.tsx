@@ -1218,11 +1218,43 @@ function GymScreen() {
     [activeExerciseIndex, activeAlternatives, exercises, viewMode]
   );
 
+  // Ref para saber si hay algún modal abierto (evitar que gestos de modal muevan ejercicios)
+  const isAnyModalOpenRef = useRef(false);
+
+  // Actualizar ref cuando cambian los modales
+  useEffect(() => {
+    isAnyModalOpenRef.current =
+      notesModalVisible ||
+      videoNotesModalVisible ||
+      historialModalVisible ||
+      structureModalVisible ||
+      seriesConfigModalVisible ||
+      dayNameModalVisible ||
+      addDayModalVisible ||
+      cameraModalVisible ||
+      modalVisible ||
+      hankModalVisible;
+  }, [
+    notesModalVisible,
+    videoNotesModalVisible,
+    historialModalVisible,
+    structureModalVisible,
+    seriesConfigModalVisible,
+    dayNameModalVisible,
+    addDayModalVisible,
+    cameraModalVisible,
+    modalVisible,
+    hankModalVisible,
+  ]);
+
   // Effect para capturar wheel/touch events en web
   useEffect(() => {
     if (Platform.OS !== 'web' || viewMode !== 'FOCUS') return;
 
     const handleWheel = (e: WheelEvent) => {
+      // Ignorar si hay un modal abierto
+      if (isAnyModalOpenRef.current) return;
+
       // Solo interceptar si el scroll es significativo
       if (Math.abs(e.deltaY) < 10 && Math.abs(e.deltaX) < 10) return;
 
@@ -1247,11 +1279,16 @@ function GymScreen() {
     };
 
     const handleTouchStart = (e: TouchEvent) => {
+      // Ignorar si hay un modal abierto
+      if (isAnyModalOpenRef.current) return;
       touchStartY.current = e.touches[0].clientY;
       touchStartX.current = e.touches[0].clientX;
     };
 
     const handleTouchEnd = (e: TouchEvent) => {
+      // Ignorar si hay un modal abierto
+      if (isAnyModalOpenRef.current) return;
+
       const deltaY = touchStartY.current - e.changedTouches[0].clientY;
       const deltaX = touchStartX.current - e.changedTouches[0].clientX;
       const SWIPE_THRESHOLD = 50;

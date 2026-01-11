@@ -393,10 +393,12 @@ function PlanScreen() {
   const layoutsReady = useRef(0);
   // Flag para evitar auto-scroll durante actualizaciones internas
   const isInternalUpdate = useRef(false);
-  // Flag para saber si es la primera vez que se monta el componente
-  const isFirstMount = useRef(true);
+  // Flag para saber si el componente ya completó su carga inicial
+  const hasCompletedInitialLoad = useRef(false);
   // Flag para evitar múltiples auto-scrolls en la misma sesión de focus
   const hasScrolledThisFocus = useRef(false);
+  // Contador de veces que la pantalla recibió focus (para detectar navegación de regreso)
+  const focusCount = useRef(0);
 
   // ============================================================================
   // HELPER: Obtener perfil completo con medidas corporales Y macros cacheados
@@ -1683,6 +1685,17 @@ function PlanScreen() {
     isInternalUpdate.current = true;
     const newIndex = direction === 'up' ? Math.max(0, workoutPosIndex - 1) : workoutPosIndex + 1;
     await saveWorkoutPosition(newIndex);
+
+    // Auto-scroll al bloque de entreno después de moverlo
+    setTimeout(() => {
+      const workoutLayout = itemLayouts.current[newIndex];
+      if (workoutLayout && workoutLayout.y > 0 && scrollViewRef.current) {
+        scrollViewRef.current.scrollTo({
+          y: Math.max(0, workoutLayout.y - 100),
+          animated: true,
+        });
+      }
+    }, 300);
   };
 
   // Handler for drag & drop
@@ -1691,6 +1704,18 @@ function PlanScreen() {
     setDragTargetIndex(null);
     setIsDraggingWorkout(false);
     await saveWorkoutPosition(newIndex);
+
+    // Auto-scroll al bloque de entreno después de moverlo
+    // Esperar a que los layouts se actualicen
+    setTimeout(() => {
+      const workoutLayout = itemLayouts.current[newIndex];
+      if (workoutLayout && workoutLayout.y > 0 && scrollViewRef.current) {
+        scrollViewRef.current.scrollTo({
+          y: Math.max(0, workoutLayout.y - 100), // 100px de margen arriba
+          animated: true,
+        });
+      }
+    }, 300);
   };
 
   // Shared function to save position
@@ -1882,34 +1907,50 @@ function PlanScreen() {
       itemLayouts.current[index] = { y, height: 0 };
       layoutsReady.current++;
 
-      // Solo guardar layouts, NO hacer auto-scroll en primer mount
-      // El auto-scroll solo se activa cuando vienes de otro módulo (useFocusEffect)
+      // Marcar que la carga inicial está completa cuando todos los layouts están listos
       if (layoutsReady.current >= timeline.length && timeline.length > 0) {
         hasScrolledToCurrentItem.current = true;
-        isFirstMount.current = false;
+        hasCompletedInitialLoad.current = true;
       }
     },
     [timeline.length]
   );
 
+  // Ref para acceder al timeline actual sin causar re-creación del callback
+  const timelineRef = useRef(timeline);
+  timelineRef.current = timeline;
+
+  // Ref para la función getCurrentTimelineIndex
+  const getCurrentTimelineIndexRef = useRef(getCurrentTimelineIndex);
+  getCurrentTimelineIndexRef.current = getCurrentTimelineIndex;
+
   // Scroll automático SOLO cuando la pantalla recibe focus desde otro módulo
   useFocusEffect(
     useCallback(() => {
-      // Si es una actualización interna, no hacer scroll automático
+      // Incrementar contador de focus
+      focusCount.current++;
+
+      // Si es una actualización interna, resetear flag y salir sin hacer scroll
       if (isInternalUpdate.current) {
         isInternalUpdate.current = false;
         return;
       }
 
-      // Solo hacer auto-scroll si venimos de otro módulo (no en el primer mount)
-      // Y si no hemos hecho scroll en este focus
-      if (
-        !isFirstMount.current &&
+      // Solo hacer auto-scroll si:
+      // 1. Ya completamos la carga inicial (hasCompletedInitialLoad)
+      // 2. Es al menos el segundo focus (focusCount > 1) - significa que navegamos de regreso
+      // 3. No hemos hecho scroll en este focus
+      // 4. Tenemos layouts y timeline disponibles
+      const currentTimeline = timelineRef.current;
+      const shouldAutoScroll =
+        hasCompletedInitialLoad.current &&
+        focusCount.current > 1 &&
         !hasScrolledThisFocus.current &&
         itemLayouts.current.length > 0 &&
-        timeline.length > 0
-      ) {
-        const currentIndex = getCurrentTimelineIndex();
+        currentTimeline.length > 0;
+
+      if (shouldAutoScroll) {
+        const currentIndex = getCurrentTimelineIndexRef.current();
         const layout = itemLayouts.current[currentIndex];
 
         if (layout && layout.y > 0) {
@@ -1927,7 +1968,7 @@ function PlanScreen() {
       return () => {
         hasScrolledThisFocus.current = false;
       };
-    }, [timeline.length, getCurrentTimelineIndex])
+    }, []) // Sin dependencias - usar refs para acceder a valores actuales
   );
 
   // ============================================================================
@@ -2002,12 +2043,32 @@ function PlanScreen() {
                 <Text className="text-zinc-500 text-[10px] font-mono">{meals.length} COMIDAS</Text>
               </View>
               {mealMacros && (
-                <View className="flex-row items-center gap-1">
-                  <View className="w-1.5 h-1.5 rounded-full bg-purple-500" />
-                  <Text className="text-zinc-500 text-[10px] font-mono">
-                    {mealMacros.protein * meals.length}P
-                  </Text>
-                </View>
+                <>
+                  <View className="flex-row items-center gap-1">
+                    <View className="w-1.5 h-1.5 rounded-full bg-orange-500" />
+                    <Text className="text-zinc-500 text-[10px] font-mono">
+                      {mealMacros.calories * meals.length} KCAL
+                    </Text>
+                  </View>
+                  <View className="flex-row items-center gap-1">
+                    <View className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+                    <Text className="text-zinc-500 text-[10px] font-mono">
+                      {mealMacros.protein * meals.length}P
+                    </Text>
+                  </View>
+                  <View className="flex-row items-center gap-1">
+                    <View className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                    <Text className="text-zinc-500 text-[10px] font-mono">
+                      {mealMacros.carbs * meals.length}C
+                    </Text>
+                  </View>
+                  <View className="flex-row items-center gap-1">
+                    <View className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                    <Text className="text-zinc-500 text-[10px] font-mono">
+                      {mealMacros.fat * meals.length}G
+                    </Text>
+                  </View>
+                </>
               )}
             </View>
           </View>
