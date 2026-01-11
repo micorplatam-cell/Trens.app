@@ -1912,18 +1912,19 @@ INSTRUCCIONES:
             await saveMessageToSupabase('model', finalResponseText || 'Listo.');
           }
 
-          // Trigger refresh si alguna operación fue exitosa
-          if (results.some((r) => r.success)) {
-            console.warn('🔄 HANK: Operación exitosa, incrementando refreshTrigger');
+          // Marcar que hubo tool calls y si hubo herramientas de ESCRITURA
+          // Solo las herramientas de escritura deben cerrar el chat y mostrar animación
+          const hadWriteTools = geminiResponse.toolCalls.some((tc) => isWriteTool(tc.tool));
+
+          // Trigger refresh SOLO si alguna operación de ESCRITURA fue exitosa
+          // Herramientas como HANK_CLEAR_HISTORY no deben disparar refresh de datos
+          if (results.some((r) => r.success) && hadWriteTools) {
+            console.warn('🔄 HANK: Operación de ESCRITURA exitosa, incrementando refreshTrigger');
             setRefreshTrigger((prev) => {
               console.warn('🔄 HANK: refreshTrigger ahora será:', prev + 1);
               return prev + 1;
             });
           }
-
-          // Marcar que hubo tool calls y si hubo herramientas de ESCRITURA
-          // Solo las herramientas de escritura deben cerrar el chat y mostrar animación
-          const hadWriteTools = geminiResponse.toolCalls.some((tc) => isWriteTool(tc.tool));
           console.warn(
             '🔧 HANK: hadWriteTools:',
             hadWriteTools,

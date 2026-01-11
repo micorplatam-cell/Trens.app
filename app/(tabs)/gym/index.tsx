@@ -577,8 +577,20 @@ export default function Tab4Router() {
 // GYM SCREEN - Pantalla original de entrenamiento
 // ============================================================================
 function GymScreen() {
-  const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = useWindowDimensions();
+  const windowDimensions = useWindowDimensions();
   const insets = useSafeAreaInsets();
+
+  // BUGFIX: Memoizar dimensiones iniciales para evitar re-renders cuando el teclado se abre
+  // El teclado cambia SCREEN_HEIGHT lo cual causaba que el FlatList se remontara
+  const initialDimensionsRef = useRef({
+    width: windowDimensions.width,
+    height: windowDimensions.height,
+  });
+
+  // Usar las dimensiones iniciales, no las reactivas
+  const SCREEN_WIDTH = initialDimensionsRef.current.width;
+  const SCREEN_HEIGHT = initialDimensionsRef.current.height;
+
   // Tab bar altura: 56px base + safe area bottom
   const TAB_BAR_HEIGHT = 56 + insets.bottom;
   const CONTENT_HEIGHT = SCREEN_HEIGHT - TAB_BAR_HEIGHT;
@@ -1066,14 +1078,12 @@ function GymScreen() {
   const lastVisibleIndexRef = useRef<number | null>(null);
   // Ref para saber si hay un modal abierto - se sincroniza en el useEffect de isAnyModalOpen
   const isAnyModalOpenRef = useRef(false);
-  // Ref para bloquear actualizaciones de índice temporalmente después de cerrar modal
-  const modalCloseCooldownRef = useRef(false);
 
   const onViewableItemsChanged = useRef(
     ({ viewableItems }: { viewableItems: Array<{ index: number | null }> }) => {
-      // BUGFIX: No actualizar el índice si hay un modal abierto o en cooldown
+      // BUGFIX: No actualizar el índice si hay un modal abierto
       // Esto evita que el scroll se resetee cuando se abre/cierra el chat de Hank
-      if (isAnyModalOpenRef.current || modalCloseCooldownRef.current) {
+      if (isAnyModalOpenRef.current) {
         return;
       }
 
@@ -1093,6 +1103,13 @@ function GymScreen() {
 
   // Trackear alternativa activa por cada ejercicio (exerciseIndex -> alternativeIndex)
   const [activeAlternatives, setActiveAlternatives] = useState<Record<number, number>>({});
+  // Ref para persistir el estado de alternativas durante re-renders (evita pérdida en modales)
+  const activeAlternativesRef = useRef<Record<number, number>>({});
+
+  // Sincronizar la ref con el estado
+  useEffect(() => {
+    activeAlternativesRef.current = activeAlternatives;
+  }, [activeAlternatives]);
 
   // ID del ejercicio actual (puede ser principal o alternativa)
   const [currentVariationId, setCurrentVariationId] = useState<string | null>(null);
@@ -1231,7 +1248,6 @@ function GymScreen() {
 
   // Actualizar ref cuando cambian los modales locales
   useEffect(() => {
-    const wasOpen = isAnyModalOpenRef.current;
     const isNowOpen =
       notesModalVisible ||
       videoNotesModalVisible ||
@@ -1243,16 +1259,8 @@ function GymScreen() {
       cameraModalVisible ||
       modalVisible ||
       hankModalVisible;
-    
+
     isAnyModalOpenRef.current = isNowOpen;
-    
-    // Si un modal se cerró, activar cooldown para evitar saltos en el índice
-    if (wasOpen && !isNowOpen) {
-      modalCloseCooldownRef.current = true;
-      setTimeout(() => {
-        modalCloseCooldownRef.current = false;
-      }, 300);
-    }
   }, [
     notesModalVisible,
     videoNotesModalVisible,
@@ -1272,17 +1280,10 @@ function GymScreen() {
       if (isOpen) {
         // Modal se abre: marcar como abierto
         isAnyModalOpenRef.current = true;
-        modalCloseCooldownRef.current = false;
       } else {
-        // Modal se cierra: activar cooldown para evitar que onViewableItemsChanged
-        // actualice el índice durante el cierre del modal
-        modalCloseCooldownRef.current = true;
-        // Después de 300ms, desactivar cooldown y sincronizar con otros modales
-        setTimeout(() => {
-          modalCloseCooldownRef.current = false;
-          // Solo poner en false si no hay otros modales locales abiertos
-          // (el useEffect de modales locales se encarga de esto)
-        }, 300);
+        // Modal se cierra: desmarcar inmediatamente para permitir interacción
+        // No usamos cooldown aquí porque ya no es necesario con las dimensiones fijas
+        isAnyModalOpenRef.current = false;
       }
     });
     return unsubscribe;
@@ -1343,8 +1344,8 @@ function GymScreen() {
     if (Platform.OS !== 'web' || viewMode !== 'FOCUS') return;
 
     const handleWheel = (e: WheelEvent) => {
-      // Ignorar si hay un modal abierto o en cooldown después de cerrar
-      if (isAnyModalOpenRef.current || modalCloseCooldownRef.current) return;
+      // Ignorar si hay un modal abierto
+      if (isAnyModalOpenRef.current) return;
 
       // Ignorar si el evento viene de dentro de un modal/overlay (detectado por DOM)
       if (isInsideModalOrOverlay(e.target as HTMLElement)) return;
@@ -1376,8 +1377,8 @@ function GymScreen() {
     };
 
     const handleTouchStart = (e: TouchEvent) => {
-      // Ignorar si hay un modal abierto o en cooldown después de cerrar
-      if (isAnyModalOpenRef.current || modalCloseCooldownRef.current) return;
+      // Ignorar si hay un modal abierto
+      if (isAnyModalOpenRef.current) return;
 
       // Verificar si el touch empezó dentro de un modal/overlay
       touchStartedInModalRef.current = isInsideModalOrOverlay(e.target as HTMLElement);
@@ -1391,8 +1392,8 @@ function GymScreen() {
     };
 
     const handleTouchEnd = (e: TouchEvent) => {
-      // Ignorar si hay un modal abierto o en cooldown después de cerrar
-      if (isAnyModalOpenRef.current || modalCloseCooldownRef.current) return;
+      // Ignorar si hay un modal abierto
+      if (isAnyModalOpenRef.current) return;
 
       // Ignorar si el touch empezó dentro de un modal/overlay
       if (touchStartedInModalRef.current) {
@@ -1554,17 +1555,13 @@ function GymScreen() {
       setTacticalContext(exerciseId, exerciseName, notes, tags);
 
       // SIEMPRE sincronizar con HANK cuando el ejercicio cambie
-      // (Removida optimización de lastSyncedExerciseId para debugging)
       if (viewMode === 'FOCUS') {
-        console.log('🎯 SINCRONIZANDO CON HANK:', exerciseId, exerciseName);
-
         if (altIndex > 0 && currentExercise.alternatives?.[altIndex - 1]) {
           setActiveAsset(exerciseId, {
             isAlternative: true,
             parentExerciseName: currentExercise.name,
           });
         } else {
-          // Usar exerciseId calculado (que ya es currentExercise.exercise_id para principales)
           setActiveAsset(exerciseId);
         }
       }
@@ -2751,7 +2748,8 @@ function GymScreen() {
       loadExercises(selectedDayIndex, true).then(() => {
         // Después de cargar, hacer scroll al mismo índice (o al último si el índice ya no existe)
         setTimeout(() => {
-          if (exerciseListRef.current && previousIndex >= 0) {
+          // BUGFIX: No intentar scroll si exercises está vacío (evita crash en web)
+          if (exerciseListRef.current && previousIndex >= 0 && exercises.length > 0) {
             // Usar Math.min para asegurar que el índice es válido
             const safeIndex = Math.min(previousIndex, Math.max(0, exercises.length - 1));
             exerciseListRef.current.scrollToIndex({
@@ -8325,6 +8323,8 @@ function GymScreen() {
         snapToInterval={CONTENT_HEIGHT}
         snapToAlignment="start"
         disableIntervalMomentum={true}
+        // BUGFIX: Evitar que las views se desmonten durante modales
+        removeClippedSubviews={false}
         getItemLayout={(_, index) => ({
           length: CONTENT_HEIGHT,
           offset: CONTENT_HEIGHT * index,
@@ -8344,6 +8344,7 @@ function GymScreen() {
             ? ({
                 transform: `translateY(${-activeExerciseIndex * CONTENT_HEIGHT}px)`,
                 transition: 'transform 0.25s cubic-bezier(0.25, 0.1, 0.25, 1)',
+                willChange: 'transform',
               } as any)
             : undefined
         }
@@ -8408,7 +8409,10 @@ function GymScreen() {
             nombres: allVariations.map((v) => v.name),
           });
 
-          const activeAltIndex = activeAlternatives[index] || 0;
+          // BUGFIX: Usar ref como fallback para evitar pérdida de alternativa durante modales
+          // El estado puede no estar sincronizado durante re-renders causados por modales
+          const activeAltIndex =
+            activeAlternatives[index] ?? activeAlternativesRef.current[index] ?? 0;
           // BUGFIX: Validar que el índice no exceda el número de elementos disponibles
           // Esto corrige el bug donde al volver de STRUCTURE a FOCUS, el índice guardado
           // podría apuntar a una alternativa que no existe
@@ -8453,6 +8457,10 @@ function GymScreen() {
                 scrollEnabled={Platform.OS !== 'web'}
                 showsHorizontalScrollIndicator={false}
                 initialScrollIndex={safeAltIndex}
+                // BUGFIX: Evitar que las views se desmonten durante modales
+                removeClippedSubviews={false}
+                // BUGFIX: Forzar re-render cuando cambia el índice de alternativa
+                extraData={safeAltIndex}
                 getItemLayout={(_, idx) => ({
                   length: SCREEN_WIDTH,
                   offset: SCREEN_WIDTH * idx,
@@ -8473,6 +8481,7 @@ function GymScreen() {
                     ? ({
                         transform: `translateX(${-safeAltIndex * SCREEN_WIDTH}px)`,
                         transition: 'transform 0.3s ease-out',
+                        willChange: 'transform',
                       } as any)
                     : undefined
                 }
