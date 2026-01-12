@@ -637,6 +637,18 @@ export function SpotifyOverlay() {
 
       const moduleName = moduleNames[screenContext.module] || screenContext.module;
 
+      // 🔍 DEBUG: Log completo del contexto actual
+      console.warn(
+        '🔍 HANK Insight - activeAsset:',
+        JSON.stringify({
+          id: activeAsset?.id,
+          name: activeAsset?.name,
+          isAlternative: activeAsset?.isAlternative,
+          parentExerciseName: activeAsset?.parentExerciseName,
+        })
+      );
+      console.warn('🔍 HANK Insight - screenContext:', JSON.stringify(screenContext));
+
       // Construir contexto del ejercicio/asset incluyendo si es alternativa
       let assetContext = '';
       if (activeAsset) {
@@ -645,6 +657,8 @@ export function SpotifyOverlay() {
         } else {
           assetContext = ` mientras hago "${activeAsset.name}"`;
         }
+      } else {
+        console.warn('⚠️ HANK Insight - activeAsset es NULL, no hay ejercicio en contexto');
       }
 
       const insightPrompt = `[SPOTIFY_INSIGHT] Estoy escuchando "${currentTrack.name}" de ${currentTrack.artist} en ${moduleName}${assetContext}. Dame un comentario SAVAGE y motivacional de máximo 2 oraciones que conecte la canción con lo que estoy haciendo. Sé creativo, usa emojis, y que sea memorable. NO uses herramientas, solo responde con el mensaje.`;

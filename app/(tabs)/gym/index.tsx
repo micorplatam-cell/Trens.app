@@ -195,7 +195,7 @@ const VideoHero = ({
 // ============================================================================
 // TYPES
 // ============================================================================
-type ViewMode = 'LOADING' | 'FOCUS' | 'STRUCTURE';
+type ViewMode = 'LOADING' | 'FOCUS'; // STRUCTURE ahora es un modal separado
 type SeriesType = 'CALENTAMIENTO' | 'APROXIMACION' | 'EFECTIVA' | 'FALLO';
 type UserLevel = 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED' | 'PRO';
 type DayOfWeek = 'Lunes' | 'Martes' | 'Miércoles' | 'Jueves' | 'Viernes' | 'Sábado' | 'Domingo';
@@ -606,9 +606,34 @@ function GymScreen() {
   const isFocused = useIsFocused(); // Detecta si esta pantalla está activa
   const { setActiveAsset, setScreenContext, refreshTrigger } = useHank();
   const [viewMode, setViewMode] = useState<ViewMode>('LOADING');
+  const [structureModalOpen, setStructureModalOpen] = useState(false); // Modal de estructura
   const [isExternalMode, setIsExternalMode] = useState(false); // Modo externo (no usa GYM)
   const [externalSchedule, setExternalSchedule] = useState<Record<string, string>>({}); // Horario externo
-  const [exercises, setExercises] = useState<Exercise[]>([]); // Ejercicios del día actual
+  const [exercises, setExercisesState] = useState<Exercise[]>([]); // Ejercicios del día actual
+  const exercisesRef = useRef<Exercise[]>([]); // Ref para acceso sincrónico inmediato
+  // BUGFIX: Key de lista que fuerza remontaje completo cuando se recargan ejercicios
+  const [listRefreshKey, setListRefreshKey] = useState(0);
+  // Wrapper que actualiza tanto state como ref para mantener sincronía
+  const setExercises = (newExercises: Exercise[] | ((prev: Exercise[]) => Exercise[])) => {
+    if (typeof newExercises === 'function') {
+      setExercisesState((prev) => {
+        const result = newExercises(prev);
+        exercisesRef.current = result;
+        console.log('📦 setExercises (función):', result.length, 'ejercicios');
+        result.slice(0, 3).forEach((e, i) => {
+          console.log(`   [${i}] ${e.name}: ${e.alternatives?.length || 0} alts`);
+        });
+        return result;
+      });
+    } else {
+      exercisesRef.current = newExercises;
+      console.log('📦 setExercises (directo):', newExercises.length, 'ejercicios');
+      newExercises.slice(0, 3).forEach((e, i) => {
+        console.log(`   [${i}] ${e.name}: ${e.alternatives?.length || 0} alts`);
+      });
+      setExercisesState(newExercises);
+    }
+  };
   const [allUserExercises, setAllUserExercises] = useState<{ name: string; image_url: string }[]>(
     []
   ); // TODOS los ejercicios del usuario
@@ -814,6 +839,8 @@ function GymScreen() {
   // Estado para el modal de estructura editable (FOCUS mode)
   const [focusSeriesConfig, setFocusSeriesConfig] = useState<SeriesConfig[]>([]);
   const [savingFocusSeries, setSavingFocusSeries] = useState(false);
+  // BUGFIX: Capturar el día en el que se abrió el modal para evitar guardar en día incorrecto
+  const [focusSeriesDayIndex, setFocusSeriesDayIndex] = useState<number>(0);
 
   // Camera State
   const [cameraModalVisible, setCameraModalVisible] = useState(false);
@@ -837,6 +864,8 @@ function GymScreen() {
   const seriesConfigFromCatalogRef = useRef(false); // Ref para acceder en panResponder
   const [selectedTemplate, setSelectedTemplate] = useState<AssetTemplate | null>(null);
   const [seriesConfig, setSeriesConfig] = useState<SeriesConfig[]>([]);
+  // BUGFIX: Capturar el día cuando se abre el modal de configuración de series
+  const [seriesConfigDayIndex, setSeriesConfigDayIndex] = useState<number>(0);
   const [userLevel, setUserLevel] = useState<UserLevel>('INTERMEDIATE');
   // NOTA: mediaType está declarado arriba con editorVideoPlayer
   const [videoMuted, setVideoMuted] = useState(true);
@@ -1062,6 +1091,8 @@ function GymScreen() {
     currentDayIndex: 0,
   });
   const [selectedDayIndex, setSelectedDayIndex] = useState(0);
+  // BUGFIX: Ref para capturar el día seleccionado actual (evita closure stale en panResponder)
+  const selectedDayIndexRef = useRef(0);
 
   // Estado para editar nombre de rutina
   const [editingRoutineName, setEditingRoutineName] = useState(false);
@@ -1072,6 +1103,12 @@ function GymScreen() {
   const viewabilityConfig = useRef({
     itemVisiblePercentThreshold: 70, // Considera visible si está 70% en pantalla (más estricto)
   });
+
+  // BUGFIX: Sincronizar selectedDayIndexRef cuando cambia selectedDayIndex
+  useEffect(() => {
+    selectedDayIndexRef.current = selectedDayIndex;
+    console.log('📅 selectedDayIndexRef actualizado:', selectedDayIndex);
+  }, [selectedDayIndex]);
 
   // BUGFIX: Memoizar onViewableItemsChanged para evitar error "Changing onViewableItemsChanged on the fly"
   // Ref para trackear el último índice visible y evitar haptics redundantes
@@ -1110,6 +1147,16 @@ function GymScreen() {
   useEffect(() => {
     activeAlternativesRef.current = activeAlternatives;
   }, [activeAlternatives]);
+
+  // DEBUG: Detectar cuando exercises cambia y verificar alternativas
+  useEffect(() => {
+    if (exercises.length > 0) {
+      console.log('🔔 EXERCISES STATE CHANGED:', exercises.length, 'ejercicios');
+      exercises.forEach((e, i) => {
+        console.log(`   [${i}] ${e.name}: ${e.alternatives?.length || 0} alternativas`);
+      });
+    }
+  }, [exercises]);
 
   // ID del ejercicio actual (puede ser principal o alternativa)
   const [currentVariationId, setCurrentVariationId] = useState<string | null>(null);
@@ -1557,11 +1604,22 @@ function GymScreen() {
       // SIEMPRE sincronizar con HANK cuando el ejercicio cambie
       if (viewMode === 'FOCUS') {
         if (altIndex > 0 && currentExercise.alternatives?.[altIndex - 1]) {
+          console.warn('🔄 GYM: Sincronizando ALTERNATIVA con HANK:', {
+            exerciseId,
+            exerciseName,
+            parentExerciseName: currentExercise.name,
+            altIndex,
+          });
           setActiveAsset(exerciseId, {
             isAlternative: true,
             parentExerciseName: currentExercise.name,
           });
         } else {
+          console.warn('🔄 GYM: Sincronizando EJERCICIO PRINCIPAL con HANK:', {
+            exerciseId,
+            exerciseName,
+            altIndex,
+          });
           setActiveAsset(exerciseId);
         }
       }
@@ -1581,6 +1639,7 @@ function GymScreen() {
   // Modal drag state
   const translateYHistorial = useSharedValue(0);
   const translateYStructure = useSharedValue(0);
+  const translateYFocusSeries = useSharedValue(0);
   const translateYCatalog = useSharedValue(0);
   const translateYSeriesConfig = useSharedValue(0);
   const translateYNotes = useSharedValue(0);
@@ -1592,6 +1651,10 @@ function GymScreen() {
 
   const animatedStyleStructure = useAnimatedStyle(() => ({
     transform: [{ translateY: translateYStructure.value }],
+  }));
+
+  const animatedStyleFocusSeries = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateYFocusSeries.value }],
   }));
 
   const animatedStyleCatalog = useAnimatedStyle(() => ({
@@ -1641,9 +1704,77 @@ function GymScreen() {
   // Ref para guardar series al cerrar con gesto
   const saveFocusSeriesRef = useRef<() => void>(() => {});
 
-  const closeStructureWithAnimation = () => {
-    // Guardar automáticamente al cerrar
-    saveFocusSeriesRef.current();
+  // Effect para animar entrada del modal de estructura principal
+  useEffect(() => {
+    if (structureModalOpen) {
+      translateYStructure.value = SCREEN_HEIGHT;
+      translateYStructure.value = withTiming(0, { duration: 300, easing: Easing.out(Easing.ease) });
+    }
+  }, [structureModalOpen]);
+
+  // Effect para animar entrada del modal de focus series (single)
+  useEffect(() => {
+    if (structureModalVisible) {
+      translateYFocusSeries.value = SCREEN_HEIGHT;
+      translateYFocusSeries.value = withTiming(0, {
+        duration: 300,
+        easing: Easing.out(Easing.ease),
+      });
+    }
+  }, [structureModalVisible]);
+
+  const closeStructureWithAnimation = async () => {
+    // BUGFIX: Capturar el día actual desde la ref para evitar closure stale
+    const targetDay = selectedDayIndexRef.current;
+    console.log('🎯 closeStructureWithAnimation - targetDay capturado:', targetDay);
+
+    // Guardar la configuración del día (igual que el botón ENTRENAR)
+    if (user) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayISO = today.toISOString();
+
+      await supabase
+        .from('profiles')
+        .update({
+          training_last_access: todayISO,
+          training_current_day: targetDay,
+        })
+        .eq('id', user.id);
+
+      setTrainingProgram((prev) => ({
+        ...prev,
+        lastAccessDate: todayISO,
+        currentDayIndex: targetDay,
+      }));
+      console.log('🏋️ Día de entrenamiento guardado al cerrar modal:', targetDay);
+    }
+
+    // SOLUCIÓN: Limpiar estado de alternativas para empezar limpio
+    // Esto evita que índices "recordados" apunten a alternativas que no existen
+    console.log('🧹 closeStructure: Limpiando activeAlternatives para estado limpio');
+    setActiveAlternatives({});
+    activeAlternativesRef.current = {};
+
+    // Paso 1: Cerrar el modal primero para mejor UX
+    setStructureModalOpen(false);
+
+    // Paso 2: Cargar datos frescos desde Supabase
+    console.log('📥 closeStructure: Cargando ejercicios frescos para día:', targetDay);
+    await loadExercises(targetDay, true);
+
+    // Paso 3: Incrementar key para forzar re-render del FlatList con datos nuevos
+    setListRefreshKey((prev) => prev + 1);
+
+    console.log('✅ closeStructure: Datos frescos cargados');
+    exercisesRef.current.forEach((e, i) => {
+      console.log(`   [${i}] ${e.name}: ${e.alternatives?.length || 0} alternativas`);
+    });
+  };
+
+  const closeFocusSeriesWithAnimation = async () => {
+    // BUGFIX: Esperar a que termine el guardado antes de cerrar para evitar race conditions
+    await saveFocusSeriesRef.current();
     setStructureModalVisible(false);
   };
 
@@ -1668,6 +1799,33 @@ function GymScreen() {
         } else {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           translateYStructure.value = withTiming(0, { duration: 150 });
+        }
+      },
+    })
+  ).current;
+
+  // NUEVO: PanResponder exclusivo para el modal de Series (Focus)
+  const panResponderFocusSeries = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 5,
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0) {
+          translateYFocusSeries.value = gestureState.dy;
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 150) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          // Animar hacia abajo y luego cerrar
+          translateYFocusSeries.value = withTiming(
+            800,
+            { duration: 200, easing: Easing.out(Easing.ease) },
+            () => runOnJS(closeFocusSeriesWithAnimation)()
+          );
+        } else {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          translateYFocusSeries.value = withTiming(0, { duration: 150 });
         }
       },
     })
@@ -1897,7 +2055,8 @@ function GymScreen() {
 
           const currentConfigData = currentConfig?.config || {};
           const seriesByDay = (currentConfigData.series_by_day as Record<string, unknown[]>) || {};
-          seriesByDay[String(selectedDayIndex)] = seriesConfig;
+          // BUGFIX: Usar seriesConfigDayIndex (día capturado al abrir modal) en lugar de selectedDayIndex
+          seriesByDay[String(seriesConfigDayIndex)] = seriesConfig;
 
           await supabase
             .from('user_exercise_config')
@@ -1911,7 +2070,8 @@ function GymScreen() {
             })
             .eq('id', selectedTemplate.id);
 
-          await loadExercises();
+          // BUGFIX: Usar seriesConfigDayIndex para recargar el día correcto
+          await loadExercises(seriesConfigDayIndex);
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         } catch (error) {
           console.error('Error guardando series:', error);
@@ -1921,7 +2081,7 @@ function GymScreen() {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
     };
-  }, [seriesConfig, selectedTemplate, selectedDayIndex, exercises]);
+  }, [seriesConfig, selectedTemplate, seriesConfigDayIndex, exercises]);
 
   // Cargar series cuando se abre el modal de estructura (FOCUS mode)
   useEffect(() => {
@@ -2591,6 +2751,8 @@ function GymScreen() {
   // Esto permite que ADN y PLAN muestren el día correcto sin entrar a FOCUS
   const syncSelectedDay = async (dayIndex: number) => {
     setSelectedDayIndex(dayIndex);
+    // BUGFIX: Cargar ejercicios del día seleccionado
+    loadExercises(dayIndex, true);
 
     // Solo sincronizar en modo personalizado
     if (!isExternalMode || !user) return;
@@ -2766,10 +2928,11 @@ function GymScreen() {
   }, [refreshTrigger]);
 
   const loadExercises = async (dayIndex: number | null = null, silent: boolean = false) => {
-    // Si no hay usuario, mostrar vista STRUCTURE vacía
+    // Si no hay usuario, mostrar modal de estructura
     if (!user) {
       setExercises([]);
-      setViewMode('STRUCTURE');
+      setViewMode('FOCUS');
+      setStructureModalOpen(true);
       setLoading(false);
       return;
     }
@@ -2818,6 +2981,13 @@ function GymScreen() {
 
       if (configError) throw configError;
 
+      console.log('📥 userConfigs cargados:', userConfigs?.length || 0);
+      // Debug: verificar si alternatives viene en el JOIN
+      if (userConfigs && userConfigs.length > 0) {
+        const firstEx = userConfigs[0] as any;
+        const exercises = firstEx.exercises;
+        console.log('🔍 Primer ejercicio - alternatives:', exercises?.alternatives?.length || 0);
+      }
       console.log('🔍 DEBUG userConfigs:', JSON.stringify(userConfigs?.[0], null, 2));
 
       // 1.5 Cargar imágenes persistentes de user_exercise_media (sobreviven eliminación)
@@ -2879,36 +3049,28 @@ function GymScreen() {
           };
         }) || [];
 
+      // BUGFIX: Filtrar ejercicios con datos inválidos (sin id, sin exercise_id, o sin nombre válido)
+      const validData = data.filter((item: any) => {
+        if (!item.id || !item.exercise_id) {
+          console.warn('⚠️ Ejercicio filtrado por falta de id o exercise_id:', item);
+          return false;
+        }
+        // NOTA: Ya no filtramos por UNNAMED - si el JOIN falla, mostrar igual con nombre fallback
+        return true;
+      });
+
+      console.log('📊 Ejercicios en DB:', data.length, '→ Válidos:', validData.length);
+
       // Filtrar los datos ya mapeados por día de entrenamiento
       const filteredData =
-        data?.filter((item: any) => {
+        validData?.filter((item: any) => {
           const itemDays = item.training_days || [0];
           return itemDays.includes(targetDayIndex);
         }) || [];
 
-      console.log(`📊 TOTAL EJERCICIOS EN DB: ${data?.length || 0}`);
       console.log(
-        '  - TODOS:',
-        data?.map((e: any) => ({
-          name: e.name,
-          id: e.id?.substring(0, 8),
-          hasCustomImage: !e.media_url?.includes('unsplash'),
-          training_days: e.training_days,
-          created: e.created_at?.substring(0, 10),
-        }))
+        `📊 Día ${targetDayIndex}: ${filteredData.length} ejercicios de ${validData?.length || 0} total`
       );
-
-      console.log(`📅 DÍA ${targetDayIndex}: ${filteredData.length} ejercicios filtrados`);
-      if (filteredData.length > 0) {
-        console.log(
-          '  - Filtrados:',
-          filteredData.map((e: any) => ({
-            name: e.name,
-            hasCustomImage: !e.media_url?.includes('unsplash'),
-            training_days: e.training_days,
-          }))
-        );
-      }
 
       if (filteredData && filteredData.length > 0) {
         // NUEVA ARQUITECTURA: Las alternativas están en exercises.alternatives (array de UUIDs)
@@ -2916,6 +3078,9 @@ function GymScreen() {
         const allAlternativeIds: string[] = [];
         filteredData.forEach((item: any) => {
           const altIds = item.metadata?.alternatives || [];
+          console.log(
+            `📋 Ejercicio "${item.name}": ${altIds.length} IDs de alternativas en metadata`
+          );
           altIds.forEach((id: string) => {
             if (id && !allAlternativeIds.includes(id)) {
               allAlternativeIds.push(id);
@@ -2923,8 +3088,7 @@ function GymScreen() {
           });
         });
 
-        console.log('🔍 DEBUG ALTERNATIVAS:');
-        console.log('  - IDs de alternativas encontrados:', allAlternativeIds.length);
+        console.log('🔍 Alternativas a cargar:', allAlternativeIds.length);
 
         // Cargar los datos de los ejercicios alternativos desde la tabla exercises
         let alternativeExercisesData: any[] = [];
@@ -2938,6 +3102,7 @@ function GymScreen() {
             .in('id', allAlternativeIds);
 
           alternativeExercisesData = altData || [];
+          console.log('  ✅ Alternativas cargadas:', alternativeExercisesData.length);
 
           // Cargar imágenes personalizadas de alternativas (si el usuario las ha cambiado)
           const { data: altConfigs } = await supabase
@@ -3137,27 +3302,21 @@ function GymScreen() {
                   }))
                 : generateDefaultSeries(item.metadata?.sets || '4x10');
 
-            // Mapear alternativas desde exercises.alternatives
+            // Mapear alternativas desde exercises.alternatives (SIMPLIFICADO)
+            // Las alternativas ya están en alternativeExercisesData cargadas desde Supabase
             const alternatives: ExerciseAlternative[] = filteredAlternativeIds
               .map((altId: string) => {
-                // Buscar primero en alternativeExercisesData
-                let altExercise = alternativeExercisesData.find((a: any) => a.id === altId);
+                // Buscar en alternativeExercisesData (cargado de tabla exercises)
+                const altExercise = alternativeExercisesData.find((a: any) => a.id === altId);
 
-                // Si no está ahí, puede ser un ejercicio principal usado como alternativa
                 if (!altExercise) {
-                  // BUGFIX: Buscar por exercise_id (ID de tabla exercises), no por id (user_exercise_config.id)
-                  const mainExercise = filteredData.find((e: any) => e.exercise_id === altId);
-                  if (mainExercise) {
-                    altExercise = {
-                      id: mainExercise.exercise_id, // Usar exercise_id para consistencia
-                      name: mainExercise.name,
-                      default_media_url: mainExercise.media_url,
-                      thumbnail_url: mainExercise.media_url,
-                    };
-                  }
+                  // DEBUG: Log cuando una alternativa no se encuentra
+                  console.warn(
+                    `⚠️ Alternativa ${altId.substring(0, 8)} no encontrada para "${item.name}". ` +
+                      `alternativeExercisesData tiene ${alternativeExercisesData.length} items.`
+                  );
+                  return null;
                 }
-
-                if (!altExercise) return null;
 
                 // Usar imagen personalizada si existe, sino usar la del catálogo
                 const customImage = alternativeCustomMedia[altId];
@@ -3168,20 +3327,17 @@ function GymScreen() {
                   id: altExercise.id,
                   name: altExercise.name,
                   image_url: imageUrl,
-                  videos: exerciseVideosMap[altId] || [], // Cargar videos de esta alternativa
-                  series: seriesForState, // Usar las mismas series del ejercicio principal
+                  videos: exerciseVideosMap[altId] || [],
+                  series: seriesForState,
                 };
               })
               .filter(Boolean) as ExerciseAlternative[];
 
-            // Debug: Log alternativas cargadas para cada ejercicio
-            if (alternatives.length > 0 || filteredAlternativeIds.length > 0) {
-              console.log(`🔄 Ejercicio "${item.name}" (${item.exercise_id?.substring(0, 8)}):`, {
-                idsOriginales: alternativeIds.length,
-                idsFiltrados: filteredAlternativeIds.length,
-                alternativasCargadas: alternatives.length,
-                detalles: alternatives.map((a) => ({ id: a.id?.substring(0, 8), name: a.name })),
-              });
+            // DEBUG: Log del resultado final de alternativas
+            if (filteredAlternativeIds.length !== alternatives.length) {
+              console.warn(
+                `⚠️ "${item.name}": ${filteredAlternativeIds.length} IDs de alternativas → ${alternatives.length} alternativas mapeadas`
+              );
             }
 
             return {
@@ -3235,23 +3391,11 @@ function GymScreen() {
 
         setExercises(mappedExercises);
 
-        // BUGFIX: Validar y limpiar activeAlternatives para evitar índices fuera de rango
-        // Esto corrige el bug donde al cambiar de STRUCTURE a FOCUS, las alternativas
-        // seleccionadas anteriormente podrían no existir en el nuevo array de ejercicios
-        setActiveAlternatives((prev) => {
-          const validated: Record<number, number> = {};
-          Object.entries(prev).forEach(([idxStr, altIdx]) => {
-            const exerciseIndex = parseInt(idxStr, 10);
-            const exercise = mappedExercises[exerciseIndex];
-            if (exercise) {
-              const maxAltIndex = exercise.alternatives?.length || 0;
-              // Clampear el índice de alternativa al rango válido (0 = principal, 1+ = alternativas)
-              validated[exerciseIndex] = Math.min(altIdx, maxAltIndex);
-            }
-            // Si el ejercicio no existe en el nuevo array, simplemente no lo incluimos
-          });
-          return validated;
-        });
+        // BUGFIX: Limpiar activeAlternatives para empezar siempre en el ejercicio principal
+        // Esto evita problemas de índices desincronizados después de reordenar
+        console.log('🧹 loadExercises: Limpiando activeAlternatives para estado limpio');
+        setActiveAlternatives({});
+        activeAlternativesRef.current = {};
 
         // Solo cambiar a FOCUS si no estamos ya en algún modo
         if (viewMode === 'LOADING') {
@@ -3263,12 +3407,14 @@ function GymScreen() {
         setExercises([]);
 
         if (viewMode === 'LOADING') {
-          setViewMode('STRUCTURE');
+          setViewMode('FOCUS');
+          // No abrir modal automáticamente - mostrar pantalla vacía para que el usuario decida
         }
       }
     } catch {
       if (viewMode === 'LOADING') {
-        setViewMode('STRUCTURE');
+        setViewMode('FOCUS');
+        // No abrir modal automáticamente en caso de error
       }
     } finally {
       setLoading(false);
@@ -3857,6 +4003,8 @@ function GymScreen() {
     setModalVisible(false);
     setSeriesConfigFromCatalog(true); // Viene del catálogo
     seriesConfigFromCatalogRef.current = true; // Actualizar ref también
+    // BUGFIX: Capturar el día actual al abrir el modal
+    setSeriesConfigDayIndex(selectedDayIndex);
     setSeriesConfigModalVisible(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
   };
@@ -3916,6 +4064,9 @@ function GymScreen() {
   ) => {
     if (!user) return;
 
+    // BUGFIX: Capturar el día actual al inicio de la operación para evitar race conditions
+    const targetDay = selectedDayIndex;
+
     setAdding(true);
     try {
       // Verificar si ya existe configuración para este ejercicio
@@ -3937,23 +4088,23 @@ function GymScreen() {
         // El ejercicio YA EXISTE - agregar este día a su array training_days
         const currentDays = existingConfig.training_days || [0];
 
-        if (currentDays.includes(selectedDayIndex)) {
+        if (currentDays.includes(targetDay)) {
           // Ya está agregado, no hacer nada
           setAdding(false);
           return;
         }
 
         // Agregar el nuevo día al array
-        const updatedDays = [...currentDays, selectedDayIndex].sort();
+        const updatedDays = [...currentDays, targetDay].sort();
         const currentConfig = existingConfig.config || {};
         const seriesByDay = (currentConfig.series_by_day as Record<string, any[]>) || {};
 
         if (customSeries && customSeries.length > 0) {
-          seriesByDay[String(selectedDayIndex)] = customSeries;
+          seriesByDay[String(targetDay)] = customSeries;
         } else {
           const firstDaySeries = seriesByDay[String(currentDays[0])] || [];
           if (firstDaySeries.length > 0) {
-            seriesByDay[String(selectedDayIndex)] = [...firstDaySeries];
+            seriesByDay[String(targetDay)] = [...firstDaySeries];
           }
         }
 
@@ -3974,7 +4125,7 @@ function GymScreen() {
         // Crear NUEVA configuración
         const seriesByDay: Record<string, any[]> = {};
         if (customSeries) {
-          seriesByDay[String(selectedDayIndex)] = customSeries;
+          seriesByDay[String(targetDay)] = customSeries;
         }
 
         const result = await supabase
@@ -3982,7 +4133,7 @@ function GymScreen() {
           .insert({
             user_id: user.id,
             exercise_id: template.id,
-            training_days: [selectedDayIndex],
+            training_days: [targetDay],
             display_order: exercises.length,
             config: {
               sets: customSeries
@@ -4027,7 +4178,7 @@ function GymScreen() {
           image_url: template.image_url,
           order: data.display_order || 0,
           series: seriesForState,
-          training_days: data.training_days || [selectedDayIndex],
+          training_days: data.training_days || [targetDay],
           videos: [],
           alternatives: [],
         };
@@ -4035,8 +4186,9 @@ function GymScreen() {
         // Actualizar estado local inmediatamente (sin cerrar modal)
         setExercises((prev) => [...prev, newExercise]);
 
-        // Recargar ejercicios silenciosamente para obtener imagen correcta de la BD
-        setTimeout(() => loadExercises(selectedDayIndex, true), 300);
+        // BUGFIX: Cargar ejercicios inmediatamente para obtener alternativas
+        // No usar setTimeout ya que puede causar race conditions al cerrar el modal
+        await loadExercises(targetDay, true);
       }
     } catch (error) {
       console.error('💥 Error adding exercise:', error);
@@ -4141,6 +4293,9 @@ function GymScreen() {
   ) => {
     if (!user) return;
 
+    // BUGFIX: Capturar el día actual al inicio de la operación para evitar race conditions
+    const targetDay = selectedDayIndex;
+
     setAdding(true);
     try {
       // NUEVA ARQUITECTURA: Usar user_exercise_config en lugar de user_assets
@@ -4165,14 +4320,14 @@ function GymScreen() {
         // El ejercicio YA EXISTE - agregar este día a su array training_days
         const currentDays = existingConfig.training_days || [0];
 
-        if (currentDays.includes(selectedDayIndex)) {
+        if (currentDays.includes(targetDay)) {
           alert('Este ejercicio ya está agregado en este día de entrenamiento');
           setAdding(false);
           return;
         }
 
         // Agregar el nuevo día al array
-        const updatedDays = [...currentDays, selectedDayIndex].sort();
+        const updatedDays = [...currentDays, targetDay].sort();
 
         // Obtener config actual para copiar series al nuevo día
         const currentConfig = existingConfig.config || {};
@@ -4180,12 +4335,12 @@ function GymScreen() {
 
         // Si el usuario configuró series personalizadas, usarlas para el nuevo día
         if (customSeries && customSeries.length > 0) {
-          seriesByDay[String(selectedDayIndex)] = customSeries;
+          seriesByDay[String(targetDay)] = customSeries;
         } else {
           // Copiar series del primer día configurado
           const firstDaySeries = seriesByDay[String(currentDays[0])] || [];
           if (firstDaySeries.length > 0) {
-            seriesByDay[String(selectedDayIndex)] = [...firstDaySeries];
+            seriesByDay[String(targetDay)] = [...firstDaySeries];
           }
         }
 
@@ -4209,7 +4364,7 @@ function GymScreen() {
         // Crear NUEVA configuración de usuario para este ejercicio
         const seriesByDay: Record<string, any[]> = {};
         if (customSeries) {
-          seriesByDay[String(selectedDayIndex)] = customSeries;
+          seriesByDay[String(targetDay)] = customSeries;
         }
 
         const result = await supabase
@@ -4217,7 +4372,7 @@ function GymScreen() {
           .insert({
             user_id: user.id,
             exercise_id: template.id, // Referencia al ejercicio global
-            training_days: [selectedDayIndex],
+            training_days: [targetDay],
             display_order: exercises.length,
             config: {
               sets: customSeries
@@ -4263,7 +4418,7 @@ function GymScreen() {
           image_url: template.image_url,
           order: data.display_order || 0,
           series: seriesForState,
-          training_days: data.training_days || [selectedDayIndex],
+          training_days: data.training_days || [targetDay],
           videos: [],
           alternatives: [],
         };
@@ -4271,8 +4426,9 @@ function GymScreen() {
         setExercises([...exercises, newExercise]);
         setModalVisible(false);
 
-        // Recargar ejercicios
-        setTimeout(() => loadExercises(), 500);
+        // BUGFIX: Cargar ejercicios inmediatamente para obtener alternativas
+        // No usar setTimeout ya que puede causar race conditions al cerrar el modal
+        await loadExercises(targetDay, true);
       }
     } catch (error) {
       console.error('💥 Error adding exercise:', error);
@@ -4338,26 +4494,72 @@ function GymScreen() {
     async (fromIndex: number, toIndex: number) => {
       if (fromIndex === toIndex) return;
 
+      // BUGFIX: Validar índices para evitar ejercicios vacíos/undefined
+      if (fromIndex < 0 || fromIndex >= exercises.length) {
+        console.error(
+          '💥 reorderExercises: fromIndex inválido:',
+          fromIndex,
+          'length:',
+          exercises.length
+        );
+        return;
+      }
+      if (toIndex < 0 || toIndex >= exercises.length) {
+        console.error(
+          '💥 reorderExercises: toIndex inválido:',
+          toIndex,
+          'length:',
+          exercises.length
+        );
+        return;
+      }
+
       // Reordenar localmente
       const newExercises = [...exercises];
       const [movedItem] = newExercises.splice(fromIndex, 1);
+
+      // BUGFIX: Verificar que el item movido existe y no es undefined
+      if (!movedItem || !movedItem.id) {
+        console.error('💥 reorderExercises: movedItem es undefined o sin id');
+        return;
+      }
+
       newExercises.splice(toIndex, 0, movedItem);
-      setExercises(newExercises);
+
+      // BUGFIX: Filtrar cualquier elemento undefined o sin id que pudiera haberse colado
+      const cleanedExercises = newExercises.filter((ex) => ex && ex.id);
+
+      // DEBUG: Verificar que las alternativas se mantienen después del reorder
+      console.log('🔄 reorderExercises: Ejercicios después de reordenar:');
+      cleanedExercises.forEach((ex, idx) => {
+        console.log(`   [${idx}] ${ex.name}: ${ex.alternatives?.length || 0} alternativas`);
+      });
+
+      setExercises(cleanedExercises);
+
+      // BUGFIX: Limpiar activeAlternatives después del reorder
+      // Los índices de ejercicios cambian, así que resetear al ejercicio principal (índice 0)
+      console.log('🧹 reorderExercises: Limpiando activeAlternatives');
+      setActiveAlternatives({});
+      activeAlternativesRef.current = {};
 
       // Actualizar orden en Supabase
       // Guardar el nuevo orden como un campo en user_exercise_config
       try {
-        const orderUpdates = newExercises.map((ex, idx) => ({
+        const orderUpdates = cleanedExercises.map((ex, idx) => ({
           id: ex.id,
           display_order: idx,
         }));
 
-        for (const update of orderUpdates) {
-          await supabase
-            .from('user_exercise_config')
-            .update({ display_order: update.display_order })
-            .eq('id', update.id);
-        }
+        // BUGFIX: Usar Promise.all para actualizar todos a la vez y evitar race conditions
+        await Promise.all(
+          orderUpdates.map((update) =>
+            supabase
+              .from('user_exercise_config')
+              .update({ display_order: update.display_order })
+              .eq('id', update.id)
+          )
+        );
 
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       } catch (error) {
@@ -4392,6 +4594,22 @@ function GymScreen() {
         lastAccessDate: new Date().toISOString(),
       }));
     }
+
+    // SOLUCIÓN MEJORADA: Cargar datos frescos sin limpiar estado
+    // Esto evita el flash de "sin ejercicios" y mantiene una mejor UX
+    console.log('🔄 saveAndTrain: Cargando datos frescos...');
+
+    // Paso 1: Cargar datos frescos desde Supabase
+    await loadExercises(selectedDayIndex, true);
+
+    // Paso 2: Incrementar key UNA SOLA VEZ para forzar re-render con datos nuevos
+    setListRefreshKey((prev) => prev + 1);
+
+    console.log('✅ saveAndTrain: Datos frescos cargados');
+    console.log('   Ejercicios:', exercisesRef.current.length);
+    exercisesRef.current.forEach((e, i) => {
+      console.log(`   [${i}] ${e.name}: ${e.alternatives?.length || 0} alternativas`);
+    });
 
     setViewMode('FOCUS');
   };
@@ -5044,645 +5262,756 @@ function GymScreen() {
   };
 
   // ============================================================================
-  // RENDER STRUCTURE MODE - ED HARDY FIRE STYLE
+  // RENDER STRUCTURE MODAL - ED HARDY FIRE STYLE (Arrastrable)
   // ============================================================================
-  if (viewMode === 'STRUCTURE') {
+  const renderStructureModal = () => {
     return (
-      <View className="flex-1 bg-black">
-        {/* HEADER - SAVAGE FIRE STYLE */}
-        <View className="relative pb-5 px-4" style={{ paddingTop: insets.top + 12 }}>
-          <LinearGradient
-            colors={['#1a0805', '#0d0502', '#000000']}
-            start={{ x: 0.5, y: 0 }}
-            end={{ x: 0.5, y: 1 }}
-            className="absolute inset-0"
-          />
-
-          {/* Fire glow effect */}
-          <View
-            className="absolute top-0 left-0 right-0 h-32"
-            style={{
-              backgroundColor: 'rgba(249, 115, 22, 0.08)',
-            }}
-          />
-
-          {/* Header Row */}
-          <View className="flex-row items-center justify-between mb-5">
-            <View>
-              <View className="flex-row items-center gap-2">
-                <View
-                  className="w-10 h-10 rounded-xl items-center justify-center"
-                  style={{
-                    backgroundColor: '#DC2626',
-                    shadowColor: '#DC2626',
-                    shadowOffset: { width: 0, height: 0 },
-                    shadowOpacity: 0.6,
-                    shadowRadius: 12,
-                  }}
-                >
-                  <Sliders size={20} color="#fff" />
-                </View>
-                <View>
-                  <Text
-                    className="text-white text-xl font-bold tracking-tight"
-                    style={{
-                      textShadowColor: '#F97316',
-                      textShadowOffset: { width: 0, height: 0 },
-                      textShadowRadius: 8,
-                    }}
-                  >
-                    ESTRUCTURA
-                  </Text>
-                  <Text className="text-zinc-500 text-[10px] uppercase tracking-widest font-mono">
-                    {isExternalMode
-                      ? `⚡ PERSONALIZADO • ${Object.keys(externalSchedule).length} DÍAS`
-                      : `${trainingProgram.days.length} DÍAS • ${exercises.length} EJERCICIOS`}
-                  </Text>
-                </View>
-              </View>
-            </View>
-            <TouchableOpacity
-              onPress={async () => {
-                if (exercises.length > 0) {
-                  // Actualizar el día de entrenamiento actual en la BD
-                  if (user && selectedDayIndex !== trainingProgram.currentDayIndex) {
-                    const today = new Date();
-                    today.setHours(0, 0, 0, 0);
-                    const todayISO = today.toISOString();
-
-                    await supabase
-                      .from('profiles')
-                      .update({
-                        training_last_access: todayISO,
-                        training_current_day: selectedDayIndex,
-                      })
-                      .eq('id', user.id);
-
-                    setTrainingProgram((prev) => ({
-                      ...prev,
-                      lastAccessDate: todayISO,
-                      currentDayIndex: selectedDayIndex,
-                    }));
-                    console.log('🏋️ Día de entrenamiento actualizado a:', selectedDayIndex);
-                  }
-                  setViewMode('FOCUS');
-                }
-              }}
-              disabled={exercises.length === 0}
-              className="flex-row items-center gap-2 px-5 py-3 rounded-xl"
-              style={
-                exercises.length > 0
-                  ? {
-                      backgroundColor: '#DC2626',
-                      shadowColor: '#DC2626',
-                      shadowOffset: { width: 0, height: 4 },
-                      shadowOpacity: 0.5,
-                      shadowRadius: 12,
-                    }
-                  : {
-                      backgroundColor: '#27272a',
-                    }
-              }
-            >
-              <Play
-                size={16}
-                color={exercises.length > 0 ? '#fff' : '#71717a'}
-                fill={exercises.length > 0 ? '#fff' : '#71717a'}
-              />
-              <Text
-                className={`font-bold text-sm ${exercises.length > 0 ? 'text-white' : 'text-zinc-500'}`}
-              >
-                ENTRENAR
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* DAYS SELECTOR - Horizontal Pills (MODO GYM o PERSONALIZADO) */}
-          <View className="mb-2">
-            <Text className="text-zinc-600 text-[10px] font-mono mb-2 uppercase tracking-wider">
-              {isExternalMode
-                ? 'Selecciona un día para agregar ejercicios'
-                : 'Selecciona el día a configurar'}
-            </Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} className="-mx-4 px-4">
-              {/* MODO PERSONALIZADO: Días seleccionables */}
-              {isExternalMode &&
-                Object.entries(externalSchedule).map(([dayName, muscleGroup], index) => {
-                  const isActive = selectedDayIndex === index;
-                  return (
-                    <TouchableOpacity
-                      key={dayName}
-                      onPress={() => {
-                        syncSelectedDay(index);
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                      }}
-                      onLongPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-                        Alert.alert(
-                          '🗑️ Eliminar día',
-                          `¿Eliminar "${dayName}: ${muscleGroup}" de tu plan personalizado?`,
-                          [
-                            { text: 'Cancelar', style: 'cancel' },
-                            {
-                              text: 'Eliminar',
-                              style: 'destructive',
-                              onPress: async () => {
-                                const deletedDayIndex = index;
-
-                                // Eliminar el día del external_schedule
-                                const newSchedule = { ...externalSchedule };
-                                delete newSchedule[dayName];
-
-                                // Actualizar en Supabase
-                                if (user) {
-                                  // 1. Actualizar external_schedule en user_profiles
-                                  await supabase
-                                    .from('user_profiles')
-                                    .update({
-                                      external_schedule: newSchedule,
-                                      training_days_per_week: Object.keys(newSchedule).length,
-                                    })
-                                    .eq('user_id', user.id);
-
-                                  // 2. SINCRONIZAR: También actualizar profiles para evitar desincronización
-                                  const newRoutineNames: Record<string, string> = {};
-                                  Object.entries(newSchedule).forEach(([day, muscle], idx) => {
-                                    newRoutineNames[String(idx)] = `${day}: ${muscle}`;
-                                  });
-
-                                  await supabase
-                                    .from('profiles')
-                                    .update({
-                                      training_frequency: Object.keys(newSchedule).length,
-                                      training_routine_names: newRoutineNames,
-                                    })
-                                    .eq('id', user.id);
-
-                                  // 3. ELIMINAR/ACTUALIZAR EJERCICIOS del día eliminado
-                                  const { data: userExercises } = await supabase
-                                    .from('user_exercise_config')
-                                    .select('id, training_days, config')
-                                    .eq('user_id', user.id);
-
-                                  if (userExercises) {
-                                    for (const ex of userExercises) {
-                                      const currentDays: number[] = ex.training_days || [];
-                                      // Remover el día eliminado y reindexar días mayores
-                                      const newDays = currentDays
-                                        .filter((d: number) => d !== deletedDayIndex)
-                                        .map((d: number) => (d > deletedDayIndex ? d - 1 : d));
-
-                                      // Limpiar series_by_day en config
-                                      const config = ex.config || {};
-                                      const seriesByDay =
-                                        (config.series_by_day as Record<string, unknown>) || {};
-                                      const newSeriesByDay: Record<string, unknown> = {};
-
-                                      Object.entries(seriesByDay).forEach(([dayKey, series]) => {
-                                        const dayNum = parseInt(dayKey);
-                                        if (dayNum !== deletedDayIndex) {
-                                          const newKey =
-                                            dayNum > deletedDayIndex ? String(dayNum - 1) : dayKey;
-                                          newSeriesByDay[newKey] = series;
-                                        }
-                                      });
-
-                                      if (newDays.length === 0) {
-                                        // Eliminar ejercicio si ya no tiene días
-                                        await supabase
-                                          .from('user_exercise_config')
-                                          .delete()
-                                          .eq('id', ex.id);
-                                      } else {
-                                        await supabase
-                                          .from('user_exercise_config')
-                                          .update({
-                                            training_days: newDays,
-                                            config: { ...config, series_by_day: newSeriesByDay },
-                                          })
-                                          .eq('id', ex.id);
-                                      }
-                                    }
-                                  }
-
-                                  // 4. Actualizar estado local
-                                  setExternalSchedule(newSchedule);
-                                  setTrainingProgram((prev) => ({
-                                    ...prev,
-                                    frequency: Object.keys(newSchedule).length,
-                                    days: Object.entries(newSchedule).map(([day, muscle], idx) => ({
-                                      id: String(idx + 1),
-                                      muscleGroups: `${day}: ${muscle}`,
-                                      exercises: [],
-                                    })),
-                                  }));
-
-                                  // Si no quedan días, desactivar modo personalizado
-                                  if (Object.keys(newSchedule).length === 0) {
-                                    await supabase
-                                      .from('user_profiles')
-                                      .update({ training_mode: 'none' })
-                                      .eq('user_id', user.id);
-                                    setIsExternalMode(false);
-                                  }
-
-                                  // Ajustar índice seleccionado
-                                  const newIndex = Math.max(
-                                    0,
-                                    Math.min(selectedDayIndex, Object.keys(newSchedule).length - 1)
-                                  );
-                                  syncSelectedDay(newIndex);
-
-                                  // Recargar ejercicios del nuevo día seleccionado
-                                  loadExercises(newIndex);
-                                }
-
-                                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-                              },
-                            },
-                          ]
-                        );
-                      }}
-                      className="mr-2.5 px-4 py-2.5 rounded-xl"
-                      style={
-                        isActive
-                          ? {
-                              backgroundColor: '#a855f7',
-                              shadowColor: '#a855f7',
-                              shadowOffset: { width: 0, height: 4 },
-                              shadowOpacity: 0.5,
-                              shadowRadius: 12,
-                            }
-                          : {
-                              backgroundColor: '#1a0a2e',
-                              borderWidth: 1,
-                              borderColor: '#a855f750',
-                            }
-                      }
-                    >
-                      <View className="flex-row items-center gap-2">
-                        <View
-                          className="w-6 h-6 rounded-lg items-center justify-center"
-                          style={{
-                            backgroundColor: isActive ? 'rgba(0,0,0,0.3)' : 'rgba(168,85,247,0.2)',
-                          }}
-                        >
-                          <Text
-                            className={`font-bold text-xs font-mono ${isActive ? 'text-white' : 'text-purple-400'}`}
-                          >
-                            {index + 1}
-                          </Text>
-                        </View>
-                        <View>
-                          <Text
-                            className={`font-bold text-[10px] uppercase tracking-wide ${isActive ? 'text-white' : 'text-purple-300'}`}
-                          >
-                            {dayName}
-                          </Text>
-                          <Text
-                            className={`font-bold text-xs uppercase ${isActive ? 'text-white' : 'text-zinc-300'}`}
-                            numberOfLines={1}
-                          >
-                            {muscleGroup}
-                          </Text>
-                        </View>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
-
-              {/* MODO GYM MODULE: Mostrar días del trainingProgram */}
-              {!isExternalMode &&
-                trainingProgram.days.map((day, index) => {
-                  const isActive = selectedDayIndex === index;
-                  const isCurrent = trainingProgram.currentDayIndex === index;
-
-                  return (
-                    <TouchableOpacity
-                      key={day.id}
-                      onPress={() => {
-                        setSelectedDayIndex(index);
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                      }}
-                      onLongPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-                        Alert.alert(
-                          '🗑️ Eliminar día',
-                          `¿Eliminar "${day.muscleGroups}" y todos sus ejercicios?`,
-                          [
-                            { text: 'Cancelar', style: 'cancel' },
-                            {
-                              text: 'Eliminar',
-                              style: 'destructive',
-                              onPress: async () => {
-                                const deletedDayIndex = index;
-
-                                // Eliminar el día seleccionado
-                                const updatedDays = trainingProgram.days.filter(
-                                  (_, i) => i !== deletedDayIndex
-                                );
-                                const newSelectedIndex =
-                                  updatedDays.length > 0
-                                    ? Math.min(selectedDayIndex, updatedDays.length - 1)
-                                    : 0;
-
-                                setTrainingProgram((prev) => ({
-                                  ...prev,
-                                  frequency: updatedDays.length,
-                                  days: updatedDays.map((d, i) => ({ ...d, id: String(i + 1) })),
-                                  currentDayIndex:
-                                    updatedDays.length > 0
-                                      ? Math.min(prev.currentDayIndex, updatedDays.length - 1)
-                                      : 0,
-                                }));
-                                setSelectedDayIndex(newSelectedIndex);
-
-                                // Actualizar en Supabase
-                                if (user) {
-                                  // Reconstruir los nombres de rutina
-                                  const updatedNames: Record<string, string> = {};
-                                  updatedDays.forEach((d, i) => {
-                                    updatedNames[String(i)] = d.muscleGroups;
-                                  });
-
-                                  await supabase
-                                    .from('profiles')
-                                    .update({
-                                      training_frequency: updatedDays.length,
-                                      training_current_day:
-                                        updatedDays.length > 0
-                                          ? Math.min(
-                                              trainingProgram.currentDayIndex,
-                                              updatedDays.length - 1
-                                            )
-                                          : 0,
-                                      training_routine_names: updatedNames,
-                                    })
-                                    .eq('id', user.id);
-
-                                  // Actualizar training_days de todos los ejercicios del usuario
-                                  const { data: userExercises } = await supabase
-                                    .from('user_exercise_config')
-                                    .select('id, training_days, config')
-                                    .eq('user_id', user.id);
-
-                                  if (userExercises) {
-                                    for (const ex of userExercises) {
-                                      const currentDays: number[] = ex.training_days || [];
-                                      // Remover el día eliminado y reindexar días mayores
-                                      const newDays = currentDays
-                                        .filter((d: number) => d !== deletedDayIndex)
-                                        .map((d: number) => (d > deletedDayIndex ? d - 1 : d));
-
-                                      // También limpiar series_by_day en config
-                                      const config = ex.config || {};
-                                      const seriesByDay =
-                                        (config.series_by_day as Record<string, unknown>) || {};
-                                      const newSeriesByDay: Record<string, unknown> = {};
-
-                                      Object.entries(seriesByDay).forEach(([dayKey, series]) => {
-                                        const dayNum = parseInt(dayKey);
-                                        if (dayNum !== deletedDayIndex) {
-                                          const newKey =
-                                            dayNum > deletedDayIndex ? String(dayNum - 1) : dayKey;
-                                          newSeriesByDay[newKey] = series;
-                                        }
-                                      });
-
-                                      await supabase
-                                        .from('user_exercise_config')
-                                        .update({
-                                          training_days: newDays,
-                                          config: { ...config, series_by_day: newSeriesByDay },
-                                        })
-                                        .eq('id', ex.id);
-                                    }
-                                  }
-                                }
-                                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-                                loadExercises(newSelectedIndex);
-                              },
-                            },
-                          ]
-                        );
-                      }}
-                      className="mr-2.5 px-4 py-2.5 rounded-xl"
-                      style={
-                        isActive
-                          ? {
-                              backgroundColor: '#F97316',
-                              shadowColor: '#F97316',
-                              shadowOffset: { width: 0, height: 4 },
-                              shadowOpacity: 0.5,
-                              shadowRadius: 12,
-                            }
-                          : {
-                              backgroundColor: '#18181b',
-                              borderWidth: 1,
-                              borderColor: '#27272a',
-                            }
-                      }
-                    >
-                      <View className="flex-row items-center gap-2">
-                        {/* Day Number Badge */}
-                        <View
-                          className="w-6 h-6 rounded-lg items-center justify-center"
-                          style={{
-                            backgroundColor: isActive ? 'rgba(0,0,0,0.3)' : '#27272a',
-                          }}
-                        >
-                          <Text
-                            className={`font-bold text-xs font-mono ${isActive ? 'text-white' : 'text-zinc-500'}`}
-                          >
-                            {index + 1}
-                          </Text>
-                        </View>
-                        <View>
-                          <Text
-                            className={`font-bold text-xs uppercase tracking-wide ${
-                              isActive ? 'text-black' : 'text-zinc-300'
-                            }`}
-                            numberOfLines={1}
-                          >
-                            {day.muscleGroups}
-                          </Text>
-                          {isCurrent && (
-                            <Text
-                              className={`text-[8px] font-mono ${isActive ? 'text-black/60' : 'text-green-500'}`}
-                            >
-                              • HOY
-                            </Text>
-                          )}
-                        </View>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
-
-              {/* BOTÓN AGREGAR DÍA - En modo GYM y PERSONALIZADO */}
-              <TouchableOpacity
-                onPress={() => {
-                  if (trainingProgram.days.length >= 7) {
-                    Alert.alert('Límite alcanzado', 'Máximo 7 días de entrenamiento');
-                    return;
-                  }
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                  setSelectedMuscleGroups([]);
-                  setAddDayModalVisible(true);
-                }}
-                className="px-4 py-2.5 rounded-xl border-2 border-dashed items-center justify-center flex-row gap-2"
-                style={{
-                  minWidth: 60,
-                  borderColor: isExternalMode ? '#a855f750' : '#3f3f46',
-                  backgroundColor: isExternalMode ? '#1a0a2e' : 'transparent',
-                }}
-              >
-                <Plus size={16} color={isExternalMode ? '#a855f7' : '#F97316'} />
-                <Text
-                  className="font-bold text-xs"
-                  style={{ color: isExternalMode ? '#a855f7' : '#F97316' }}
-                >
-                  NUEVO
-                </Text>
-              </TouchableOpacity>
-            </ScrollView>
-          </View>
-        </View>
-
-        {/* EXERCISES LIST - DRAG & DROP */}
-        <GestureHandlerRootView style={{ flex: 1 }}>
-          <ScrollView
-            className="flex-1 px-4 pt-3"
-            showsVerticalScrollIndicator={false}
-            scrollEnabled={!isDraggingExercise}
+      <Modal
+        visible={structureModalOpen}
+        animationType="none"
+        transparent={true}
+        onRequestClose={closeStructureWithAnimation}
+      >
+        <View className="flex-1 bg-black/80 justify-end">
+          <Animated.View
+            style={[
+              {
+                height: '92%',
+                backgroundColor: '#000',
+                borderTopLeftRadius: 24,
+                borderTopRightRadius: 24,
+                borderTopWidth: 2,
+                borderTopColor: 'rgba(220, 38, 38, 0.5)',
+                overflow: 'hidden',
+              },
+              animatedStyleStructure,
+            ]}
           >
-            {exercises.length === 0 ? (
-              <View className="flex-1 justify-center items-center py-20">
-                <View
-                  className="w-20 h-20 rounded-2xl items-center justify-center mb-5"
-                  style={{
-                    backgroundColor: '#0a0500',
-                    borderWidth: 2,
-                    borderColor: '#F97316',
-                    shadowColor: '#F97316',
-                    shadowOffset: { width: 0, height: 0 },
-                    shadowOpacity: 0.3,
-                    shadowRadius: 16,
-                  }}
-                >
-                  <Plus size={32} color="#F97316" />
+            {/* Línea de acento roja */}
+            <View
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                height: 3,
+                backgroundColor: '#DC2626',
+                shadowColor: '#DC2626',
+                shadowOffset: { width: 0, height: 0 },
+                shadowOpacity: 0.8,
+                shadowRadius: 10,
+                zIndex: 10,
+              }}
+            />
+
+            {/* Contenido scrolleable */}
+            <View className="flex-1">
+              {/* HEADER ARRASTRABLE - SAVAGE FIRE STYLE */}
+              <Animated.View className="relative pb-5 px-4" {...panResponderStructure.panHandlers}>
+                {/* Drag Handle */}
+                <View className="items-center pt-4 pb-3">
+                  <View className="w-12 h-1.5 bg-zinc-600 rounded-full" />
                 </View>
-                <Text className="text-zinc-400 text-center mb-2 text-base font-bold">
-                  Sin ejercicios configurados
-                </Text>
-                <Text className="text-zinc-600 text-center mb-6 text-xs">
-                  {trainingProgram.days.length === 0
-                    ? 'Primero agrega un día de entrenamiento'
-                    : 'Agrega ejercicios para este día de entrenamiento'}
-                </Text>
-                <TouchableOpacity
-                  onPress={() => setModalVisible(true)}
-                  disabled={trainingProgram.days.length === 0}
-                  className="px-8 py-4 rounded-xl"
-                  style={
-                    trainingProgram.days.length === 0
-                      ? {
-                          backgroundColor: '#18181b',
-                          borderWidth: 2,
-                          borderColor: '#3f3f46',
+                <LinearGradient
+                  colors={['#1a0805', '#0d0502', '#000000']}
+                  start={{ x: 0.5, y: 0 }}
+                  end={{ x: 0.5, y: 1 }}
+                  className="absolute inset-0"
+                />
+
+                {/* Fire glow effect */}
+                <View
+                  className="absolute top-0 left-0 right-0 h-32"
+                  style={{
+                    backgroundColor: 'rgba(249, 115, 22, 0.08)',
+                  }}
+                />
+
+                {/* Header Row */}
+                <View className="flex-row items-center justify-between mb-5">
+                  <View>
+                    <View className="flex-row items-center gap-2">
+                      <View
+                        className="w-10 h-10 rounded-xl items-center justify-center"
+                        style={{
+                          backgroundColor: '#DC2626',
+                          shadowColor: '#DC2626',
+                          shadowOffset: { width: 0, height: 0 },
+                          shadowOpacity: 0.6,
+                          shadowRadius: 12,
+                        }}
+                      >
+                        <Sliders size={20} color="#fff" />
+                      </View>
+                      <View>
+                        <Text
+                          className="text-white text-xl font-bold tracking-tight"
+                          style={{
+                            textShadowColor: '#F97316',
+                            textShadowOffset: { width: 0, height: 0 },
+                            textShadowRadius: 8,
+                          }}
+                        >
+                          ESTRUCTURA
+                        </Text>
+                        <Text className="text-zinc-500 text-[10px] uppercase tracking-widest font-mono">
+                          {isExternalMode
+                            ? `⚡ PERSONALIZADO • ${Object.keys(externalSchedule).length} DÍAS`
+                            : `${trainingProgram.days.length} DÍAS • ${exercises.length} EJERCICIOS`}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                  <TouchableOpacity
+                    onPress={async () => {
+                      if (exercises.length > 0) {
+                        // Actualizar el día de entrenamiento actual en la BD
+                        if (user && selectedDayIndex !== trainingProgram.currentDayIndex) {
+                          const today = new Date();
+                          today.setHours(0, 0, 0, 0);
+                          const todayISO = today.toISOString();
+
+                          await supabase
+                            .from('profiles')
+                            .update({
+                              training_last_access: todayISO,
+                              training_current_day: selectedDayIndex,
+                            })
+                            .eq('id', user.id);
+
+                          setTrainingProgram((prev) => ({
+                            ...prev,
+                            lastAccessDate: todayISO,
+                            currentDayIndex: selectedDayIndex,
+                          }));
+                          console.log('🏋️ Día de entrenamiento actualizado a:', selectedDayIndex);
                         }
-                      : {
+                        // Cerrar modal con animación y recargar desde BD
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                        translateYStructure.value = withTiming(
+                          800,
+                          { duration: 250, easing: Easing.out(Easing.ease) },
+                          () => runOnJS(closeStructureWithAnimation)()
+                        );
+                      }
+                    }}
+                    disabled={exercises.length === 0}
+                    className="flex-row items-center gap-2 px-5 py-3 rounded-xl"
+                    style={
+                      exercises.length > 0
+                        ? {
+                            backgroundColor: '#DC2626',
+                            shadowColor: '#DC2626',
+                            shadowOffset: { width: 0, height: 4 },
+                            shadowOpacity: 0.5,
+                            shadowRadius: 12,
+                          }
+                        : {
+                            backgroundColor: '#27272a',
+                          }
+                    }
+                  >
+                    <Play
+                      size={16}
+                      color={exercises.length > 0 ? '#fff' : '#71717a'}
+                      fill={exercises.length > 0 ? '#fff' : '#71717a'}
+                    />
+                    <Text
+                      className={`font-bold text-sm ${exercises.length > 0 ? 'text-white' : 'text-zinc-500'}`}
+                    >
+                      ENTRENAR
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* DAYS SELECTOR - Horizontal Pills (MODO GYM o PERSONALIZADO) */}
+                <View className="mb-2">
+                  <Text className="text-zinc-600 text-[10px] font-mono mb-2 uppercase tracking-wider">
+                    {isExternalMode
+                      ? 'Selecciona un día para agregar ejercicios'
+                      : 'Selecciona el día a configurar'}
+                  </Text>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    className="-mx-4 px-4"
+                  >
+                    {/* MODO PERSONALIZADO: Días seleccionables */}
+                    {isExternalMode &&
+                      Object.entries(externalSchedule).map(([dayName, muscleGroup], index) => {
+                        const isActive = selectedDayIndex === index;
+                        return (
+                          <TouchableOpacity
+                            key={dayName}
+                            onPress={() => {
+                              syncSelectedDay(index);
+                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                            }}
+                            onLongPress={() => {
+                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                              Alert.alert(
+                                '🗑️ Eliminar día',
+                                `¿Eliminar "${dayName}: ${muscleGroup}" de tu plan personalizado?`,
+                                [
+                                  { text: 'Cancelar', style: 'cancel' },
+                                  {
+                                    text: 'Eliminar',
+                                    style: 'destructive',
+                                    onPress: async () => {
+                                      const deletedDayIndex = index;
+
+                                      // Eliminar el día del external_schedule
+                                      const newSchedule = { ...externalSchedule };
+                                      delete newSchedule[dayName];
+
+                                      // Actualizar en Supabase
+                                      if (user) {
+                                        // 1. Actualizar external_schedule en user_profiles
+                                        await supabase
+                                          .from('user_profiles')
+                                          .update({
+                                            external_schedule: newSchedule,
+                                            training_days_per_week: Object.keys(newSchedule).length,
+                                          })
+                                          .eq('user_id', user.id);
+
+                                        // 2. SINCRONIZAR: También actualizar profiles para evitar desincronización
+                                        const newRoutineNames: Record<string, string> = {};
+                                        Object.entries(newSchedule).forEach(
+                                          ([day, muscle], idx) => {
+                                            newRoutineNames[String(idx)] = `${day}: ${muscle}`;
+                                          }
+                                        );
+
+                                        await supabase
+                                          .from('profiles')
+                                          .update({
+                                            training_frequency: Object.keys(newSchedule).length,
+                                            training_routine_names: newRoutineNames,
+                                          })
+                                          .eq('id', user.id);
+
+                                        // 3. ELIMINAR/ACTUALIZAR EJERCICIOS del día eliminado
+                                        const { data: userExercises } = await supabase
+                                          .from('user_exercise_config')
+                                          .select('id, training_days, config')
+                                          .eq('user_id', user.id);
+
+                                        if (userExercises) {
+                                          for (const ex of userExercises) {
+                                            const currentDays: number[] = ex.training_days || [];
+                                            // Remover el día eliminado y reindexar días mayores
+                                            const newDays = currentDays
+                                              .filter((d: number) => d !== deletedDayIndex)
+                                              .map((d: number) =>
+                                                d > deletedDayIndex ? d - 1 : d
+                                              );
+
+                                            // Limpiar series_by_day en config
+                                            const config = ex.config || {};
+                                            const seriesByDay =
+                                              (config.series_by_day as Record<string, unknown>) ||
+                                              {};
+                                            const newSeriesByDay: Record<string, unknown> = {};
+
+                                            Object.entries(seriesByDay).forEach(
+                                              ([dayKey, series]) => {
+                                                const dayNum = parseInt(dayKey);
+                                                if (dayNum !== deletedDayIndex) {
+                                                  const newKey =
+                                                    dayNum > deletedDayIndex
+                                                      ? String(dayNum - 1)
+                                                      : dayKey;
+                                                  newSeriesByDay[newKey] = series;
+                                                }
+                                              }
+                                            );
+
+                                            if (newDays.length === 0) {
+                                              // Eliminar ejercicio si ya no tiene días
+                                              await supabase
+                                                .from('user_exercise_config')
+                                                .delete()
+                                                .eq('id', ex.id);
+                                            } else {
+                                              await supabase
+                                                .from('user_exercise_config')
+                                                .update({
+                                                  training_days: newDays,
+                                                  config: {
+                                                    ...config,
+                                                    series_by_day: newSeriesByDay,
+                                                  },
+                                                })
+                                                .eq('id', ex.id);
+                                            }
+                                          }
+                                        }
+
+                                        // 4. Actualizar estado local
+                                        setExternalSchedule(newSchedule);
+                                        setTrainingProgram((prev) => ({
+                                          ...prev,
+                                          frequency: Object.keys(newSchedule).length,
+                                          days: Object.entries(newSchedule).map(
+                                            ([day, muscle], idx) => ({
+                                              id: String(idx + 1),
+                                              muscleGroups: `${day}: ${muscle}`,
+                                              exercises: [],
+                                            })
+                                          ),
+                                        }));
+
+                                        // Si no quedan días, desactivar modo personalizado
+                                        if (Object.keys(newSchedule).length === 0) {
+                                          await supabase
+                                            .from('user_profiles')
+                                            .update({ training_mode: 'none' })
+                                            .eq('user_id', user.id);
+                                          setIsExternalMode(false);
+                                        }
+
+                                        // Ajustar índice seleccionado
+                                        const newIndex = Math.max(
+                                          0,
+                                          Math.min(
+                                            selectedDayIndex,
+                                            Object.keys(newSchedule).length - 1
+                                          )
+                                        );
+                                        syncSelectedDay(newIndex);
+
+                                        // Recargar ejercicios del nuevo día seleccionado
+                                        loadExercises(newIndex);
+                                      }
+
+                                      Haptics.notificationAsync(
+                                        Haptics.NotificationFeedbackType.Warning
+                                      );
+                                    },
+                                  },
+                                ]
+                              );
+                            }}
+                            className="mr-2.5 px-4 py-2.5 rounded-xl"
+                            style={
+                              isActive
+                                ? {
+                                    backgroundColor: '#a855f7',
+                                    shadowColor: '#a855f7',
+                                    shadowOffset: { width: 0, height: 4 },
+                                    shadowOpacity: 0.5,
+                                    shadowRadius: 12,
+                                  }
+                                : {
+                                    backgroundColor: '#1a0a2e',
+                                    borderWidth: 1,
+                                    borderColor: '#a855f750',
+                                  }
+                            }
+                          >
+                            <View className="flex-row items-center gap-2">
+                              <View
+                                className="w-6 h-6 rounded-lg items-center justify-center"
+                                style={{
+                                  backgroundColor: isActive
+                                    ? 'rgba(0,0,0,0.3)'
+                                    : 'rgba(168,85,247,0.2)',
+                                }}
+                              >
+                                <Text
+                                  className={`font-bold text-xs font-mono ${isActive ? 'text-white' : 'text-purple-400'}`}
+                                >
+                                  {index + 1}
+                                </Text>
+                              </View>
+                              <View>
+                                <Text
+                                  className={`font-bold text-[10px] uppercase tracking-wide ${isActive ? 'text-white' : 'text-purple-300'}`}
+                                >
+                                  {dayName}
+                                </Text>
+                                <Text
+                                  className={`font-bold text-xs uppercase ${isActive ? 'text-white' : 'text-zinc-300'}`}
+                                  numberOfLines={1}
+                                >
+                                  {muscleGroup}
+                                </Text>
+                              </View>
+                            </View>
+                          </TouchableOpacity>
+                        );
+                      })}
+
+                    {/* MODO GYM MODULE: Mostrar días del trainingProgram */}
+                    {!isExternalMode &&
+                      trainingProgram.days.map((day, index) => {
+                        const isActive = selectedDayIndex === index;
+                        const isCurrent = trainingProgram.currentDayIndex === index;
+
+                        return (
+                          <TouchableOpacity
+                            key={day.id}
+                            onPress={() => {
+                              setSelectedDayIndex(index);
+                              // BUGFIX: Cargar ejercicios del día seleccionado
+                              loadExercises(index, true);
+                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                            }}
+                            onLongPress={() => {
+                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                              Alert.alert(
+                                '🗑️ Eliminar día',
+                                `¿Eliminar "${day.muscleGroups}" y todos sus ejercicios?`,
+                                [
+                                  { text: 'Cancelar', style: 'cancel' },
+                                  {
+                                    text: 'Eliminar',
+                                    style: 'destructive',
+                                    onPress: async () => {
+                                      const deletedDayIndex = index;
+
+                                      // Eliminar el día seleccionado
+                                      const updatedDays = trainingProgram.days.filter(
+                                        (_, i) => i !== deletedDayIndex
+                                      );
+                                      const newSelectedIndex =
+                                        updatedDays.length > 0
+                                          ? Math.min(selectedDayIndex, updatedDays.length - 1)
+                                          : 0;
+
+                                      setTrainingProgram((prev) => ({
+                                        ...prev,
+                                        frequency: updatedDays.length,
+                                        days: updatedDays.map((d, i) => ({
+                                          ...d,
+                                          id: String(i + 1),
+                                        })),
+                                        currentDayIndex:
+                                          updatedDays.length > 0
+                                            ? Math.min(prev.currentDayIndex, updatedDays.length - 1)
+                                            : 0,
+                                      }));
+                                      setSelectedDayIndex(newSelectedIndex);
+
+                                      // Actualizar en Supabase
+                                      if (user) {
+                                        // Reconstruir los nombres de rutina
+                                        const updatedNames: Record<string, string> = {};
+                                        updatedDays.forEach((d, i) => {
+                                          updatedNames[String(i)] = d.muscleGroups;
+                                        });
+
+                                        await supabase
+                                          .from('profiles')
+                                          .update({
+                                            training_frequency: updatedDays.length,
+                                            training_current_day:
+                                              updatedDays.length > 0
+                                                ? Math.min(
+                                                    trainingProgram.currentDayIndex,
+                                                    updatedDays.length - 1
+                                                  )
+                                                : 0,
+                                            training_routine_names: updatedNames,
+                                          })
+                                          .eq('id', user.id);
+
+                                        // Actualizar training_days de todos los ejercicios del usuario
+                                        const { data: userExercises } = await supabase
+                                          .from('user_exercise_config')
+                                          .select('id, training_days, config')
+                                          .eq('user_id', user.id);
+
+                                        if (userExercises) {
+                                          for (const ex of userExercises) {
+                                            const currentDays: number[] = ex.training_days || [];
+                                            // Remover el día eliminado y reindexar días mayores
+                                            const newDays = currentDays
+                                              .filter((d: number) => d !== deletedDayIndex)
+                                              .map((d: number) =>
+                                                d > deletedDayIndex ? d - 1 : d
+                                              );
+
+                                            // También limpiar series_by_day en config
+                                            const config = ex.config || {};
+                                            const seriesByDay =
+                                              (config.series_by_day as Record<string, unknown>) ||
+                                              {};
+                                            const newSeriesByDay: Record<string, unknown> = {};
+
+                                            Object.entries(seriesByDay).forEach(
+                                              ([dayKey, series]) => {
+                                                const dayNum = parseInt(dayKey);
+                                                if (dayNum !== deletedDayIndex) {
+                                                  const newKey =
+                                                    dayNum > deletedDayIndex
+                                                      ? String(dayNum - 1)
+                                                      : dayKey;
+                                                  newSeriesByDay[newKey] = series;
+                                                }
+                                              }
+                                            );
+
+                                            await supabase
+                                              .from('user_exercise_config')
+                                              .update({
+                                                training_days: newDays,
+                                                config: {
+                                                  ...config,
+                                                  series_by_day: newSeriesByDay,
+                                                },
+                                              })
+                                              .eq('id', ex.id);
+                                          }
+                                        }
+                                      }
+                                      Haptics.notificationAsync(
+                                        Haptics.NotificationFeedbackType.Warning
+                                      );
+                                      loadExercises(newSelectedIndex);
+                                    },
+                                  },
+                                ]
+                              );
+                            }}
+                            className="mr-2.5 px-4 py-2.5 rounded-xl"
+                            style={
+                              isActive
+                                ? {
+                                    backgroundColor: '#F97316',
+                                    shadowColor: '#F97316',
+                                    shadowOffset: { width: 0, height: 4 },
+                                    shadowOpacity: 0.5,
+                                    shadowRadius: 12,
+                                  }
+                                : {
+                                    backgroundColor: '#18181b',
+                                    borderWidth: 1,
+                                    borderColor: '#27272a',
+                                  }
+                            }
+                          >
+                            <View className="flex-row items-center gap-2">
+                              {/* Day Number Badge */}
+                              <View
+                                className="w-6 h-6 rounded-lg items-center justify-center"
+                                style={{
+                                  backgroundColor: isActive ? 'rgba(0,0,0,0.3)' : '#27272a',
+                                }}
+                              >
+                                <Text
+                                  className={`font-bold text-xs font-mono ${isActive ? 'text-white' : 'text-zinc-500'}`}
+                                >
+                                  {index + 1}
+                                </Text>
+                              </View>
+                              <View>
+                                <Text
+                                  className={`font-bold text-xs uppercase tracking-wide ${
+                                    isActive ? 'text-black' : 'text-zinc-300'
+                                  }`}
+                                  numberOfLines={1}
+                                >
+                                  {day.muscleGroups}
+                                </Text>
+                                {isCurrent && (
+                                  <Text
+                                    className={`text-[8px] font-mono ${isActive ? 'text-black/60' : 'text-green-500'}`}
+                                  >
+                                    • HOY
+                                  </Text>
+                                )}
+                              </View>
+                            </View>
+                          </TouchableOpacity>
+                        );
+                      })}
+
+                    {/* BOTÓN AGREGAR DÍA - En modo GYM y PERSONALIZADO */}
+                    <TouchableOpacity
+                      onPress={() => {
+                        if (trainingProgram.days.length >= 7) {
+                          Alert.alert('Límite alcanzado', 'Máximo 7 días de entrenamiento');
+                          return;
+                        }
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                        setSelectedMuscleGroups([]);
+                        setAddDayModalVisible(true);
+                      }}
+                      className="px-4 py-2.5 rounded-xl border-2 border-dashed items-center justify-center flex-row gap-2"
+                      style={{
+                        minWidth: 60,
+                        borderColor: isExternalMode ? '#a855f750' : '#3f3f46',
+                        backgroundColor: isExternalMode ? '#1a0a2e' : 'transparent',
+                      }}
+                    >
+                      <Plus size={16} color={isExternalMode ? '#a855f7' : '#F97316'} />
+                      <Text
+                        className="font-bold text-xs"
+                        style={{ color: isExternalMode ? '#a855f7' : '#F97316' }}
+                      >
+                        NUEVO
+                      </Text>
+                    </TouchableOpacity>
+                  </ScrollView>
+                </View>
+              </Animated.View>
+
+              {/* EXERCISES LIST - DRAG & DROP */}
+              <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#000000' }}>
+                {exercises.length === 0 ? (
+                  // Estado vacío - sin scroll
+                  <View
+                    className="flex-1 justify-center items-center px-4"
+                    style={{ backgroundColor: '#000000' }}
+                  >
+                    {/* Icono principal */}
+                    <View
+                      className="w-28 h-28 rounded-full items-center justify-center mb-6"
+                      style={{
+                        backgroundColor: '#0a0000',
+                        borderWidth: 2,
+                        borderColor: trainingProgram.days.length === 0 ? '#DC2626' : '#F97316',
+                        shadowColor: trainingProgram.days.length === 0 ? '#DC2626' : '#F97316',
+                        shadowOffset: { width: 0, height: 0 },
+                        shadowOpacity: 0.4,
+                        shadowRadius: 20,
+                      }}
+                    >
+                      <Zap
+                        size={48}
+                        color={trainingProgram.days.length === 0 ? '#DC2626' : '#F97316'}
+                      />
+                    </View>
+
+                    {/* Título y descripción */}
+                    <Text className="text-white text-center mb-2 text-xl font-bold">
+                      {trainingProgram.days.length === 0
+                        ? 'Configura tu Entrenamiento'
+                        : 'Sin ejercicios para hoy'}
+                    </Text>
+                    <Text className="text-zinc-500 text-center mb-8 text-sm px-8 leading-5">
+                      {trainingProgram.days.length === 0
+                        ? 'Toca el botón + NUEVO arriba para agregar tu primer día de entrenamiento.'
+                        : 'Agrega ejercicios a este día para comenzar tu entrenamiento.'}
+                    </Text>
+
+                    {/* Botón solo cuando hay días pero no ejercicios */}
+                    {trainingProgram.days.length > 0 && (
+                      <TouchableOpacity
+                        onPress={() => {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                          setModalVisible(true);
+                        }}
+                        className="py-4 px-8 rounded-2xl flex-row items-center justify-center gap-2"
+                        style={{
                           backgroundColor: '#0a0000',
                           borderWidth: 2,
                           borderColor: '#F97316',
                           shadowColor: '#F97316',
                           shadowOffset: { width: 0, height: 4 },
-                          shadowOpacity: 0.4,
+                          shadowOpacity: 0.5,
                           shadowRadius: 16,
-                        }
-                  }
-                >
-                  <Text
-                    className={`font-bold text-sm tracking-wider ${
-                      trainingProgram.days.length === 0 ? 'text-zinc-500' : 'text-fire-orange'
-                    }`}
+                        }}
+                      >
+                        <Plus size={20} color="#F97316" strokeWidth={2.5} />
+                        <Text className="text-fire-orange font-bold text-base">
+                          Agregar Ejercicio
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+
+                    {/* Texto secundario - solo cuando no hay días */}
+                    {trainingProgram.days.length === 0 && (
+                      <View className="flex-row items-center gap-2 mt-4">
+                        <Plus size={14} color="#F97316" />
+                        <Text className="text-zinc-600 text-xs">
+                          Usa el botón NUEVO en la barra de días
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                ) : (
+                  // Lista de ejercicios - con scroll
+                  <ScrollView
+                    className="flex-1 px-4 pt-3"
+                    showsVerticalScrollIndicator={false}
+                    scrollEnabled={!isDraggingExercise}
                   >
-                    + AGREGAR EJERCICIO {trainingProgram.days.length > 0 ? '🔥' : ''}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <>
-                {/* Header de lista con consejos */}
-                <View className="mb-3 px-1">
-                  <View className="flex-row items-center justify-between mb-2">
-                    <View className="flex-row items-center gap-2">
-                      <View className="w-2 h-2 rounded-full bg-fire-orange" />
-                      <Text className="text-zinc-400 text-xs font-bold uppercase tracking-wider">
-                        {exercises.length} EJERCICIO{exercises.length !== 1 ? 'S' : ''}
-                      </Text>
-                    </View>
-                  </View>
-                  {/* Tips */}
-                  <View className="flex-row flex-wrap gap-x-3 gap-y-1">
-                    <Text className="text-zinc-600 text-[9px] font-mono">👆 Toca para editar</Text>
-                    <Text className="text-zinc-600 text-[9px] font-mono">
-                      👈 Desliza para eliminar
-                    </Text>
-                    <Text className="text-zinc-600 text-[9px] font-mono">
-                      ✊ Mantén para reordenar
-                    </Text>
-                  </View>
-                </View>
+                    <>
+                      {/* Header de lista con consejos */}
+                      <View className="mb-3 px-1">
+                        <View className="flex-row items-center justify-between mb-2">
+                          <View className="flex-row items-center gap-2">
+                            <View className="w-2 h-2 rounded-full bg-fire-orange" />
+                            <Text className="text-zinc-400 text-xs font-bold uppercase tracking-wider">
+                              {exercises.length} EJERCICIO{exercises.length !== 1 ? 'S' : ''}
+                            </Text>
+                          </View>
+                        </View>
+                        {/* Tips */}
+                        <View className="flex-row flex-wrap gap-x-3 gap-y-1">
+                          <Text className="text-zinc-600 text-[9px] font-mono">
+                            👆 Toca para editar
+                          </Text>
+                          <Text className="text-zinc-600 text-[9px] font-mono">
+                            👈 Desliza para eliminar
+                          </Text>
+                          <Text className="text-zinc-600 text-[9px] font-mono">
+                            ✊ Mantén para reordenar
+                          </Text>
+                        </View>
+                      </View>
 
-                {/* Lista de ejercicios arrastrables */}
-                {exercises.map((item, index) => {
-                  // Calcular offset de animación basado en la posición del drag
-                  const ITEM_HEIGHT = 88;
-                  const getAnimatedOffset = (): number => {
-                    if (
-                      !isDraggingExercise ||
-                      dragTargetIndex === null ||
-                      draggingFromIndex === null
-                    )
-                      return 0;
-                    if (index === draggingFromIndex) return 0; // El item arrastrado no necesita offset
+                      {/* Lista de ejercicios arrastrables */}
+                      {exercises.map((item, index) => {
+                        // Calcular offset de animación basado en la posición del drag
+                        const ITEM_HEIGHT = 88;
+                        const getAnimatedOffset = (): number => {
+                          if (
+                            !isDraggingExercise ||
+                            dragTargetIndex === null ||
+                            draggingFromIndex === null
+                          )
+                            return 0;
+                          if (index === draggingFromIndex) return 0; // El item arrastrado no necesita offset
 
-                    // Si el target está DESPUÉS del origen (arrastrando hacia abajo)
-                    if (dragTargetIndex > draggingFromIndex) {
-                      // Los items entre origen+1 y target deben subir
-                      if (index > draggingFromIndex && index <= dragTargetIndex) {
-                        return -ITEM_HEIGHT;
-                      }
-                    }
-                    // Si el target está ANTES del origen (arrastrando hacia arriba)
-                    else if (dragTargetIndex < draggingFromIndex) {
-                      // Los items entre target y origen-1 deben bajar
-                      if (index >= dragTargetIndex && index < draggingFromIndex) {
-                        return ITEM_HEIGHT;
-                      }
-                    }
-                    return 0;
-                  };
+                          // Si el target está DESPUÉS del origen (arrastrando hacia abajo)
+                          if (dragTargetIndex > draggingFromIndex) {
+                            // Los items entre origen+1 y target deben subir
+                            if (index > draggingFromIndex && index <= dragTargetIndex) {
+                              return -ITEM_HEIGHT;
+                            }
+                          }
+                          // Si el target está ANTES del origen (arrastrando hacia arriba)
+                          else if (dragTargetIndex < draggingFromIndex) {
+                            // Los items entre target y origen-1 deben bajar
+                            if (index >= dragTargetIndex && index < draggingFromIndex) {
+                              return ITEM_HEIGHT;
+                            }
+                          }
+                          return 0;
+                        };
 
-                  const offset = getAnimatedOffset();
+                        const offset = getAnimatedOffset();
 
-                  return (
-                    <AnimatedExerciseItem
-                      key={item.id}
-                      offset={offset}
-                      isDragging={draggingFromIndex === index}
-                    >
-                      <DraggableExerciseCard
-                        exercise={item}
-                        index={index}
-                        totalItems={exercises.length}
-                        onEdit={async () => {
-                          // NUEVA ARQUITECTURA: Cargar config del ejercicio para editarlo
-                          const { data } = await supabase
-                            .from('user_exercise_config')
-                            .select(
-                              `
+                        return (
+                          <AnimatedExerciseItem
+                            key={item.id}
+                            offset={offset}
+                            isDragging={draggingFromIndex === index}
+                          >
+                            <DraggableExerciseCard
+                              exercise={item}
+                              index={index}
+                              totalItems={exercises.length}
+                              onEdit={async () => {
+                                // NUEVA ARQUITECTURA: Cargar config del ejercicio para editarlo
+                                const { data } = await supabase
+                                  .from('user_exercise_config')
+                                  .select(
+                                    `
                           id,
                           config,
                           custom_media_url,
@@ -5695,605 +6024,1139 @@ function GymScreen() {
                             default_media_url
                           )
                         `
-                            )
-                            .eq('id', item.id)
-                            .single();
+                                  )
+                                  .eq('id', item.id)
+                                  .single();
 
-                          if (data) {
-                            const exerciseInfo = data.exercises as unknown as {
-                              id: string;
-                              name: string;
-                              description: string | null;
-                              muscle_group: string | null;
-                              difficulty: string | null;
-                              default_media_url: string | null;
-                            } | null;
+                                if (data) {
+                                  const exerciseInfo = data.exercises as unknown as {
+                                    id: string;
+                                    name: string;
+                                    description: string | null;
+                                    muscle_group: string | null;
+                                    difficulty: string | null;
+                                    default_media_url: string | null;
+                                  } | null;
 
-                            const template: AssetTemplate = {
-                              id: data.id,
-                              name: exerciseInfo?.name || item.name,
-                              description: exerciseInfo?.description || '',
-                              image_url:
-                                data.custom_media_url || exerciseInfo?.default_media_url || '',
-                              category: exerciseInfo?.muscle_group || 'OTRO',
-                              difficulty: exerciseInfo?.difficulty || 'INTERMEDIO',
-                              default_metadata: data.config || {},
+                                  const template: AssetTemplate = {
+                                    id: data.id,
+                                    name: exerciseInfo?.name || item.name,
+                                    description: exerciseInfo?.description || '',
+                                    image_url:
+                                      data.custom_media_url ||
+                                      exerciseInfo?.default_media_url ||
+                                      '',
+                                    category: exerciseInfo?.muscle_group || 'OTRO',
+                                    difficulty: exerciseInfo?.difficulty || 'INTERMEDIO',
+                                    default_metadata: data.config || {},
+                                  };
+
+                                  const seriesByDay = data.config?.series_by_day as
+                                    | Record<string, SeriesConfig[]>
+                                    | undefined;
+                                  const existingSeries: SeriesConfig[] =
+                                    seriesByDay?.[String(selectedDayIndex)] ||
+                                    (data.config?.custom_series as SeriesConfig[] | undefined) ||
+                                    [];
+                                  setSeriesConfig(existingSeries);
+                                  setSelectedTemplate(template);
+                                  // NO viene del catálogo, viene de editar ejercicio existente
+                                  setSeriesConfigFromCatalog(false);
+                                  seriesConfigFromCatalogRef.current = false;
+                                  // BUGFIX: Capturar el día actual al abrir el modal
+                                  setSeriesConfigDayIndex(selectedDayIndex);
+                                  setSeriesConfigModalVisible(true);
+                                }
+                              }}
+                              onDelete={() => deleteExercise(item.id)}
+                              onDragStart={() => {
+                                setIsDraggingExercise(true);
+                                setDraggingFromIndex(index);
+                              }}
+                              onDragEnd={(newIndex) => {
+                                setIsDraggingExercise(false);
+                                setDragTargetIndex(null);
+                                setDraggingFromIndex(null);
+                                reorderExercises(index, newIndex);
+                              }}
+                              onDragCancel={() => {
+                                setIsDraggingExercise(false);
+                                setDragTargetIndex(null);
+                                setDraggingFromIndex(null);
+                              }}
+                              onPositionChange={(targetIndex) => setDragTargetIndex(targetIndex)}
+                              itemHeight={88}
+                            />
+                          </AnimatedExerciseItem>
+                        );
+                      })}
+
+                      {/* BOTÓN AGREGAR EJERCICIO - Dentro del scroll */}
+                      <TouchableOpacity
+                        onPress={() => setModalVisible(true)}
+                        disabled={trainingProgram.days.length === 0}
+                        className="mt-2 mb-4 p-4 rounded-xl items-center flex-row justify-center gap-2"
+                        style={{
+                          borderWidth: 2,
+                          borderColor: trainingProgram.days.length === 0 ? '#3f3f46' : '#F97316',
+                          backgroundColor:
+                            trainingProgram.days.length === 0 ? '#18181b' : '#0a0500',
+                          borderStyle: 'dashed',
+                        }}
+                      >
+                        <Plus
+                          color={trainingProgram.days.length === 0 ? '#71717a' : '#F97316'}
+                          size={18}
+                        />
+                        <Text
+                          className={`font-bold text-sm tracking-wider ${
+                            trainingProgram.days.length === 0 ? 'text-zinc-500' : 'text-fire-orange'
+                          }`}
+                        >
+                          AGREGAR EJERCICIO
+                        </Text>
+                      </TouchableOpacity>
+                    </>
+                  </ScrollView>
+                )}
+              </GestureHandlerRootView>
+
+              {/* CATALOG MODAL */}
+              {renderCatalogModal()}
+              {renderSeriesConfigModal()}
+
+              {/* DAY NAME EDIT MODAL */}
+              <Modal
+                visible={dayNameModalVisible}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setDayNameModalVisible(false)}
+              >
+                <Pressable
+                  className="flex-1 bg-black/80 justify-center items-center p-4"
+                  onPress={() => setDayNameModalVisible(false)}
+                >
+                  <Pressable
+                    className="bg-zinc-900 rounded-xl p-5 w-full border border-zinc-800"
+                    onPress={(e) => e.stopPropagation()}
+                  >
+                    <Text className="text-white text-lg font-bold mb-3">Renombrar rutina</Text>
+                    <TextInput
+                      value={editingDayName}
+                      onChangeText={setEditingDayName}
+                      placeholder="Ej: PECHO + ESPALDA"
+                      placeholderTextColor="#71717A"
+                      autoCapitalize="characters"
+                      className="bg-black border border-zinc-700 rounded-lg px-3 py-2.5 text-white text-sm font-bold mb-3"
+                      autoFocus
+                    />
+                    <View className="flex-row gap-2">
+                      <TouchableOpacity
+                        onPress={() => setDayNameModalVisible(false)}
+                        className="flex-1 py-2.5 rounded-lg border border-zinc-700"
+                      >
+                        <Text className="text-zinc-400 text-center font-bold text-sm">
+                          Cancelar
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => {
+                          if (editingDayIndex !== null) {
+                            saveDayName(editingDayIndex, editingDayName);
+                          }
+                          setDayNameModalVisible(false);
+                        }}
+                        className="flex-1 py-2.5 rounded-lg bg-savage-red"
+                      >
+                        <Text className="text-white text-center font-bold text-sm">Guardar</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </Pressable>
+                </Pressable>
+              </Modal>
+
+              {/* MODAL AGREGAR DÍA - SELECCIÓN DE GRUPOS MUSCULARES */}
+              <Modal
+                visible={addDayModalVisible}
+                transparent
+                animationType="slide"
+                onRequestClose={() => {
+                  setAddDayModalVisible(false);
+                  setSelectedMuscleGroups([]);
+                }}
+              >
+                <View className="flex-1 bg-transparent justify-end">
+                  <Animated.View
+                    style={[
+                      {
+                        height: '85%',
+                        backgroundColor: '#0a0a0a',
+                        borderTopLeftRadius: 24,
+                        borderTopRightRadius: 24,
+                        borderTopWidth: 2,
+                        borderTopColor: 'rgba(249, 115, 22, 0.5)',
+                        overflow: 'hidden',
+                      },
+                      animatedStyleAddDay,
+                    ]}
+                  >
+                    {/* Línea de acento superior */}
+                    <View
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        height: 3,
+                        backgroundColor: '#F97316',
+                        shadowColor: '#F97316',
+                        shadowOffset: { width: 0, height: 0 },
+                        shadowOpacity: 0.8,
+                        shadowRadius: 10,
+                        zIndex: 10,
+                      }}
+                    />
+
+                    {/* Header - Draggable para cerrar */}
+                    <View
+                      {...panResponderAddDay.panHandlers}
+                      className="px-5 pt-6 pb-4 border-b border-zinc-900"
+                    >
+                      {/* Indicador de drag centrado arriba */}
+                      <View className="absolute top-2 left-0 right-0 items-center">
+                        <View className="w-12 h-1.5 bg-zinc-600 rounded-full" />
+                      </View>
+
+                      <View className="items-center mt-2">
+                        <Text className="text-white text-xl font-bold">🔥 NUEVO DÍA</Text>
+                        <Text className="text-zinc-500 text-xs mt-0.5">
+                          Selecciona los grupos musculares
+                        </Text>
+                      </View>
+                    </View>
+
+                    {/* Contenido */}
+                    <View className="flex-1 px-5 pt-4">
+                      {/* Grupos seleccionados */}
+                      {selectedMuscleGroups.length > 0 && (
+                        <View className="bg-zinc-900/80 rounded-xl p-3 mb-4 border border-fire-orange/30">
+                          <Text className="text-fire-orange font-bold text-xs mb-1">
+                            TU SELECCIÓN:
+                          </Text>
+                          <Text className="text-white font-bold">
+                            {selectedMuscleGroups.join(' + ')}
+                          </Text>
+                        </View>
+                      )}
+
+                      {/* Grid de grupos musculares por categorías */}
+                      <ScrollView
+                        showsVerticalScrollIndicator={false}
+                        className="flex-1 mb-4"
+                        contentContainerStyle={{ paddingBottom: 20 }}
+                      >
+                        {/* TORSO */}
+                        <View
+                          className="mb-4 rounded-xl p-3"
+                          style={{
+                            backgroundColor: '#0a0a0a',
+                            borderWidth: 1,
+                            borderColor: '#ef444450',
+                          }}
+                        >
+                          <Text className="text-xs font-bold mb-2" style={{ color: '#ef4444' }}>
+                            💪 TORSO
+                          </Text>
+                          <View className="flex-row flex-wrap gap-2">
+                            {MUSCLE_GROUPS.filter((g) => g.category === 'superior').map((group) => {
+                              const isSelected = selectedMuscleGroups.includes(group.name);
+                              return (
+                                <TouchableOpacity
+                                  key={group.id}
+                                  onPress={() => {
+                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                                    if (isSelected) {
+                                      setSelectedMuscleGroups((prev) =>
+                                        prev.filter((g) => g !== group.name)
+                                      );
+                                    } else {
+                                      setSelectedMuscleGroups((prev) => [...prev, group.name]);
+                                    }
+                                  }}
+                                  className="px-3 py-2 rounded-lg"
+                                  style={{
+                                    backgroundColor: isSelected ? '#ef4444' : '#18181b',
+                                    borderWidth: 1,
+                                    borderColor: isSelected ? '#ef4444' : '#27272a',
+                                  }}
+                                >
+                                  <Text
+                                    className="font-bold text-xs"
+                                    style={{ color: isSelected ? '#000' : '#a1a1aa' }}
+                                  >
+                                    {group.name}
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+                        </View>
+
+                        {/* HOMBROS */}
+                        <View
+                          className="mb-4 rounded-xl p-3"
+                          style={{
+                            backgroundColor: '#0a0a0a',
+                            borderWidth: 1,
+                            borderColor: '#f59e0b50',
+                          }}
+                        >
+                          <Text className="text-xs font-bold mb-2" style={{ color: '#f59e0b' }}>
+                            🎯 HOMBROS
+                          </Text>
+                          <View className="flex-row flex-wrap gap-2">
+                            {MUSCLE_GROUPS.filter((g) => g.category === 'hombros').map((group) => {
+                              const isSelected = selectedMuscleGroups.includes(group.name);
+                              return (
+                                <TouchableOpacity
+                                  key={group.id}
+                                  onPress={() => {
+                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                                    if (isSelected) {
+                                      setSelectedMuscleGroups((prev) =>
+                                        prev.filter((g) => g !== group.name)
+                                      );
+                                    } else {
+                                      setSelectedMuscleGroups((prev) => [...prev, group.name]);
+                                    }
+                                  }}
+                                  className="px-3 py-2 rounded-lg"
+                                  style={{
+                                    backgroundColor: isSelected ? '#f59e0b' : '#18181b',
+                                    borderWidth: 1,
+                                    borderColor: isSelected ? '#f59e0b' : '#27272a',
+                                  }}
+                                >
+                                  <Text
+                                    className="font-bold text-xs"
+                                    style={{ color: isSelected ? '#000' : '#a1a1aa' }}
+                                  >
+                                    {group.name}
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+                        </View>
+
+                        {/* BRAZOS */}
+                        <View
+                          className="mb-4 rounded-xl p-3"
+                          style={{
+                            backgroundColor: '#0a0a0a',
+                            borderWidth: 1,
+                            borderColor: '#10b98150',
+                          }}
+                        >
+                          <Text className="text-xs font-bold mb-2" style={{ color: '#10b981' }}>
+                            💪 BRAZOS
+                          </Text>
+                          <View className="flex-row flex-wrap gap-2">
+                            {MUSCLE_GROUPS.filter((g) => g.category === 'brazos').map((group) => {
+                              const isSelected = selectedMuscleGroups.includes(group.name);
+                              return (
+                                <TouchableOpacity
+                                  key={group.id}
+                                  onPress={() => {
+                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                                    if (isSelected) {
+                                      setSelectedMuscleGroups((prev) =>
+                                        prev.filter((g) => g !== group.name)
+                                      );
+                                    } else {
+                                      setSelectedMuscleGroups((prev) => [...prev, group.name]);
+                                    }
+                                  }}
+                                  className="px-3 py-2 rounded-lg"
+                                  style={{
+                                    backgroundColor: isSelected ? '#10b981' : '#18181b',
+                                    borderWidth: 1,
+                                    borderColor: isSelected ? '#10b981' : '#27272a',
+                                  }}
+                                >
+                                  <Text
+                                    className="font-bold text-xs"
+                                    style={{ color: isSelected ? '#000' : '#a1a1aa' }}
+                                  >
+                                    {group.name}
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+                        </View>
+
+                        {/* PIERNAS */}
+                        <View
+                          className="mb-4 rounded-xl p-3"
+                          style={{
+                            backgroundColor: '#0a0a0a',
+                            borderWidth: 1,
+                            borderColor: '#ec489950',
+                          }}
+                        >
+                          <Text className="text-xs font-bold mb-2" style={{ color: '#ec4899' }}>
+                            🦵 PIERNAS
+                          </Text>
+                          <View className="flex-row flex-wrap gap-2">
+                            {MUSCLE_GROUPS.filter((g) => g.category === 'piernas').map((group) => {
+                              const isSelected = selectedMuscleGroups.includes(group.name);
+                              return (
+                                <TouchableOpacity
+                                  key={group.id}
+                                  onPress={() => {
+                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                                    if (isSelected) {
+                                      setSelectedMuscleGroups((prev) =>
+                                        prev.filter((g) => g !== group.name)
+                                      );
+                                    } else {
+                                      setSelectedMuscleGroups((prev) => [...prev, group.name]);
+                                    }
+                                  }}
+                                  className="px-3 py-2 rounded-lg"
+                                  style={{
+                                    backgroundColor: isSelected ? '#ec4899' : '#18181b',
+                                    borderWidth: 1,
+                                    borderColor: isSelected ? '#ec4899' : '#27272a',
+                                  }}
+                                >
+                                  <Text
+                                    className="font-bold text-xs"
+                                    style={{ color: isSelected ? '#000' : '#a1a1aa' }}
+                                  >
+                                    {group.name}
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+                        </View>
+
+                        {/* CORE */}
+                        <View
+                          className="mb-4 rounded-xl p-3"
+                          style={{
+                            backgroundColor: '#0a0a0a',
+                            borderWidth: 1,
+                            borderColor: '#eab30850',
+                          }}
+                        >
+                          <Text className="text-xs font-bold mb-2" style={{ color: '#eab308' }}>
+                            🔥 CORE
+                          </Text>
+                          <View className="flex-row flex-wrap gap-2">
+                            {MUSCLE_GROUPS.filter((g) => g.category === 'core').map((group) => {
+                              const isSelected = selectedMuscleGroups.includes(group.name);
+                              return (
+                                <TouchableOpacity
+                                  key={group.id}
+                                  onPress={() => {
+                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                                    if (isSelected) {
+                                      setSelectedMuscleGroups((prev) =>
+                                        prev.filter((g) => g !== group.name)
+                                      );
+                                    } else {
+                                      setSelectedMuscleGroups((prev) => [...prev, group.name]);
+                                    }
+                                  }}
+                                  className="px-3 py-2 rounded-lg"
+                                  style={{
+                                    backgroundColor: isSelected ? '#eab308' : '#18181b',
+                                    borderWidth: 1,
+                                    borderColor: isSelected ? '#eab308' : '#27272a',
+                                  }}
+                                >
+                                  <Text
+                                    className="font-bold text-xs"
+                                    style={{ color: isSelected ? '#000' : '#a1a1aa' }}
+                                  >
+                                    {group.name}
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+                        </View>
+
+                        {/* ESPECIALES */}
+                        <View
+                          className="mb-2 rounded-xl p-3"
+                          style={{
+                            backgroundColor: '#0a0a0a',
+                            borderWidth: 1,
+                            borderColor: '#06b6d450',
+                          }}
+                        >
+                          <Text className="text-xs font-bold mb-2" style={{ color: '#06b6d4' }}>
+                            ⚡ ESPECIALES
+                          </Text>
+                          <View className="flex-row flex-wrap gap-2">
+                            {MUSCLE_GROUPS.filter(
+                              (g) => g.category === 'cardio' || g.category === 'especial'
+                            ).map((group) => {
+                              const isSelected = selectedMuscleGroups.includes(group.name);
+                              return (
+                                <TouchableOpacity
+                                  key={group.id}
+                                  onPress={() => {
+                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                                    if (isSelected) {
+                                      setSelectedMuscleGroups((prev) =>
+                                        prev.filter((g) => g !== group.name)
+                                      );
+                                    } else {
+                                      setSelectedMuscleGroups((prev) => [...prev, group.name]);
+                                    }
+                                  }}
+                                  className="px-3 py-2 rounded-lg"
+                                  style={{
+                                    backgroundColor: isSelected ? '#06b6d4' : '#18181b',
+                                    borderWidth: 1,
+                                    borderColor: isSelected ? '#06b6d4' : '#27272a',
+                                  }}
+                                >
+                                  <Text
+                                    className="font-bold text-xs"
+                                    style={{ color: isSelected ? '#000' : '#a1a1aa' }}
+                                  >
+                                    {group.name}
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+                        </View>
+                      </ScrollView>
+
+                      {/* Botón crear - con safe area */}
+                      <View style={{ paddingBottom: insets.bottom + 16 }}>
+                        <TouchableOpacity
+                          onPress={async () => {
+                            if (selectedMuscleGroups.length === 0) {
+                              Alert.alert(
+                                'Selección requerida',
+                                'Elige al menos un grupo muscular'
+                              );
+                              return;
+                            }
+
+                            const newDayIndex = trainingProgram.days.length;
+                            const muscleGroupsName = selectedMuscleGroups.join(' + ');
+                            const newDay = {
+                              id: String(newDayIndex + 1),
+                              muscleGroups: muscleGroupsName,
+                              exercises: [],
                             };
 
-                            const seriesByDay = data.config?.series_by_day as
-                              | Record<string, SeriesConfig[]>
-                              | undefined;
-                            const existingSeries: SeriesConfig[] =
-                              seriesByDay?.[String(selectedDayIndex)] ||
-                              (data.config?.custom_series as SeriesConfig[] | undefined) ||
-                              [];
-                            setSeriesConfig(existingSeries);
-                            setSelectedTemplate(template);
-                            // NO viene del catálogo, viene de editar ejercicio existente
-                            setSeriesConfigFromCatalog(false);
-                            seriesConfigFromCatalogRef.current = false;
-                            setSeriesConfigModalVisible(true);
+                            // Actualizar estado local
+                            const updatedDays = [...trainingProgram.days, newDay];
+                            setTrainingProgram((prev) => ({
+                              ...prev,
+                              frequency: updatedDays.length,
+                              days: updatedDays,
+                            }));
+
+                            // Guardar en Supabase
+                            if (user) {
+                              const { data: profile } = await supabase
+                                .from('profiles')
+                                .select('training_routine_names')
+                                .eq('id', user.id)
+                                .single();
+
+                              const currentNames = profile?.training_routine_names || {};
+                              const updatedNames = {
+                                ...currentNames,
+                                [String(newDayIndex)]: muscleGroupsName,
+                              };
+
+                              // Actualizar profiles con el nuevo día
+                              await supabase
+                                .from('profiles')
+                                .update({
+                                  training_frequency: updatedDays.length,
+                                  training_routine_names: updatedNames,
+                                  plan_source: 'custom', // Marcar como plan personalizado
+                                })
+                                .eq('id', user.id);
+
+                              // ACTIVAR MODO PERSONALIZADO: Sincronizar con user_profiles
+                              // Construir external_schedule desde los días actualizados
+                              const newExternalSchedule: Record<string, string> = {};
+                              updatedDays.forEach((day, idx) => {
+                                newExternalSchedule[`Día ${idx + 1}`] = day.muscleGroups;
+                              });
+
+                              // Usar upsert para garantizar que la fila exista
+                              const { error: upsertError } = await supabase
+                                .from('user_profiles')
+                                .upsert(
+                                  {
+                                    user_id: user.id,
+                                    training_mode: 'external',
+                                    external_schedule: newExternalSchedule,
+                                    training_days_per_week: updatedDays.length,
+                                  },
+                                  { onConflict: 'user_id' }
+                                );
+
+                              if (upsertError) {
+                                console.error(
+                                  '❌ Error guardando modo personalizado:',
+                                  upsertError
+                                );
+                              } else {
+                                console.warn(
+                                  '✅ Modo personalizado guardado:',
+                                  newExternalSchedule
+                                );
+                              }
+
+                              // Actualizar estado local
+                              setIsExternalMode(true);
+                              setExternalSchedule(newExternalSchedule);
+                            }
+
+                            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                            setAddDayModalVisible(false);
+                            setSelectedMuscleGroups([]);
+
+                            // Seleccionar el nuevo día y cargar sus ejercicios
+                            setSelectedDayIndex(newDayIndex);
+                            // BUGFIX: Cargar ejercicios del nuevo día (será vacío pero prepara el estado)
+                            loadExercises(newDayIndex, true);
+                          }}
+                          disabled={selectedMuscleGroups.length === 0}
+                          className={`py-4 rounded-xl ${
+                            selectedMuscleGroups.length > 0 ? 'bg-fire-orange' : 'bg-zinc-800'
+                          }`}
+                          style={
+                            selectedMuscleGroups.length > 0
+                              ? {
+                                  shadowColor: '#F97316',
+                                  shadowOffset: { width: 0, height: 4 },
+                                  shadowOpacity: 0.5,
+                                  shadowRadius: 12,
+                                }
+                              : {}
                           }
-                        }}
-                        onDelete={() => deleteExercise(item.id)}
-                        onDragStart={() => {
-                          setIsDraggingExercise(true);
-                          setDraggingFromIndex(index);
-                        }}
-                        onDragEnd={(newIndex) => {
-                          setIsDraggingExercise(false);
-                          setDragTargetIndex(null);
-                          setDraggingFromIndex(null);
-                          reorderExercises(index, newIndex);
-                        }}
-                        onDragCancel={() => {
-                          setIsDraggingExercise(false);
-                          setDragTargetIndex(null);
-                          setDraggingFromIndex(null);
-                        }}
-                        onPositionChange={(targetIndex) => setDragTargetIndex(targetIndex)}
-                        itemHeight={88}
-                      />
-                    </AnimatedExerciseItem>
-                  );
-                })}
+                        >
+                          <Text
+                            className={`text-center font-bold text-base ${
+                              selectedMuscleGroups.length > 0 ? 'text-black' : 'text-zinc-500'
+                            }`}
+                          >
+                            {selectedMuscleGroups.length > 0
+                              ? `🔥 CREAR DÍA ${trainingProgram.days.length + 1}`
+                              : 'SELECCIONA GRUPOS MUSCULARES'}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </Animated.View>
+                </View>
+              </Modal>
+              {/* Fin del Modal addDayModal - MOVIDO A renderAddDayModal */}
+            </View>
+            {/* Fin del contenido scrolleable */}
+          </Animated.View>
+        </View>
+      </Modal>
+    );
+  };
 
-                {/* BOTÓN AGREGAR EJERCICIO - Dentro del scroll */}
-                <TouchableOpacity
-                  onPress={() => setModalVisible(true)}
-                  disabled={trainingProgram.days.length === 0}
-                  className="mt-2 mb-4 p-4 rounded-xl items-center flex-row justify-center gap-2"
-                  style={{
-                    borderWidth: 2,
-                    borderColor: trainingProgram.days.length === 0 ? '#3f3f46' : '#F97316',
-                    backgroundColor: trainingProgram.days.length === 0 ? '#18181b' : '#0a0500',
-                    borderStyle: 'dashed',
-                  }}
-                >
-                  <Plus
-                    color={trainingProgram.days.length === 0 ? '#71717a' : '#F97316'}
-                    size={18}
-                  />
-                  <Text
-                    className={`font-bold text-sm tracking-wider ${
-                      trainingProgram.days.length === 0 ? 'text-zinc-500' : 'text-fire-orange'
-                    }`}
-                  >
-                    AGREGAR EJERCICIO
-                  </Text>
-                </TouchableOpacity>
-              </>
-            )}
-          </ScrollView>
-        </GestureHandlerRootView>
-
-        {/* CATALOG MODAL */}
-        {renderCatalogModal()}
-        {renderSeriesConfigModal()}
-
-        {/* DAY NAME EDIT MODAL */}
-        <Modal
-          visible={dayNameModalVisible}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setDayNameModalVisible(false)}
-        >
-          <Pressable
-            className="flex-1 bg-black/80 justify-center items-center p-4"
-            onPress={() => setDayNameModalVisible(false)}
+  // ============================================================================
+  // RENDER ADD DAY MODAL - Modal separado para agregar día
+  // ============================================================================
+  const renderAddDayModal = () => {
+    return (
+      <Modal
+        visible={addDayModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => {
+          setAddDayModalVisible(false);
+          setSelectedMuscleGroups([]);
+        }}
+      >
+        <View className="flex-1 bg-black/80 justify-end">
+          <Animated.View
+            style={[
+              {
+                height: '85%',
+                backgroundColor: '#0a0a0a',
+                borderTopLeftRadius: 24,
+                borderTopRightRadius: 24,
+                borderTopWidth: 2,
+                borderTopColor: 'rgba(249, 115, 22, 0.5)',
+                overflow: 'hidden',
+              },
+              animatedStyleAddDay,
+            ]}
           >
-            <Pressable
-              className="bg-zinc-900 rounded-xl p-5 w-full border border-zinc-800"
-              onPress={(e) => e.stopPropagation()}
+            {/* Línea de acento superior */}
+            <View
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                height: 3,
+                backgroundColor: '#F97316',
+                shadowColor: '#F97316',
+                shadowOffset: { width: 0, height: 0 },
+                shadowOpacity: 0.8,
+                shadowRadius: 10,
+                zIndex: 10,
+              }}
+            />
+
+            {/* Header - Draggable para cerrar */}
+            <View
+              {...panResponderAddDay.panHandlers}
+              className="px-5 pt-6 pb-4 border-b border-zinc-900"
             >
-              <Text className="text-white text-lg font-bold mb-3">Renombrar rutina</Text>
-              <TextInput
-                value={editingDayName}
-                onChangeText={setEditingDayName}
-                placeholder="Ej: PECHO + ESPALDA"
-                placeholderTextColor="#71717A"
-                autoCapitalize="characters"
-                className="bg-black border border-zinc-700 rounded-lg px-3 py-2.5 text-white text-sm font-bold mb-3"
-                autoFocus
-              />
-              <View className="flex-row gap-2">
-                <TouchableOpacity
-                  onPress={() => setDayNameModalVisible(false)}
-                  className="flex-1 py-2.5 rounded-lg border border-zinc-700"
-                >
-                  <Text className="text-zinc-400 text-center font-bold text-sm">Cancelar</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => {
-                    if (editingDayIndex !== null) {
-                      saveDayName(editingDayIndex, editingDayName);
-                    }
-                    setDayNameModalVisible(false);
-                  }}
-                  className="flex-1 py-2.5 rounded-lg bg-savage-red"
-                >
-                  <Text className="text-white text-center font-bold text-sm">Guardar</Text>
-                </TouchableOpacity>
+              {/* Indicador de drag centrado arriba */}
+              <View className="absolute top-2 left-0 right-0 items-center">
+                <View className="w-12 h-1.5 bg-zinc-600 rounded-full" />
               </View>
-            </Pressable>
-          </Pressable>
-        </Modal>
 
-        {/* MODAL AGREGAR DÍA - SELECCIÓN DE GRUPOS MUSCULARES */}
-        <Modal
-          visible={addDayModalVisible}
-          transparent
-          animationType="slide"
-          onRequestClose={() => {
-            setAddDayModalVisible(false);
-            setSelectedMuscleGroups([]);
-          }}
-        >
-          <View className="flex-1 bg-transparent justify-end">
-            <Animated.View
-              style={[
-                {
-                  height: '85%',
-                  backgroundColor: '#0a0a0a',
-                  borderTopLeftRadius: 24,
-                  borderTopRightRadius: 24,
-                  borderTopWidth: 2,
-                  borderTopColor: 'rgba(249, 115, 22, 0.5)',
-                  overflow: 'hidden',
-                },
-                animatedStyleAddDay,
-              ]}
-            >
-              {/* Línea de acento superior */}
-              <View
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  height: 3,
-                  backgroundColor: '#F97316',
-                  shadowColor: '#F97316',
-                  shadowOffset: { width: 0, height: 0 },
-                  shadowOpacity: 0.8,
-                  shadowRadius: 10,
-                  zIndex: 10,
-                }}
-              />
+              <View className="items-center mt-2">
+                <Text className="text-white text-xl font-bold">🔥 NUEVO DÍA</Text>
+                <Text className="text-zinc-500 text-xs mt-0.5">
+                  Selecciona los grupos musculares
+                </Text>
+              </View>
+            </View>
 
-              {/* Header - Draggable para cerrar */}
-              <View
-                {...panResponderAddDay.panHandlers}
-                className="px-5 pt-6 pb-4 border-b border-zinc-900"
+            {/* Contenido */}
+            <View className="flex-1 px-5 pt-4">
+              {/* Grupos seleccionados */}
+              {selectedMuscleGroups.length > 0 && (
+                <View className="bg-zinc-900/80 rounded-xl p-3 mb-4 border border-fire-orange/30">
+                  <Text className="text-fire-orange font-bold text-xs mb-1">TU SELECCIÓN:</Text>
+                  <Text className="text-white font-bold">{selectedMuscleGroups.join(' + ')}</Text>
+                </View>
+              )}
+
+              {/* Grid de grupos musculares por categorías */}
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                className="flex-1 mb-4"
+                contentContainerStyle={{ paddingBottom: 20 }}
               >
-                {/* Indicador de drag centrado arriba */}
-                <View className="absolute top-2 left-0 right-0 items-center">
-                  <View className="w-12 h-1.5 bg-zinc-600 rounded-full" />
-                </View>
-
-                <View className="items-center mt-2">
-                  <Text className="text-white text-xl font-bold">🔥 NUEVO DÍA</Text>
-                  <Text className="text-zinc-500 text-xs mt-0.5">
-                    Selecciona los grupos musculares
-                  </Text>
-                </View>
-              </View>
-
-              {/* Contenido */}
-              <View className="flex-1 px-5 pt-4">
-                {/* Grupos seleccionados */}
-                {selectedMuscleGroups.length > 0 && (
-                  <View className="bg-zinc-900/80 rounded-xl p-3 mb-4 border border-fire-orange/30">
-                    <Text className="text-fire-orange font-bold text-xs mb-1">TU SELECCIÓN:</Text>
-                    <Text className="text-white font-bold">{selectedMuscleGroups.join(' + ')}</Text>
-                  </View>
-                )}
-
-                {/* Grid de grupos musculares por categorías */}
-                <ScrollView
-                  showsVerticalScrollIndicator={false}
-                  className="flex-1 mb-4"
-                  contentContainerStyle={{ paddingBottom: 20 }}
+                {/* TORSO */}
+                <View
+                  className="mb-4 rounded-xl p-3"
+                  style={{
+                    backgroundColor: '#0a0a0a',
+                    borderWidth: 1,
+                    borderColor: '#ef444450',
+                  }}
                 >
-                  {/* TORSO */}
-                  <View
-                    className="mb-4 rounded-xl p-3"
-                    style={{ backgroundColor: '#0a0a0a', borderWidth: 1, borderColor: '#ef444450' }}
-                  >
-                    <Text className="text-xs font-bold mb-2" style={{ color: '#ef4444' }}>
-                      💪 TORSO
-                    </Text>
-                    <View className="flex-row flex-wrap gap-2">
-                      {MUSCLE_GROUPS.filter((g) => g.category === 'superior').map((group) => {
-                        const isSelected = selectedMuscleGroups.includes(group.name);
-                        return (
-                          <TouchableOpacity
-                            key={group.id}
-                            onPress={() => {
-                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                              if (isSelected) {
-                                setSelectedMuscleGroups((prev) =>
-                                  prev.filter((g) => g !== group.name)
-                                );
-                              } else {
-                                setSelectedMuscleGroups((prev) => [...prev, group.name]);
-                              }
-                            }}
-                            className="px-3 py-2 rounded-lg"
-                            style={{
-                              backgroundColor: isSelected ? '#ef4444' : '#18181b',
-                              borderWidth: 1,
-                              borderColor: isSelected ? '#ef4444' : '#27272a',
-                            }}
+                  <Text className="text-xs font-bold mb-2" style={{ color: '#ef4444' }}>
+                    💪 TORSO
+                  </Text>
+                  <View className="flex-row flex-wrap gap-2">
+                    {MUSCLE_GROUPS.filter((g) => g.category === 'superior').map((group) => {
+                      const isSelected = selectedMuscleGroups.includes(group.name);
+                      return (
+                        <TouchableOpacity
+                          key={group.id}
+                          onPress={() => {
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                            if (isSelected) {
+                              setSelectedMuscleGroups((prev) =>
+                                prev.filter((g) => g !== group.name)
+                              );
+                            } else {
+                              setSelectedMuscleGroups((prev) => [...prev, group.name]);
+                            }
+                          }}
+                          className="px-3 py-2 rounded-lg"
+                          style={{
+                            backgroundColor: isSelected ? '#ef4444' : '#18181b',
+                            borderWidth: 1,
+                            borderColor: isSelected ? '#ef4444' : '#27272a',
+                          }}
+                        >
+                          <Text
+                            className="font-bold text-xs"
+                            style={{ color: isSelected ? '#000' : '#a1a1aa' }}
                           >
-                            <Text
-                              className="font-bold text-xs"
-                              style={{ color: isSelected ? '#000' : '#a1a1aa' }}
-                            >
-                              {group.name}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
+                            {group.name}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
                   </View>
+                </View>
 
-                  {/* HOMBROS */}
-                  <View
-                    className="mb-4 rounded-xl p-3"
-                    style={{ backgroundColor: '#0a0a0a', borderWidth: 1, borderColor: '#f59e0b50' }}
-                  >
-                    <Text className="text-xs font-bold mb-2" style={{ color: '#f59e0b' }}>
-                      🎯 HOMBROS
-                    </Text>
-                    <View className="flex-row flex-wrap gap-2">
-                      {MUSCLE_GROUPS.filter((g) => g.category === 'hombros').map((group) => {
-                        const isSelected = selectedMuscleGroups.includes(group.name);
-                        return (
-                          <TouchableOpacity
-                            key={group.id}
-                            onPress={() => {
-                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                              if (isSelected) {
-                                setSelectedMuscleGroups((prev) =>
-                                  prev.filter((g) => g !== group.name)
-                                );
-                              } else {
-                                setSelectedMuscleGroups((prev) => [...prev, group.name]);
-                              }
-                            }}
-                            className="px-3 py-2 rounded-lg"
-                            style={{
-                              backgroundColor: isSelected ? '#f59e0b' : '#18181b',
-                              borderWidth: 1,
-                              borderColor: isSelected ? '#f59e0b' : '#27272a',
-                            }}
+                {/* HOMBROS */}
+                <View
+                  className="mb-4 rounded-xl p-3"
+                  style={{
+                    backgroundColor: '#0a0a0a',
+                    borderWidth: 1,
+                    borderColor: '#f59e0b50',
+                  }}
+                >
+                  <Text className="text-xs font-bold mb-2" style={{ color: '#f59e0b' }}>
+                    🎯 HOMBROS
+                  </Text>
+                  <View className="flex-row flex-wrap gap-2">
+                    {MUSCLE_GROUPS.filter((g) => g.category === 'hombros').map((group) => {
+                      const isSelected = selectedMuscleGroups.includes(group.name);
+                      return (
+                        <TouchableOpacity
+                          key={group.id}
+                          onPress={() => {
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                            if (isSelected) {
+                              setSelectedMuscleGroups((prev) =>
+                                prev.filter((g) => g !== group.name)
+                              );
+                            } else {
+                              setSelectedMuscleGroups((prev) => [...prev, group.name]);
+                            }
+                          }}
+                          className="px-3 py-2 rounded-lg"
+                          style={{
+                            backgroundColor: isSelected ? '#f59e0b' : '#18181b',
+                            borderWidth: 1,
+                            borderColor: isSelected ? '#f59e0b' : '#27272a',
+                          }}
+                        >
+                          <Text
+                            className="font-bold text-xs"
+                            style={{ color: isSelected ? '#000' : '#a1a1aa' }}
                           >
-                            <Text
-                              className="font-bold text-xs"
-                              style={{ color: isSelected ? '#000' : '#a1a1aa' }}
-                            >
-                              {group.name}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
+                            {group.name}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
                   </View>
+                </View>
 
-                  {/* BRAZOS */}
-                  <View
-                    className="mb-4 rounded-xl p-3"
-                    style={{ backgroundColor: '#0a0a0a', borderWidth: 1, borderColor: '#10b98150' }}
-                  >
-                    <Text className="text-xs font-bold mb-2" style={{ color: '#10b981' }}>
-                      💪 BRAZOS
-                    </Text>
-                    <View className="flex-row flex-wrap gap-2">
-                      {MUSCLE_GROUPS.filter((g) => g.category === 'brazos').map((group) => {
-                        const isSelected = selectedMuscleGroups.includes(group.name);
-                        return (
-                          <TouchableOpacity
-                            key={group.id}
-                            onPress={() => {
-                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                              if (isSelected) {
-                                setSelectedMuscleGroups((prev) =>
-                                  prev.filter((g) => g !== group.name)
-                                );
-                              } else {
-                                setSelectedMuscleGroups((prev) => [...prev, group.name]);
-                              }
-                            }}
-                            className="px-3 py-2 rounded-lg"
-                            style={{
-                              backgroundColor: isSelected ? '#10b981' : '#18181b',
-                              borderWidth: 1,
-                              borderColor: isSelected ? '#10b981' : '#27272a',
-                            }}
+                {/* BRAZOS */}
+                <View
+                  className="mb-4 rounded-xl p-3"
+                  style={{
+                    backgroundColor: '#0a0a0a',
+                    borderWidth: 1,
+                    borderColor: '#10b98150',
+                  }}
+                >
+                  <Text className="text-xs font-bold mb-2" style={{ color: '#10b981' }}>
+                    💪 BRAZOS
+                  </Text>
+                  <View className="flex-row flex-wrap gap-2">
+                    {MUSCLE_GROUPS.filter((g) => g.category === 'brazos').map((group) => {
+                      const isSelected = selectedMuscleGroups.includes(group.name);
+                      return (
+                        <TouchableOpacity
+                          key={group.id}
+                          onPress={() => {
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                            if (isSelected) {
+                              setSelectedMuscleGroups((prev) =>
+                                prev.filter((g) => g !== group.name)
+                              );
+                            } else {
+                              setSelectedMuscleGroups((prev) => [...prev, group.name]);
+                            }
+                          }}
+                          className="px-3 py-2 rounded-lg"
+                          style={{
+                            backgroundColor: isSelected ? '#10b981' : '#18181b',
+                            borderWidth: 1,
+                            borderColor: isSelected ? '#10b981' : '#27272a',
+                          }}
+                        >
+                          <Text
+                            className="font-bold text-xs"
+                            style={{ color: isSelected ? '#000' : '#a1a1aa' }}
                           >
-                            <Text
-                              className="font-bold text-xs"
-                              style={{ color: isSelected ? '#000' : '#a1a1aa' }}
-                            >
-                              {group.name}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
+                            {group.name}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
                   </View>
+                </View>
 
-                  {/* PIERNAS */}
-                  <View
-                    className="mb-4 rounded-xl p-3"
-                    style={{ backgroundColor: '#0a0a0a', borderWidth: 1, borderColor: '#ec489950' }}
-                  >
-                    <Text className="text-xs font-bold mb-2" style={{ color: '#ec4899' }}>
-                      🦵 PIERNAS
-                    </Text>
-                    <View className="flex-row flex-wrap gap-2">
-                      {MUSCLE_GROUPS.filter((g) => g.category === 'piernas').map((group) => {
-                        const isSelected = selectedMuscleGroups.includes(group.name);
-                        return (
-                          <TouchableOpacity
-                            key={group.id}
-                            onPress={() => {
-                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                              if (isSelected) {
-                                setSelectedMuscleGroups((prev) =>
-                                  prev.filter((g) => g !== group.name)
-                                );
-                              } else {
-                                setSelectedMuscleGroups((prev) => [...prev, group.name]);
-                              }
-                            }}
-                            className="px-3 py-2 rounded-lg"
-                            style={{
-                              backgroundColor: isSelected ? '#ec4899' : '#18181b',
-                              borderWidth: 1,
-                              borderColor: isSelected ? '#ec4899' : '#27272a',
-                            }}
+                {/* PIERNAS */}
+                <View
+                  className="mb-4 rounded-xl p-3"
+                  style={{
+                    backgroundColor: '#0a0a0a',
+                    borderWidth: 1,
+                    borderColor: '#ec489950',
+                  }}
+                >
+                  <Text className="text-xs font-bold mb-2" style={{ color: '#ec4899' }}>
+                    🦵 PIERNAS
+                  </Text>
+                  <View className="flex-row flex-wrap gap-2">
+                    {MUSCLE_GROUPS.filter((g) => g.category === 'piernas').map((group) => {
+                      const isSelected = selectedMuscleGroups.includes(group.name);
+                      return (
+                        <TouchableOpacity
+                          key={group.id}
+                          onPress={() => {
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                            if (isSelected) {
+                              setSelectedMuscleGroups((prev) =>
+                                prev.filter((g) => g !== group.name)
+                              );
+                            } else {
+                              setSelectedMuscleGroups((prev) => [...prev, group.name]);
+                            }
+                          }}
+                          className="px-3 py-2 rounded-lg"
+                          style={{
+                            backgroundColor: isSelected ? '#ec4899' : '#18181b',
+                            borderWidth: 1,
+                            borderColor: isSelected ? '#ec4899' : '#27272a',
+                          }}
+                        >
+                          <Text
+                            className="font-bold text-xs"
+                            style={{ color: isSelected ? '#000' : '#a1a1aa' }}
                           >
-                            <Text
-                              className="font-bold text-xs"
-                              style={{ color: isSelected ? '#000' : '#a1a1aa' }}
-                            >
-                              {group.name}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
+                            {group.name}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
                   </View>
+                </View>
 
-                  {/* CORE */}
-                  <View
-                    className="mb-4 rounded-xl p-3"
-                    style={{ backgroundColor: '#0a0a0a', borderWidth: 1, borderColor: '#eab30850' }}
-                  >
-                    <Text className="text-xs font-bold mb-2" style={{ color: '#eab308' }}>
-                      🔥 CORE
-                    </Text>
-                    <View className="flex-row flex-wrap gap-2">
-                      {MUSCLE_GROUPS.filter((g) => g.category === 'core').map((group) => {
-                        const isSelected = selectedMuscleGroups.includes(group.name);
-                        return (
-                          <TouchableOpacity
-                            key={group.id}
-                            onPress={() => {
-                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                              if (isSelected) {
-                                setSelectedMuscleGroups((prev) =>
-                                  prev.filter((g) => g !== group.name)
-                                );
-                              } else {
-                                setSelectedMuscleGroups((prev) => [...prev, group.name]);
-                              }
-                            }}
-                            className="px-3 py-2 rounded-lg"
-                            style={{
-                              backgroundColor: isSelected ? '#eab308' : '#18181b',
-                              borderWidth: 1,
-                              borderColor: isSelected ? '#eab308' : '#27272a',
-                            }}
+                {/* CORE */}
+                <View
+                  className="mb-4 rounded-xl p-3"
+                  style={{
+                    backgroundColor: '#0a0a0a',
+                    borderWidth: 1,
+                    borderColor: '#eab30850',
+                  }}
+                >
+                  <Text className="text-xs font-bold mb-2" style={{ color: '#eab308' }}>
+                    🔥 CORE
+                  </Text>
+                  <View className="flex-row flex-wrap gap-2">
+                    {MUSCLE_GROUPS.filter((g) => g.category === 'core').map((group) => {
+                      const isSelected = selectedMuscleGroups.includes(group.name);
+                      return (
+                        <TouchableOpacity
+                          key={group.id}
+                          onPress={() => {
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                            if (isSelected) {
+                              setSelectedMuscleGroups((prev) =>
+                                prev.filter((g) => g !== group.name)
+                              );
+                            } else {
+                              setSelectedMuscleGroups((prev) => [...prev, group.name]);
+                            }
+                          }}
+                          className="px-3 py-2 rounded-lg"
+                          style={{
+                            backgroundColor: isSelected ? '#eab308' : '#18181b',
+                            borderWidth: 1,
+                            borderColor: isSelected ? '#eab308' : '#27272a',
+                          }}
+                        >
+                          <Text
+                            className="font-bold text-xs"
+                            style={{ color: isSelected ? '#000' : '#a1a1aa' }}
                           >
-                            <Text
-                              className="font-bold text-xs"
-                              style={{ color: isSelected ? '#000' : '#a1a1aa' }}
-                            >
-                              {group.name}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
+                            {group.name}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
                   </View>
+                </View>
 
-                  {/* ESPECIALES */}
-                  <View
-                    className="mb-2 rounded-xl p-3"
-                    style={{ backgroundColor: '#0a0a0a', borderWidth: 1, borderColor: '#06b6d450' }}
-                  >
-                    <Text className="text-xs font-bold mb-2" style={{ color: '#06b6d4' }}>
-                      ⚡ ESPECIALES
-                    </Text>
-                    <View className="flex-row flex-wrap gap-2">
-                      {MUSCLE_GROUPS.filter(
-                        (g) => g.category === 'cardio' || g.category === 'especial'
-                      ).map((group) => {
-                        const isSelected = selectedMuscleGroups.includes(group.name);
-                        return (
-                          <TouchableOpacity
-                            key={group.id}
-                            onPress={() => {
-                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                              if (isSelected) {
-                                setSelectedMuscleGroups((prev) =>
-                                  prev.filter((g) => g !== group.name)
-                                );
-                              } else {
-                                setSelectedMuscleGroups((prev) => [...prev, group.name]);
-                              }
-                            }}
-                            className="px-3 py-2 rounded-lg"
-                            style={{
-                              backgroundColor: isSelected ? '#06b6d4' : '#18181b',
-                              borderWidth: 1,
-                              borderColor: isSelected ? '#06b6d4' : '#27272a',
-                            }}
+                {/* ESPECIALES */}
+                <View
+                  className="mb-2 rounded-xl p-3"
+                  style={{
+                    backgroundColor: '#0a0a0a',
+                    borderWidth: 1,
+                    borderColor: '#06b6d450',
+                  }}
+                >
+                  <Text className="text-xs font-bold mb-2" style={{ color: '#06b6d4' }}>
+                    ⚡ ESPECIALES
+                  </Text>
+                  <View className="flex-row flex-wrap gap-2">
+                    {MUSCLE_GROUPS.filter(
+                      (g) => g.category === 'cardio' || g.category === 'especial'
+                    ).map((group) => {
+                      const isSelected = selectedMuscleGroups.includes(group.name);
+                      return (
+                        <TouchableOpacity
+                          key={group.id}
+                          onPress={() => {
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                            if (isSelected) {
+                              setSelectedMuscleGroups((prev) =>
+                                prev.filter((g) => g !== group.name)
+                              );
+                            } else {
+                              setSelectedMuscleGroups((prev) => [...prev, group.name]);
+                            }
+                          }}
+                          className="px-3 py-2 rounded-lg"
+                          style={{
+                            backgroundColor: isSelected ? '#06b6d4' : '#18181b',
+                            borderWidth: 1,
+                            borderColor: isSelected ? '#06b6d4' : '#27272a',
+                          }}
+                        >
+                          <Text
+                            className="font-bold text-xs"
+                            style={{ color: isSelected ? '#000' : '#a1a1aa' }}
                           >
-                            <Text
-                              className="font-bold text-xs"
-                              style={{ color: isSelected ? '#000' : '#a1a1aa' }}
-                            >
-                              {group.name}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
+                            {group.name}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
                   </View>
-                </ScrollView>
+                </View>
+              </ScrollView>
 
-                {/* Botón crear - con safe area */}
-                <View style={{ paddingBottom: insets.bottom + 16 }}>
-                  <TouchableOpacity
-                    onPress={async () => {
-                      if (selectedMuscleGroups.length === 0) {
-                        Alert.alert('Selección requerida', 'Elige al menos un grupo muscular');
-                        return;
-                      }
+              {/* Botón crear - con safe area */}
+              <View style={{ paddingBottom: insets.bottom + 16 }}>
+                <TouchableOpacity
+                  onPress={async () => {
+                    if (selectedMuscleGroups.length === 0) {
+                      Alert.alert('Selección requerida', 'Elige al menos un grupo muscular');
+                      return;
+                    }
 
-                      const newDayIndex = trainingProgram.days.length;
-                      const muscleGroupsName = selectedMuscleGroups.join(' + ');
-                      const newDay = {
-                        id: String(newDayIndex + 1),
-                        muscleGroups: muscleGroupsName,
-                        exercises: [],
+                    const newDayIndex = trainingProgram.days.length;
+                    const muscleGroupsName = selectedMuscleGroups.join(' + ');
+                    const newDay = {
+                      id: String(newDayIndex + 1),
+                      muscleGroups: muscleGroupsName,
+                      exercises: [],
+                    };
+
+                    // Actualizar estado local
+                    const updatedDays = [...trainingProgram.days, newDay];
+                    setTrainingProgram((prev) => ({
+                      ...prev,
+                      frequency: updatedDays.length,
+                      days: updatedDays,
+                    }));
+
+                    // Guardar en Supabase
+                    if (user) {
+                      const { data: profile } = await supabase
+                        .from('profiles')
+                        .select('training_routine_names')
+                        .eq('id', user.id)
+                        .single();
+
+                      const currentNames = profile?.training_routine_names || {};
+                      const updatedNames = {
+                        ...currentNames,
+                        [String(newDayIndex)]: muscleGroupsName,
                       };
 
-                      // Actualizar estado local
-                      const updatedDays = [...trainingProgram.days, newDay];
-                      setTrainingProgram((prev) => ({
-                        ...prev,
-                        frequency: updatedDays.length,
-                        days: updatedDays,
-                      }));
+                      // Actualizar profiles con el nuevo día
+                      await supabase
+                        .from('profiles')
+                        .update({
+                          training_frequency: updatedDays.length,
+                          training_routine_names: updatedNames,
+                          plan_source: 'custom',
+                        })
+                        .eq('id', user.id);
 
-                      // Guardar en Supabase
-                      if (user) {
-                        const { data: profile } = await supabase
-                          .from('profiles')
-                          .select('training_routine_names')
-                          .eq('id', user.id)
-                          .single();
+                      // ACTIVAR MODO PERSONALIZADO
+                      const newExternalSchedule: Record<string, string> = {};
+                      updatedDays.forEach((day, idx) => {
+                        newExternalSchedule[`Día ${idx + 1}`] = day.muscleGroups;
+                      });
 
-                        const currentNames = profile?.training_routine_names || {};
-                        const updatedNames = {
-                          ...currentNames,
-                          [String(newDayIndex)]: muscleGroupsName,
-                        };
+                      const { error: upsertError } = await supabase.from('user_profiles').upsert(
+                        {
+                          user_id: user.id,
+                          training_mode: 'external',
+                          external_schedule: newExternalSchedule,
+                          training_days_per_week: updatedDays.length,
+                        },
+                        { onConflict: 'user_id' }
+                      );
 
-                        // Actualizar profiles con el nuevo día
-                        await supabase
-                          .from('profiles')
-                          .update({
-                            training_frequency: updatedDays.length,
-                            training_routine_names: updatedNames,
-                            plan_source: 'custom', // Marcar como plan personalizado
-                          })
-                          .eq('id', user.id);
-
-                        // ACTIVAR MODO PERSONALIZADO: Sincronizar con user_profiles
-                        // Construir external_schedule desde los días actualizados
-                        const newExternalSchedule: Record<string, string> = {};
-                        updatedDays.forEach((day, idx) => {
-                          newExternalSchedule[`Día ${idx + 1}`] = day.muscleGroups;
-                        });
-
-                        // Usar upsert para garantizar que la fila exista
-                        const { error: upsertError } = await supabase.from('user_profiles').upsert(
-                          {
-                            user_id: user.id,
-                            training_mode: 'external',
-                            external_schedule: newExternalSchedule,
-                            training_days_per_week: updatedDays.length,
-                          },
-                          { onConflict: 'user_id' }
-                        );
-
-                        if (upsertError) {
-                          console.error('❌ Error guardando modo personalizado:', upsertError);
-                        } else {
-                          console.warn('✅ Modo personalizado guardado:', newExternalSchedule);
-                        }
-
-                        // Actualizar estado local
-                        setIsExternalMode(true);
-                        setExternalSchedule(newExternalSchedule);
+                      if (upsertError) {
+                        console.error('❌ Error guardando modo personalizado:', upsertError);
+                      } else {
+                        console.warn('✅ Modo personalizado guardado:', newExternalSchedule);
                       }
 
-                      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                      setAddDayModalVisible(false);
-                      setSelectedMuscleGroups([]);
-
-                      // Seleccionar el nuevo día
-                      setSelectedDayIndex(newDayIndex);
-                    }}
-                    disabled={selectedMuscleGroups.length === 0}
-                    className={`py-4 rounded-xl ${
-                      selectedMuscleGroups.length > 0 ? 'bg-fire-orange' : 'bg-zinc-800'
-                    }`}
-                    style={
-                      selectedMuscleGroups.length > 0
-                        ? {
-                            shadowColor: '#F97316',
-                            shadowOffset: { width: 0, height: 4 },
-                            shadowOpacity: 0.5,
-                            shadowRadius: 12,
-                          }
-                        : {}
+                      setIsExternalMode(true);
+                      setExternalSchedule(newExternalSchedule);
                     }
+
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                    setAddDayModalVisible(false);
+                    setSelectedMuscleGroups([]);
+
+                    // Seleccionar el nuevo día y cargar sus ejercicios
+                    setSelectedDayIndex(newDayIndex);
+                    loadExercises(newDayIndex, true);
+                  }}
+                  disabled={selectedMuscleGroups.length === 0}
+                  className={`py-4 rounded-xl ${
+                    selectedMuscleGroups.length > 0 ? 'bg-fire-orange' : 'bg-zinc-800'
+                  }`}
+                  style={
+                    selectedMuscleGroups.length > 0
+                      ? {
+                          shadowColor: '#F97316',
+                          shadowOffset: { width: 0, height: 4 },
+                          shadowOpacity: 0.5,
+                          shadowRadius: 12,
+                        }
+                      : {}
+                  }
+                >
+                  <Text
+                    className={`text-center font-bold text-base ${
+                      selectedMuscleGroups.length > 0 ? 'text-black' : 'text-zinc-500'
+                    }`}
                   >
-                    <Text
-                      className={`text-center font-bold text-base ${
-                        selectedMuscleGroups.length > 0 ? 'text-black' : 'text-zinc-500'
-                      }`}
-                    >
-                      {selectedMuscleGroups.length > 0
-                        ? `🔥 CREAR DÍA ${trainingProgram.days.length + 1}`
-                        : 'SELECCIONA GRUPOS MUSCULARES'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
+                    {selectedMuscleGroups.length > 0
+                      ? `🔥 CREAR DÍA ${trainingProgram.days.length + 1}`
+                      : 'SELECCIONA GRUPOS MUSCULARES'}
+                  </Text>
+                </TouchableOpacity>
               </View>
-            </Animated.View>
-          </View>
-        </Modal>
-      </View>
+            </View>
+          </Animated.View>
+        </View>
+      </Modal>
     );
-  }
+  };
 
   // ============================================================================
   // RENDER MODALS
@@ -7840,10 +8703,11 @@ function GymScreen() {
       const currentConfigData = currentConfig?.config || {};
       const currentSeriesByDay = currentConfigData.series_by_day || {};
 
-      // Actualizar series para el día actual
+      // BUGFIX: Usar focusSeriesDayIndex (día capturado al abrir modal) en lugar de selectedDayIndex
+      // Esto evita guardar series en el día incorrecto si el usuario cambió de día
       const updatedSeriesByDay = {
         ...currentSeriesByDay,
-        [String(selectedDayIndex)]: focusSeriesConfig,
+        [String(focusSeriesDayIndex)]: focusSeriesConfig,
       };
 
       // Actualizar el registro existente por su ID (no upsert con exercise_id)
@@ -7863,7 +8727,12 @@ function GymScreen() {
         throw error;
       }
 
-      console.log('✅ Series guardadas en Supabase:', focusSeriesConfig.length, 'series');
+      console.log(
+        '✅ Series guardadas en Supabase:',
+        focusSeriesConfig.length,
+        'series para día',
+        focusSeriesDayIndex
+      );
 
       // Actualizar estado local de ejercicios
       setExercises((prev) =>
@@ -7896,7 +8765,7 @@ function GymScreen() {
   // Mantener ref actualizada para el panResponder
   saveFocusSeriesRef.current = saveFocusSeries;
 
-  const renderStructureModal = () => {
+  const renderFocusSeriesModal = () => {
     if (!modalExercise) return null;
 
     const FOCUS_SERIES_TYPES = [
@@ -7944,7 +8813,7 @@ function GymScreen() {
                 borderTopColor: 'rgba(220, 38, 38, 0.5)',
                 overflow: 'hidden',
               },
-              animatedStyleStructure,
+              animatedStyleFocusSeries,
             ]}
           >
             {/* Línea de acento superior con glow */}
@@ -7966,7 +8835,7 @@ function GymScreen() {
 
             {/* HEADER DRAGGABLE */}
             <View
-              {...panResponderStructure.panHandlers}
+              {...panResponderFocusSeries.panHandlers}
               className="px-4 pt-4 pb-3 border-b border-zinc-900"
             >
               {/* Indicador de drag */}
@@ -8236,7 +9105,7 @@ function GymScreen() {
               <Text className="text-zinc-500 text-xs font-mono mt-0.5">{getCurrentTime()}</Text>
             </View>
             <TouchableOpacity
-              onPress={() => setViewMode('STRUCTURE')}
+              onPress={() => setStructureModalOpen(true)}
               className="p-2.5 rounded-lg"
               style={{
                 backgroundColor: '#0a0000',
@@ -8315,16 +9184,32 @@ function GymScreen() {
       {/* VERTICAL SCROLL (ESTILO TIKTOK) */}
       <FlatList
         ref={exerciseListRef}
+        // BUGFIX: Key dinámica para forzar re-mount completo
+        // listRefreshKey se incrementa después de loadExercises para garantizar remontaje
+        key={`exercise-list-${listRefreshKey}-${exercises.length}`}
         data={exercises}
+        // BUGFIX: Forzar re-render cuando cambian las alternativas de los ejercicios
+        // El extraData incluye un hash completo de las alternativas (id, cantidad, y nombres)
+        // para que React detecte cualquier cambio en los datos de alternativas
+        extraData={exercises
+          .map(
+            (e) =>
+              `${e.id}:${e.alternatives?.length || 0}:${e.alternatives?.map((a) => a.name).join(',') || ''}`
+          )
+          .join('|')}
         keyExtractor={(item) => item.id}
-        pagingEnabled={Platform.OS !== 'web'}
-        scrollEnabled={Platform.OS !== 'web'}
+        pagingEnabled={Platform.OS !== 'web' && exercises.length > 0}
+        scrollEnabled={Platform.OS !== 'web' && exercises.length > 0}
         decelerationRate="fast"
         snapToInterval={CONTENT_HEIGHT}
         snapToAlignment="start"
         disableIntervalMomentum={true}
         // BUGFIX: Evitar que las views se desmonten durante modales
         removeClippedSubviews={false}
+        // BUGFIX: Renderizar TODOS los ejercicios de una vez para evitar items vacíos
+        windowSize={21}
+        maxToRenderPerBatch={20}
+        initialNumToRender={20}
         getItemLayout={(_, index) => ({
           length: CONTENT_HEIGHT,
           offset: CONTENT_HEIGHT * index,
@@ -8338,29 +9223,58 @@ function GymScreen() {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
           }
         }}
-        style={Platform.OS === 'web' ? { overflow: 'hidden' } : undefined}
+        style={Platform.OS === 'web' ? { overflow: 'hidden', flex: 1 } : { flex: 1 }}
         contentContainerStyle={
-          Platform.OS === 'web'
-            ? ({
-                transform: `translateY(${-activeExerciseIndex * CONTENT_HEIGHT}px)`,
-                transition: 'transform 0.25s cubic-bezier(0.25, 0.1, 0.25, 1)',
-                willChange: 'transform',
-              } as any)
-            : undefined
+          exercises.length === 0
+            ? { flex: 1 }
+            : Platform.OS === 'web'
+              ? ({
+                  transform: `translateY(${-activeExerciseIndex * CONTENT_HEIGHT}px)`,
+                  transition: 'transform 0.25s cubic-bezier(0.25, 0.1, 0.25, 1)',
+                  willChange: 'transform',
+                } as any)
+              : undefined
         }
         ListEmptyComponent={
-          <View style={{ height: CONTENT_HEIGHT }} className="justify-center items-center px-6">
-            <View className="w-20 h-20 rounded-full bg-zinc-900 items-center justify-center mb-6">
-              <Plus size={32} color="#DC2626" />
+          <View
+            style={{ height: CONTENT_HEIGHT, backgroundColor: '#000000' }}
+            className="justify-center items-center px-6"
+          >
+            <View
+              className="w-24 h-24 rounded-full items-center justify-center mb-6"
+              style={{
+                backgroundColor: '#0a0000',
+                borderWidth: 2,
+                borderColor: '#DC2626',
+                shadowColor: '#DC2626',
+                shadowOffset: { width: 0, height: 0 },
+                shadowOpacity: 0.4,
+                shadowRadius: 16,
+              }}
+            >
+              <Zap size={40} color="#DC2626" />
             </View>
-            <Text className="text-white text-xl font-bold text-center mb-2">SIN EJERCICIOS</Text>
-            <Text className="text-zinc-500 text-center text-sm mb-8">
-              Configura tu rutina para comenzar a entrenar
+            <Text className="text-white text-xl font-bold text-center mb-2">
+              Configura tu Entrenamiento
+            </Text>
+            <Text className="text-zinc-500 text-center text-sm mb-6 px-4">
+              Crea tu estructura de días y ejercicios para comenzar a entrenar.
             </Text>
             <TouchableOpacity
-              onPress={() => setViewMode('STRUCTURE')}
-              className="bg-savage-red px-8 py-4 rounded-lg"
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                setStructureModalOpen(true);
+              }}
+              className="px-8 py-4 rounded-xl flex-row items-center gap-2"
+              style={{
+                backgroundColor: '#DC2626',
+                shadowColor: '#DC2626',
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.5,
+                shadowRadius: 12,
+              }}
             >
+              <Sliders size={18} color="#FFFFFF" />
               <Text className="text-white font-bold tracking-wider">CONFIGURAR RUTINA</Text>
             </TouchableOpacity>
           </View>
@@ -8400,14 +9314,20 @@ function GymScreen() {
             })),
           ];
 
-          // Debug log para identificar problemas - SIEMPRE mostrar para todos los ejercicios
-          console.log(`📊 Ejercicio[${index}] "${item.name}":`, {
-            mainId: mainExerciseId?.substring(0, 8),
-            alternativasEnItem: item.alternatives?.length || 0,
-            alternativasValidas: validAlternatives.length,
-            variacionesTotales: allVariations.length,
-            nombres: allVariations.map((v) => v.name),
-          });
+          // DEBUG: Log detallado para diagnosticar el problema de ejercicios vacíos
+          if (index < 5) {
+            // Solo los primeros 5 para no saturar
+            console.log(
+              `🔍 RENDER[${index}] "${item.name}": raw=${item.alternatives?.length || 0}, valid=${validAlternatives.length}, total=${allVariations.length}`
+            );
+            console.log(
+              `   📋 allVariations:`,
+              allVariations.map((v) => `${v.isMain ? '★' : '○'} ${v.name}`)
+            );
+            console.log(
+              `   📐 Layout: SCREEN_WIDTH=${SCREEN_WIDTH}, safeAltIndex=${activeAlternatives[index] ?? 0}`
+            );
+          }
 
           // BUGFIX: Usar ref como fallback para evitar pérdida de alternativa durante modales
           // El estado puede no estar sincronizado durante re-renders causados por modales
@@ -8446,10 +9366,9 @@ function GymScreen() {
               )}
 
               {/* PARTE SUPERIOR SCROLLEABLE - Imagen, nombre, historial */}
-              {/* Key solo usa ejercicio y cantidad de alternativas - NO incluir safeAltIndex
-                  porque causaría remontaje en cada scroll horizontal */}
+              {/* Key incluye listRefreshKey para forzar remontaje después de loadExercises */}
               <FlatList
-                key={`variations-${item.id}-${allVariations.length}`}
+                key={`variations-${listRefreshKey}-${item.id}-${allVariations.length}`}
                 horizontal
                 data={allVariations}
                 keyExtractor={(variation) => variation.id}
@@ -8459,13 +9378,21 @@ function GymScreen() {
                 initialScrollIndex={safeAltIndex}
                 // BUGFIX: Evitar que las views se desmonten durante modales
                 removeClippedSubviews={false}
-                // BUGFIX: Forzar re-render cuando cambia el índice de alternativa
-                extraData={safeAltIndex}
+                // BUGFIX: Forzar re-render cuando cambia el índice de alternativa o los datos
+                extraData={`${safeAltIndex}-${allVariations.map((v) => v.id).join(',')}`}
+                // BUGFIX: Renderizar TODAS las alternativas de una vez para evitar items vacíos
+                windowSize={21}
+                maxToRenderPerBatch={allVariations.length + 1}
+                initialNumToRender={allVariations.length + 1}
                 getItemLayout={(_, idx) => ({
                   length: SCREEN_WIDTH,
                   offset: SCREEN_WIDTH * idx,
                   index: idx,
                 })}
+                onScrollToIndexFailed={(info) => {
+                  // BUGFIX: Si el scroll inicial falla, reintentar después de un frame
+                  console.warn(`⚠️ FlatList scroll failed for index ${info.index}, retrying...`);
+                }}
                 onMomentumScrollEnd={(event) => {
                   if (Platform.OS !== 'web') {
                     const newIndex = Math.round(event.nativeEvent.contentOffset.x / SCREEN_WIDTH);
@@ -8473,376 +9400,395 @@ function GymScreen() {
                   }
                 }}
                 style={{
+                  width: SCREEN_WIDTH,
                   height: SCREEN_WIDTH * 0.85 + 170,
                   overflow: 'hidden',
+                  flexGrow: 0,
                 }}
                 contentContainerStyle={
                   Platform.OS === 'web'
                     ? ({
+                        display: 'flex',
+                        flexDirection: 'row',
+                        width: SCREEN_WIDTH * allVariations.length,
                         transform: `translateX(${-safeAltIndex * SCREEN_WIDTH}px)`,
                         transition: 'transform 0.3s ease-out',
                         willChange: 'transform',
                       } as any)
                     : undefined
                 }
-                renderItem={({ item: variation }) => (
-                  <View
-                    style={{
-                      width: SCREEN_WIDTH,
-                      backgroundColor: spotifyIsPlaying ? 'transparent' : '#000',
-                    }}
-                  >
-                    {/* IMAGEN/VIDEO HERO */}
-                    <View className="relative" style={{ height: SCREEN_WIDTH * 0.85 }}>
-                      {isVideoUrl(variation.image_url) ? (
-                        <VideoHero
-                          videoUrl={variation.image_url!}
-                          videoMuted={videoMuted}
-                          screenWidth={SCREEN_WIDTH}
-                          isActive={
-                            isFocused &&
-                            index === activeExerciseIndex &&
-                            safeAltIndex ===
-                              allVariations.findIndex((v) => v.id === variation.id) &&
-                            !editorVisible &&
-                            !cameraModalVisible &&
-                            !isPickingFromGallery
-                          }
-                        />
-                      ) : variation.image_url ? (
-                        <Image
-                          source={{ uri: variation.image_url }}
-                          style={{ width: SCREEN_WIDTH, height: '100%' }}
-                          contentFit="cover"
-                        />
-                      ) : (
-                        // Placeholder cuando no hay imagen
-                        <View
-                          style={{ width: SCREEN_WIDTH, height: '100%' }}
-                          className="bg-zinc-900 items-center justify-center"
-                        >
-                          <View className="w-20 h-20 rounded-full bg-zinc-800 items-center justify-center">
-                            <Zap size={32} color="#DC2626" />
-                          </View>
-                          <Text className="text-zinc-500 text-sm mt-4">Sin imagen</Text>
-                        </View>
-                      )}
-
-                      {/* OVERLAY GRADIENTE SUPERIOR */}
-                      <LinearGradient
-                        colors={['rgba(0,0,0,0.7)', 'transparent']}
-                        className="absolute top-0 left-0 right-0 h-28"
-                      />
-
-                      {/* OVERLAY GRADIENTE INFERIOR */}
-                      <LinearGradient
-                        colors={['transparent', 'rgba(0,0,0,0.95)', '#000']}
-                        className="absolute bottom-0 left-0 right-0 h-32"
-                      />
-
-                      {/* INDICADORES DE ALTERNATIVAS (DOTS) */}
-                      {allVariations.length > 1 && (
-                        <View className="absolute top-24 left-4 flex-row gap-1.5">
-                          {allVariations.map((_, dotIndex) => (
-                            <View
-                              key={dotIndex}
-                              className={`h-1.5 rounded-full ${
-                                dotIndex === safeAltIndex
-                                  ? 'w-6 bg-fire-orange'
-                                  : 'w-1.5 bg-white/40'
-                              }`}
-                            />
-                          ))}
-                        </View>
-                      )}
-
-                      {/* BOTÓN NOTAS */}
-                      <TouchableOpacity
-                        onPress={() => {
-                          setCurrentExerciseIndex(index);
-                          setNotesModalVisible(true);
-                        }}
-                        className="absolute bottom-40 right-4 z-50"
-                        style={{
-                          backgroundColor: 'rgba(0,0,0,0.6)',
-                          borderWidth: 1,
-                          borderColor: 'rgba(255,255,255,0.2)',
-                          borderRadius: 12,
-                          width: 48,
-                          height: 48,
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                        }}
-                      >
-                        <Edit3
-                          color={
-                            exerciseNotes[variation.id] || exerciseTags[variation.id]?.length
-                              ? '#F97316'
-                              : '#FFFFFF'
-                          }
-                          size={20}
-                        />
-                        {exerciseNotes[variation.id] ||
-                        (exerciseTags[variation.id]?.length ?? 0) > 0 ? (
-                          <View
-                            className="absolute -top-1 -right-1 w-3 h-3 bg-fire-orange rounded-full"
-                            style={{ borderWidth: 2, borderColor: '#000' }}
+                renderItem={({ item: variation, index: variationIndex }) => {
+                  // DEBUG: Log para verificar que cada variación se renderiza
+                  if (index === 0) {
+                    console.log(
+                      `   🎨 renderItem[${variationIndex}]: "${variation.name}" (isMain=${variation.isMain})`
+                    );
+                  }
+                  return (
+                    <View
+                      style={{
+                        width: SCREEN_WIDTH,
+                        minWidth: SCREEN_WIDTH,
+                        maxWidth: SCREEN_WIDTH,
+                        backgroundColor: spotifyIsPlaying ? 'transparent' : '#000',
+                      }}
+                    >
+                      {/* IMAGEN/VIDEO HERO */}
+                      <View className="relative" style={{ height: SCREEN_WIDTH * 0.85 }}>
+                        {isVideoUrl(variation.image_url) ? (
+                          <VideoHero
+                            videoUrl={variation.image_url!}
+                            videoMuted={videoMuted}
+                            screenWidth={SCREEN_WIDTH}
+                            isActive={
+                              isFocused &&
+                              index === activeExerciseIndex &&
+                              safeAltIndex ===
+                                allVariations.findIndex((v) => v.id === variation.id) &&
+                              !editorVisible &&
+                              !cameraModalVisible &&
+                              !isPickingFromGallery
+                            }
                           />
-                        ) : null}
-                      </TouchableOpacity>
+                        ) : variation.image_url ? (
+                          <Image
+                            source={{ uri: variation.image_url }}
+                            style={{ width: SCREEN_WIDTH, height: '100%' }}
+                            contentFit="cover"
+                          />
+                        ) : (
+                          // Placeholder cuando no hay imagen
+                          <View
+                            style={{ width: SCREEN_WIDTH, height: '100%' }}
+                            className="bg-zinc-900 items-center justify-center"
+                          >
+                            <View className="w-20 h-20 rounded-full bg-zinc-800 items-center justify-center">
+                              <Zap size={32} color="#DC2626" />
+                            </View>
+                            <Text className="text-zinc-500 text-sm mt-4">Sin imagen</Text>
+                          </View>
+                        )}
 
-                      {/* BOTÓN MUTE/AUDIO (solo para videos) */}
-                      {isVideoUrl(variation.image_url) && (
+                        {/* OVERLAY GRADIENTE SUPERIOR */}
+                        <LinearGradient
+                          colors={['rgba(0,0,0,0.7)', 'transparent']}
+                          className="absolute top-0 left-0 right-0 h-28"
+                        />
+
+                        {/* OVERLAY GRADIENTE INFERIOR */}
+                        <LinearGradient
+                          colors={['transparent', 'rgba(0,0,0,0.95)', '#000']}
+                          className="absolute bottom-0 left-0 right-0 h-32"
+                        />
+
+                        {/* INDICADORES DE ALTERNATIVAS (DOTS) */}
+                        {allVariations.length > 1 && (
+                          <View className="absolute top-24 left-4 flex-row gap-1.5">
+                            {allVariations.map((_, dotIndex) => (
+                              <View
+                                key={dotIndex}
+                                className={`h-1.5 rounded-full ${
+                                  dotIndex === safeAltIndex
+                                    ? 'w-6 bg-fire-orange'
+                                    : 'w-1.5 bg-white/40'
+                                }`}
+                              />
+                            ))}
+                          </View>
+                        )}
+
+                        {/* BOTÓN NOTAS */}
                         <TouchableOpacity
                           onPress={() => {
-                            setVideoMuted(!videoMuted);
-                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                            setCurrentExerciseIndex(index);
+                            setNotesModalVisible(true);
                           }}
-                          className="absolute bottom-24 left-4"
+                          className="absolute bottom-40 right-4 z-50"
                           style={{
                             backgroundColor: 'rgba(0,0,0,0.6)',
                             borderWidth: 1,
                             borderColor: 'rgba(255,255,255,0.2)',
                             borderRadius: 12,
-                            padding: 10,
+                            width: 48,
+                            height: 48,
+                            alignItems: 'center',
+                            justifyContent: 'center',
                           }}
                         >
-                          {videoMuted ? (
-                            <Volume2 color="#FFFFFF" size={18} />
-                          ) : (
-                            <Volume2 color="#F97316" size={18} />
-                          )}
+                          <Edit3
+                            color={
+                              exerciseNotes[variation.id] || exerciseTags[variation.id]?.length
+                                ? '#F97316'
+                                : '#FFFFFF'
+                            }
+                            size={20}
+                          />
+                          {exerciseNotes[variation.id] ||
+                          (exerciseTags[variation.id]?.length ?? 0) > 0 ? (
+                            <View
+                              className="absolute -top-1 -right-1 w-3 h-3 bg-fire-orange rounded-full"
+                              style={{ borderWidth: 2, borderColor: '#000' }}
+                            />
+                          ) : null}
                         </TouchableOpacity>
-                      )}
 
-                      {/* BOTÓN CÁMARA */}
-                      <TouchableOpacity
-                        onPress={() => {
-                          setCurrentExerciseIndex(index);
-                          setCurrentVariationId(variation.id);
-                          openCamera();
-                        }}
-                        className="absolute bottom-24 right-4 items-center justify-center"
+                        {/* BOTÓN MUTE/AUDIO (solo para videos) */}
+                        {isVideoUrl(variation.image_url) && (
+                          <TouchableOpacity
+                            onPress={() => {
+                              setVideoMuted(!videoMuted);
+                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                            }}
+                            className="absolute bottom-24 left-4"
+                            style={{
+                              backgroundColor: 'rgba(0,0,0,0.6)',
+                              borderWidth: 1,
+                              borderColor: 'rgba(255,255,255,0.2)',
+                              borderRadius: 12,
+                              padding: 10,
+                            }}
+                          >
+                            {videoMuted ? (
+                              <Volume2 color="#FFFFFF" size={18} />
+                            ) : (
+                              <Volume2 color="#F97316" size={18} />
+                            )}
+                          </TouchableOpacity>
+                        )}
+
+                        {/* BOTÓN CÁMARA */}
+                        <TouchableOpacity
+                          onPress={() => {
+                            setCurrentExerciseIndex(index);
+                            setCurrentVariationId(variation.id);
+                            openCamera();
+                          }}
+                          className="absolute bottom-24 right-4 items-center justify-center"
+                          style={{
+                            width: 48,
+                            height: 48,
+                            backgroundColor: 'rgba(0,0,0,0.6)',
+                            borderWidth: 1,
+                            borderColor: 'rgba(255,255,255,0.2)',
+                            borderRadius: 12,
+                          }}
+                        >
+                          <CameraIcon color="#FFFFFF" size={20} />
+                        </TouchableOpacity>
+
+                        {/* TÍTULO EJERCICIO */}
+                        <View className="absolute bottom-4 left-4 right-20">
+                          <Text
+                            className="text-white font-bold uppercase tracking-wider"
+                            style={{
+                              fontSize: 28,
+                              textShadowColor: 'rgba(0,0,0,0.8)',
+                              textShadowOffset: { width: 0, height: 2 },
+                              textShadowRadius: 8,
+                            }}
+                            numberOfLines={2}
+                          >
+                            {variation.name}
+                          </Text>
+                          {!variation.isMain && (
+                            <View className="flex-row items-center mt-1">
+                              <View className="w-2 h-2 bg-fire-orange rounded-full mr-2" />
+                              <Text className="text-fire-orange text-xs uppercase tracking-widest font-bold">
+                                Alternativa
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                      </View>
+
+                      {/* SLIDER DE HISTORIAL */}
+                      <View
+                        className="px-4 pt-3"
                         style={{
-                          width: 48,
-                          height: 48,
-                          backgroundColor: 'rgba(0,0,0,0.6)',
-                          borderWidth: 1,
-                          borderColor: 'rgba(255,255,255,0.2)',
-                          borderRadius: 12,
+                          backgroundColor: spotifyIsPlaying ? 'transparent' : '#000',
                         }}
                       >
-                        <CameraIcon color="#FFFFFF" size={20} />
-                      </TouchableOpacity>
+                        <View className="flex-row items-center justify-between mb-2">
+                          <View className="flex-row items-center gap-2">
+                            <View className="w-1 h-4 bg-fire-orange rounded-full" />
+                            <Text className="text-white font-bold text-sm uppercase tracking-wider">
+                              Historial
+                            </Text>
+                          </View>
+                          <Text className="text-zinc-500 text-xs font-mono">
+                            {
+                              variation.videos.filter((v: VideoRecord) => v.video_url || v.videoUrl)
+                                .length
+                            }{' '}
+                            registros
+                          </Text>
+                        </View>
 
-                      {/* TÍTULO EJERCICIO */}
-                      <View className="absolute bottom-4 left-4 right-20">
-                        <Text
-                          className="text-white font-bold uppercase tracking-wider"
-                          style={{
-                            fontSize: 28,
-                            textShadowColor: 'rgba(0,0,0,0.8)',
-                            textShadowOffset: { width: 0, height: 2 },
-                            textShadowRadius: 8,
-                          }}
-                          numberOfLines={2}
-                        >
-                          {variation.name}
-                        </Text>
-                        {!variation.isMain && (
-                          <View className="flex-row items-center mt-1">
-                            <View className="w-2 h-2 bg-fire-orange rounded-full mr-2" />
-                            <Text className="text-fire-orange text-xs uppercase tracking-widest font-bold">
-                              Alternativa
+                        {variation.videos.filter((v: VideoRecord) => v.video_url || v.videoUrl)
+                          .length > 0 ? (
+                          <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={{ paddingRight: 16 }}
+                            className="-mx-4 px-4"
+                          >
+                            {variation.videos
+                              .filter((v: VideoRecord) => v.video_url || v.videoUrl)
+                              .slice(0, 10)
+                              .map((video: VideoRecord, vIdx: number) => (
+                                <Pressable
+                                  key={video.id || vIdx}
+                                  onPress={() => {
+                                    setSelectedVideo(video);
+                                    setVideoNotesExpanded(false);
+                                    setVideoViewerVisible(true);
+                                  }}
+                                  onLongPress={() => {
+                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                                    deleteVideoFromHistorial(video);
+                                  }}
+                                  delayLongPress={500}
+                                  className="mr-3"
+                                  style={{
+                                    width: 75,
+                                    height: 133,
+                                    backgroundColor: spotifyIsPlaying
+                                      ? 'rgba(0,0,0,0.4)'
+                                      : '#0a0a0a',
+                                    borderRadius: 10,
+                                    borderWidth: 1.5,
+                                    borderColor:
+                                      vIdx === 0
+                                        ? '#F97316'
+                                        : spotifyIsPlaying
+                                          ? 'rgba(255,255,255,0.15)'
+                                          : '#27272a',
+                                    overflow: 'hidden',
+                                  }}
+                                >
+                                  <View className="relative flex-1">
+                                    {video.thumbnail_url || video.video_url ? (
+                                      <Image
+                                        source={{ uri: video.thumbnail_url || video.video_url }}
+                                        style={{ width: '100%', height: '100%' }}
+                                        contentFit="cover"
+                                      />
+                                    ) : (
+                                      <View className="w-full h-full bg-zinc-800 items-center justify-center">
+                                        <Video color="#52525b" size={20} />
+                                      </View>
+                                    )}
+
+                                    <LinearGradient
+                                      colors={['transparent', 'rgba(0,0,0,0.9)']}
+                                      className="absolute bottom-0 left-0 right-0 h-16"
+                                    />
+
+                                    <View className="absolute inset-0 items-center justify-center">
+                                      <View
+                                        className="w-8 h-8 rounded-full items-center justify-center"
+                                        style={{ backgroundColor: 'rgba(255,255,255,0.9)' }}
+                                      >
+                                        <Play color="#000" size={14} fill="#000" />
+                                      </View>
+                                    </View>
+
+                                    <View className="absolute top-1.5 left-1.5 right-1.5 flex-row justify-between">
+                                      <View
+                                        className="w-5 h-5 rounded-full items-center justify-center"
+                                        style={{ backgroundColor: 'rgba(0,0,0,0.7)' }}
+                                      >
+                                        {video.is_public ? (
+                                          <Eye color="#22c55e" size={11} />
+                                        ) : (
+                                          <EyeOff color="#71717a" size={11} />
+                                        )}
+                                      </View>
+
+                                      {video.spotify?.enabled && (
+                                        <View
+                                          className="w-5 h-5 rounded-full items-center justify-center"
+                                          style={{ backgroundColor: 'rgba(0,0,0,0.7)' }}
+                                        >
+                                          <Music color="#1DB954" size={11} />
+                                        </View>
+                                      )}
+                                    </View>
+
+                                    <View className="absolute bottom-1.5 left-1.5 right-1.5">
+                                      {(video.weight > 0 || video.reps > 0) && (
+                                        <Text
+                                          className="text-white font-bold text-[11px]"
+                                          numberOfLines={1}
+                                        >
+                                          {video.weight > 0 && video.reps > 0
+                                            ? `${video.weight}kg × ${video.reps}`
+                                            : video.weight > 0
+                                              ? `${video.weight}kg`
+                                              : `${video.reps} reps`}
+                                        </Text>
+                                      )}
+                                      {video.free_text && (
+                                        <Text
+                                          className="text-zinc-300 text-[9px] italic"
+                                          numberOfLines={1}
+                                        >
+                                          {video.free_text}
+                                        </Text>
+                                      )}
+                                      <Text className="text-zinc-400 text-[9px]">{video.date}</Text>
+                                    </View>
+                                  </View>
+                                </Pressable>
+                              ))}
+
+                            {variation.videos.length > 5 && (
+                              <TouchableOpacity
+                                onPress={() => {
+                                  setModalExercise(item);
+                                  setHistorialModalVisible(true);
+                                }}
+                                className="items-center justify-center"
+                                style={{
+                                  width: 75,
+                                  height: 133,
+                                  backgroundColor: spotifyIsPlaying ? 'rgba(0,0,0,0.4)' : '#18181b',
+                                  borderRadius: 10,
+                                  borderWidth: 1,
+                                  borderColor: spotifyIsPlaying
+                                    ? 'rgba(255,255,255,0.15)'
+                                    : '#27272a',
+                                }}
+                              >
+                                <Text className="text-zinc-400 text-[10px] font-bold">
+                                  Ver todo
+                                </Text>
+                                <Text className="text-fire-orange text-lg font-bold mt-0.5">
+                                  +{variation.videos.length - 5}
+                                </Text>
+                              </TouchableOpacity>
+                            )}
+                          </ScrollView>
+                        ) : (
+                          <View
+                            className="items-center justify-center py-4 rounded-xl"
+                            style={{
+                              backgroundColor: spotifyIsPlaying ? 'rgba(0,0,0,0.4)' : '#0a0a0a',
+                              borderWidth: 1,
+                              borderColor: spotifyIsPlaying ? 'rgba(255,255,255,0.1)' : '#1a1a1a',
+                            }}
+                          >
+                            <Video color="#52525b" size={24} />
+                            <Text className="text-zinc-600 text-xs mt-2">Sin registros aún</Text>
+                            <Text className="text-zinc-700 text-[10px] mt-0.5">
+                              Graba tu primera serie
                             </Text>
                           </View>
                         )}
                       </View>
                     </View>
-
-                    {/* SLIDER DE HISTORIAL */}
-                    <View
-                      className="px-4 pt-3"
-                      style={{
-                        backgroundColor: spotifyIsPlaying ? 'transparent' : '#000',
-                      }}
-                    >
-                      <View className="flex-row items-center justify-between mb-2">
-                        <View className="flex-row items-center gap-2">
-                          <View className="w-1 h-4 bg-fire-orange rounded-full" />
-                          <Text className="text-white font-bold text-sm uppercase tracking-wider">
-                            Historial
-                          </Text>
-                        </View>
-                        <Text className="text-zinc-500 text-xs font-mono">
-                          {
-                            variation.videos.filter((v: VideoRecord) => v.video_url || v.videoUrl)
-                              .length
-                          }{' '}
-                          registros
-                        </Text>
-                      </View>
-
-                      {variation.videos.filter((v: VideoRecord) => v.video_url || v.videoUrl)
-                        .length > 0 ? (
-                        <ScrollView
-                          horizontal
-                          showsHorizontalScrollIndicator={false}
-                          contentContainerStyle={{ paddingRight: 16 }}
-                          className="-mx-4 px-4"
-                        >
-                          {variation.videos
-                            .filter((v: VideoRecord) => v.video_url || v.videoUrl)
-                            .slice(0, 10)
-                            .map((video: VideoRecord, vIdx: number) => (
-                              <Pressable
-                                key={video.id || vIdx}
-                                onPress={() => {
-                                  setSelectedVideo(video);
-                                  setVideoNotesExpanded(false);
-                                  setVideoViewerVisible(true);
-                                }}
-                                onLongPress={() => {
-                                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-                                  deleteVideoFromHistorial(video);
-                                }}
-                                delayLongPress={500}
-                                className="mr-3"
-                                style={{
-                                  width: 75,
-                                  height: 133,
-                                  backgroundColor: spotifyIsPlaying ? 'rgba(0,0,0,0.4)' : '#0a0a0a',
-                                  borderRadius: 10,
-                                  borderWidth: 1.5,
-                                  borderColor:
-                                    vIdx === 0
-                                      ? '#F97316'
-                                      : spotifyIsPlaying
-                                        ? 'rgba(255,255,255,0.15)'
-                                        : '#27272a',
-                                  overflow: 'hidden',
-                                }}
-                              >
-                                <View className="relative flex-1">
-                                  {video.thumbnail_url || video.video_url ? (
-                                    <Image
-                                      source={{ uri: video.thumbnail_url || video.video_url }}
-                                      style={{ width: '100%', height: '100%' }}
-                                      contentFit="cover"
-                                    />
-                                  ) : (
-                                    <View className="w-full h-full bg-zinc-800 items-center justify-center">
-                                      <Video color="#52525b" size={20} />
-                                    </View>
-                                  )}
-
-                                  <LinearGradient
-                                    colors={['transparent', 'rgba(0,0,0,0.9)']}
-                                    className="absolute bottom-0 left-0 right-0 h-16"
-                                  />
-
-                                  <View className="absolute inset-0 items-center justify-center">
-                                    <View
-                                      className="w-8 h-8 rounded-full items-center justify-center"
-                                      style={{ backgroundColor: 'rgba(255,255,255,0.9)' }}
-                                    >
-                                      <Play color="#000" size={14} fill="#000" />
-                                    </View>
-                                  </View>
-
-                                  <View className="absolute top-1.5 left-1.5 right-1.5 flex-row justify-between">
-                                    <View
-                                      className="w-5 h-5 rounded-full items-center justify-center"
-                                      style={{ backgroundColor: 'rgba(0,0,0,0.7)' }}
-                                    >
-                                      {video.is_public ? (
-                                        <Eye color="#22c55e" size={11} />
-                                      ) : (
-                                        <EyeOff color="#71717a" size={11} />
-                                      )}
-                                    </View>
-
-                                    {video.spotify?.enabled && (
-                                      <View
-                                        className="w-5 h-5 rounded-full items-center justify-center"
-                                        style={{ backgroundColor: 'rgba(0,0,0,0.7)' }}
-                                      >
-                                        <Music color="#1DB954" size={11} />
-                                      </View>
-                                    )}
-                                  </View>
-
-                                  <View className="absolute bottom-1.5 left-1.5 right-1.5">
-                                    {(video.weight > 0 || video.reps > 0) && (
-                                      <Text
-                                        className="text-white font-bold text-[11px]"
-                                        numberOfLines={1}
-                                      >
-                                        {video.weight > 0 && video.reps > 0
-                                          ? `${video.weight}kg × ${video.reps}`
-                                          : video.weight > 0
-                                            ? `${video.weight}kg`
-                                            : `${video.reps} reps`}
-                                      </Text>
-                                    )}
-                                    {video.free_text && (
-                                      <Text
-                                        className="text-zinc-300 text-[9px] italic"
-                                        numberOfLines={1}
-                                      >
-                                        {video.free_text}
-                                      </Text>
-                                    )}
-                                    <Text className="text-zinc-400 text-[9px]">{video.date}</Text>
-                                  </View>
-                                </View>
-                              </Pressable>
-                            ))}
-
-                          {variation.videos.length > 5 && (
-                            <TouchableOpacity
-                              onPress={() => {
-                                setModalExercise(item);
-                                setHistorialModalVisible(true);
-                              }}
-                              className="items-center justify-center"
-                              style={{
-                                width: 75,
-                                height: 133,
-                                backgroundColor: spotifyIsPlaying ? 'rgba(0,0,0,0.4)' : '#18181b',
-                                borderRadius: 10,
-                                borderWidth: 1,
-                                borderColor: spotifyIsPlaying
-                                  ? 'rgba(255,255,255,0.15)'
-                                  : '#27272a',
-                              }}
-                            >
-                              <Text className="text-zinc-400 text-[10px] font-bold">Ver todo</Text>
-                              <Text className="text-fire-orange text-lg font-bold mt-0.5">
-                                +{variation.videos.length - 5}
-                              </Text>
-                            </TouchableOpacity>
-                          )}
-                        </ScrollView>
-                      ) : (
-                        <View
-                          className="items-center justify-center py-4 rounded-xl"
-                          style={{
-                            backgroundColor: spotifyIsPlaying ? 'rgba(0,0,0,0.4)' : '#0a0a0a',
-                            borderWidth: 1,
-                            borderColor: spotifyIsPlaying ? 'rgba(255,255,255,0.1)' : '#1a1a1a',
-                          }}
-                        >
-                          <Video color="#52525b" size={24} />
-                          <Text className="text-zinc-600 text-xs mt-2">Sin registros aún</Text>
-                          <Text className="text-zinc-700 text-[10px] mt-0.5">
-                            Graba tu primera serie
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-                  </View>
-                )}
+                  );
+                }}
               />
 
               {/* CARD ESTRUCTURA - FIJA (fuera del scroll horizontal) */}
@@ -8861,6 +9807,8 @@ function GymScreen() {
                   spotifyMode={spotifyIsPlaying}
                   onPress={() => {
                     setModalExercise(item);
+                    // BUGFIX: Capturar el día actual al abrir el modal para evitar guardar en día incorrecto
+                    setFocusSeriesDayIndex(selectedDayIndex);
                     setStructureModalVisible(true);
                   }}
                 />
@@ -8907,6 +9855,8 @@ function GymScreen() {
       {renderVideoViewer()}
       {renderHistorialModal()}
       {renderStructureModal()}
+      {renderAddDayModal()}
+      {renderFocusSeriesModal()}
       {renderCameraModal()}
       {renderEditorModal()}
     </GestureHandlerRootView>

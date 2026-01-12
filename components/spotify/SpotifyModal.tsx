@@ -405,7 +405,7 @@ const AnimatedAlbumBackground = ({
 // ============================================================================
 // ALBUM DISPLAY - Carátula estática (sin swipe para cambiar canción)
 // ============================================================================
-const ALBUM_DISPLAY_SIZE = 280;
+const ALBUM_DISPLAY_SIZE = 250;
 
 interface TrackInfo {
   name: string;
@@ -442,7 +442,7 @@ const AlbumDisplay = React.memo(
     return (
       <View>
         {/* Carátula del álbum */}
-        <View style={{ alignItems: 'center', marginBottom: 16 }}>
+        <View style={{ alignItems: 'center', marginBottom: 20 }}>
           <Animated.View
             entering={FadeIn.duration(300)}
             style={{
@@ -548,17 +548,6 @@ const AlbumDisplay = React.memo(
                 numberOfLines={1}
               >
                 {currentTrackInfo.artist}
-              </Text>
-              <Text
-                style={{
-                  color: '#52525b',
-                  fontSize: 13,
-                  marginTop: 4,
-                  textAlign: 'center',
-                }}
-                numberOfLines={1}
-              >
-                {currentTrackInfo.album}
               </Text>
             </View>
           ) : (
@@ -1653,9 +1642,9 @@ export default function SpotifyModal({
         isPlaying={playbackState?.isPlaying ?? false}
       />
 
-      <View className="flex-1 px-0 pt-4">
+      <View className="flex-1 px-0 pt-0">
         {currentTrack ? (
-          <View className="flex-1 items-center justify-center">
+          <View className="flex-1 items-center" style={{ paddingTop: 40 }}>
             {/* Album Display - Carátula estática */}
             <AlbumDisplay
               currentAlbumArt={currentTrack.albumArt}
@@ -1674,7 +1663,7 @@ export default function SpotifyModal({
             />
 
             {/* Progress Bar Slider */}
-            <View className="w-full mb-6 px-6">
+            <View className="w-full mb-4 px-6">
               <Slider
                 style={{ width: '100%', height: 40 }}
                 minimumValue={0}

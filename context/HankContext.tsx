@@ -929,11 +929,11 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
             .select('metadata')
             .eq('user_id', userId)
             .eq('exercise_id', exerciseId)
-            .single();
+            .maybeSingle();
 
-          console.warn(
-            `🔍 user_exercise_config: ${configData ? 'ENCONTRADO' : 'NO'}, error: ${configError?.message || 'ninguno'}`
-          );
+          if (configData) {
+            console.warn(`🔍 user_exercise_config: ENCONTRADO`);
+          }
 
           let currentNotes = configData?.metadata?.notes || '';
           let currentTags = configData?.metadata?.tags || [];
