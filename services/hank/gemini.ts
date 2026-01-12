@@ -17,6 +17,90 @@ console.warn(
 );
 
 // ============================================================================
+// PREPROCESADOR: Convertir números en texto a dígitos
+// Esto asegura que Gemini reciba "5" en lugar de "cinco"
+// ============================================================================
+function preprocessSpanishNumbers(text: string): string {
+  // Log entrada para debug
+  console.warn(`🔢 PREPROCESADOR INPUT: "${text}"`);
+
+  // Mapa de números en español a dígitos
+  const numberMap: [RegExp, string][] = [
+    // Centenas compuestas primero (más largas)
+    [/ciento\s+cuarenta/gi, '140'],
+    [/ciento\s+cincuenta/gi, '150'],
+    [/ciento\s+sesenta/gi, '160'],
+    [/ciento\s+setenta/gi, '170'],
+    [/ciento\s+ochenta/gi, '180'],
+    [/ciento\s+noventa/gi, '190'],
+    [/ciento\s+diez/gi, '110'],
+    [/ciento\s+veinte/gi, '120'],
+    [/ciento\s+treinta/gi, '130'],
+    [/doscientos/gi, '200'],
+    [/doscientas/gi, '200'],
+    // Veinti- compuestos
+    [/veinticinco/gi, '25'],
+    [/veinticuatro/gi, '24'],
+    [/veintitres/gi, '23'],
+    [/veintitrés/gi, '23'],
+    [/veintidos/gi, '22'],
+    [/veintidós/gi, '22'],
+    [/veintiuno/gi, '21'],
+    [/veintiuna/gi, '21'],
+    [/veintinueve/gi, '29'],
+    [/veintiocho/gi, '28'],
+    [/veintisiete/gi, '27'],
+    [/veintiseis/gi, '26'],
+    [/veintiséis/gi, '26'],
+    // Decenas
+    [/\bnoventa\b/gi, '90'],
+    [/\bochenta\b/gi, '80'],
+    [/\bsetenta\b/gi, '70'],
+    [/\bsesenta\b/gi, '60'],
+    [/\bcincuenta\b/gi, '50'],
+    [/\bcuarenta\b/gi, '40'],
+    [/\btreinta\b/gi, '30'],
+    [/\bveinte\b/gi, '20'],
+    // Teens
+    [/\bdiecinueve\b/gi, '19'],
+    [/\bdieciocho\b/gi, '18'],
+    [/\bdiecisiete\b/gi, '17'],
+    [/\bdieciseis\b/gi, '16'],
+    [/\bdieciséis\b/gi, '16'],
+    [/\bquince\b/gi, '15'],
+    [/\bcatorce\b/gi, '14'],
+    [/\btrece\b/gi, '13'],
+    [/\bdoce\b/gi, '12'],
+    [/\bonce\b/gi, '11'],
+    [/\bdiez\b/gi, '10'],
+    // Unidades (al final para no interferir con compuestos)
+    [/\bnueve\b/gi, '9'],
+    [/\bocho\b/gi, '8'],
+    [/\bsiete\b/gi, '7'],
+    [/\bseis\b/gi, '6'],
+    [/\bcinco\b/gi, '5'],
+    [/\bcuatro\b/gi, '4'],
+    [/\btres\b/gi, '3'],
+    [/\bdos\b/gi, '2'],
+    [/\buna\b/gi, '1'],
+    [/\buno\b/gi, '1'],
+    [/\bcien\b/gi, '100'],
+    [/\bcero\b/gi, '0'],
+  ];
+
+  let result = text;
+
+  for (const [regex, replacement] of numberMap) {
+    result = result.replace(regex, replacement);
+  }
+
+  // Log resultado
+  console.warn(`🔢 PREPROCESADOR OUTPUT: "${result}"`);
+
+  return result;
+}
+
+// ============================================================================
 // TYPES
 // ============================================================================
 interface GeminiMessage {
@@ -919,6 +1003,9 @@ export async function callGemini(
   apiKey: string,
   conversationHistory: GeminiMessage[] = []
 ): Promise<GeminiResult> {
+  // � PREPROCESAR: Convertir números en texto a dígitos
+  const processedMessage = preprocessSpanishNumbers(userMessage);
+
   // 🔍 DEBUG: Ver qué ejercicio está activo en el contexto
   console.warn('🎯 GEMINI activeAsset:', context.activeAsset?.name || 'NINGUNO');
 
@@ -936,7 +1023,7 @@ export async function callGemini(
   console.warn(`📦 Herramientas enviadas a Gemini: ${geminiTools.length}`);
 
   // 🔍 DEBUG: Detectar si es un comando de acción
-  const lowerMessage = userMessage.toLowerCase();
+  const lowerMessage = processedMessage.toLowerCase();
 
   // Detectar si el usuario está preguntando sobre su físico, progreso o planes
   // En estos casos, incluiremos las fotos de progreso
@@ -957,8 +1044,8 @@ export async function callGemini(
   // Construir las partes del mensaje del usuario
   const userMessageParts: GeminiMessage['parts'] = [];
 
-  // Primero el texto
-  userMessageParts.push({ text: userMessage });
+  // Primero el texto (ya preprocesado)
+  userMessageParts.push({ text: processedMessage });
 
   // Después las fotos si las hay
   if (photosParts.length > 0) {

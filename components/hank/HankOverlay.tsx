@@ -37,7 +37,6 @@ import {
   Send,
   Mic,
   MicOff,
-  Sparkles,
   ChevronDown,
   Check,
   X,
@@ -441,13 +440,11 @@ const HankFAB: React.FC<{
           ]}
         />
 
-        {/* Icon - ED HARDY COLORS - FAB siempre muestra Bot */}
+        {/* Icon - ED HARDY COLORS - FAB siempre muestra Bot (HANK Logo) */}
         {isListening ? (
           <Mic size={28} color="#FFFFFF" />
-        ) : isProcessing ? (
-          <Sparkles size={28} color="#F97316" />
         ) : (
-          <Bot size={28} color={isWorking || isSuccess ? '#FFFFFF' : '#F97316'} />
+          <Bot size={28} color={isWorking || isSuccess || isProcessing ? '#FFFFFF' : '#F97316'} />
         )}
       </AnimatedPressable>
     </Animated.View>
@@ -1257,6 +1254,25 @@ export const HankOverlay: React.FC = () => {
       setIsOpen(false);
     }
   }, [targetState.writeToolDetected, isOpen]);
+
+  // -------------------------------------------------------------------------
+  // ABRIR CHAT CUANDO LA EJECUCIÓN TERMINA EXITOSAMENTE
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    // Registrar callback para abrir el chat cuando HANK termine de ejecutar exitosamente
+    targetState.setOnExecutionSuccess(() => {
+      console.warn('🎯 HANK UI: Ejecución exitosa completada, abriendo chat...');
+      // Pequeño delay para que la animación de regreso termine suavemente
+      setTimeout(() => {
+        setIsOpen(true);
+      }, 200);
+    });
+
+    // Limpiar al desmontar
+    return () => {
+      targetState.setOnExecutionSuccess(null);
+    };
+  }, [targetState]);
 
   // -------------------------------------------------------------------------
   // HELPER: Verificar si debe limpiar la UI del chat

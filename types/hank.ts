@@ -360,6 +360,7 @@ export interface HankTargetState {
   completeAnimation: (success: boolean) => void;
   registerTarget: (id: string, target: Omit<HankTarget, 'id'>) => void;
   unregisterTarget: (id: string) => void;
+  setOnExecutionSuccess: (callback: (() => void) | null) => void; // Callback para abrir chat al terminar
 }
 
 // ============================================================================

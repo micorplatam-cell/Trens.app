@@ -370,6 +370,12 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
     }, 800);
   }, []);
 
+  // Callback para notificar cuando la ejecución exitosa termina completamente
+  const onExecutionSuccessRef = useRef<(() => void) | null>(null);
+  const setOnExecutionSuccess = useCallback((callback: (() => void) | null) => {
+    onExecutionSuccessRef.current = callback;
+  }, []);
+
   const completeTargetAnimation = useCallback((success: boolean) => {
     console.warn('✨ HANK: Completando animación', success ? 'con éxito' : 'con error');
     setAnimationPhase(success ? 'success' : 'idle');
@@ -382,6 +388,11 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
         setCurrentTarget(null);
         // Reset del flag de write tool detectado
         setWriteToolDetected(false);
+        // 🎯 Notificar al overlay que abra el chat con el resultado
+        if (success && onExecutionSuccessRef.current) {
+          console.warn('🎯 HANK: Notificando éxito para abrir chat');
+          onExecutionSuccessRef.current();
+        }
       }, 600);
     }, 400);
   }, []);
@@ -2550,6 +2561,7 @@ HISTORIAL DE PROGRESO (FOTOS):
         completeAnimation: completeTargetAnimation,
         registerTarget,
         unregisterTarget,
+        setOnExecutionSuccess,
       },
     }),
     [
@@ -2587,6 +2599,7 @@ HISTORIAL DE PROGRESO (FOTOS):
       completeTargetAnimation,
       registerTarget,
       unregisterTarget,
+      setOnExecutionSuccess,
     ]
   );
 
@@ -2645,6 +2658,7 @@ const defaultHankState: HankContextState = {
     completeAnimation: () => {},
     registerTarget: () => {},
     unregisterTarget: () => {},
+    setOnExecutionSuccess: () => {},
   },
 };
 
