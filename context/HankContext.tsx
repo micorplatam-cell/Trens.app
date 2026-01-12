@@ -313,15 +313,21 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
 
   // User Plan Context - Nutrición y Stack actual para contexto de Gemini
   const [userPlanContext, setUserPlanContext] = useState<{
-    // Datos biométricos del usuario (ADN/Trens ID)
+    // Datos biométricos del usuario (ADN/Trens ID) - TODOS los campos de biometría
     biometrics: {
       weight?: number; // kg
       height?: number; // cm
       age?: number;
       bodyFat?: number; // %
+      muscleMass?: number; // kg
       goal?: string; // bulking, cutting, recomp, maintenance
       sex?: string;
-      activityLevel?: string;
+      activityLevel?: string; // SEDENTARIO, MODERADO, ACTIVO, MUY ACTIVO
+      trainingExperience?: string; // PRINCIPIANTE, INTERMEDIO, AVANZADO
+      metabolicRate?: string; // LENTO, NORMAL, RAPIDO
+      trainingDaysPerWeek?: number;
+      injuries?: string; // Lesiones del usuario
+      allergies?: string; // Alergias alimentarias
       bmr?: number; // Basal metabolic rate
       tdee?: number; // Total daily energy expenditure
     } | null;
@@ -809,10 +815,12 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
           console.warn('⚠️ Error cargando training profile:', trainingProfileError);
         }
 
-        // 4. Cargar datos biométricos desde user_profiles (donde ADN los guarda)
+        // 4. Cargar datos biométricos desde user_profiles (donde ADN los guarda) - TODOS los campos
         const { data: userProfile, error: userProfileError } = await supabase
           .from('user_profiles')
-          .select('weight, height, goal, age, sex, body_fat_percentage, activity_level')
+          .select(
+            'weight, height, goal, age, sex, body_fat_percentage, muscle_mass, activity_level, training_experience, metabolic_rate, training_days_per_week, injuries, allergies'
+          )
           .eq('user_id', userId)
           .single();
 
@@ -834,7 +842,13 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
           age?: number;
           sex?: string;
           body_fat_percentage?: number;
+          muscle_mass?: number;
           activity_level?: string;
+          training_experience?: string;
+          metabolic_rate?: string;
+          training_days_per_week?: number;
+          injuries?: string;
+          allergies?: string;
         } | null;
 
         // Formatear comidas
@@ -878,7 +892,7 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
           routineNames: trainingData?.training_routine_names || {},
         };
 
-        // Formatear biométricos (desde user_profiles)
+        // Formatear biométricos (desde user_profiles) - TODOS los campos de ADN
         // Nota: weight y height vienen como strings, convertir a números
         const biometrics = biometricsData
           ? {
@@ -886,9 +900,15 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
               height: biometricsData.height ? parseFloat(biometricsData.height) : undefined,
               age: biometricsData.age || undefined,
               bodyFat: biometricsData.body_fat_percentage || undefined,
+              muscleMass: biometricsData.muscle_mass || undefined,
               goal: biometricsData.goal || undefined,
               sex: biometricsData.sex || undefined,
               activityLevel: biometricsData.activity_level || undefined,
+              trainingExperience: biometricsData.training_experience || undefined,
+              metabolicRate: biometricsData.metabolic_rate || undefined,
+              trainingDaysPerWeek: biometricsData.training_days_per_week || undefined,
+              injuries: biometricsData.injuries || undefined,
+              allergies: biometricsData.allergies || undefined,
               bmr: undefined, // Calcular si es necesario
               tdee: undefined, // Calcular si es necesario
             }

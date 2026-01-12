@@ -6,7 +6,6 @@
 
 import React, { useState } from 'react';
 import { View, Text, Pressable, ScrollView, Image, Platform } from 'react-native';
-import { useVideoPlayer, VideoView } from 'expo-video';
 import { GestureDetector, GestureType } from 'react-native-gesture-handler';
 import Animated, {
   useAnimatedStyle,
@@ -104,7 +103,8 @@ const getTypeIcon = (type: string, color: string) => {
 };
 
 // ============================================================================
-// EXERCISE CARD - Muestra imagen o primer frame del video con nombre
+// EXERCISE CARD - Muestra imagen o placeholder con nombre
+// No usamos VideoPlayer para thumbnails para evitar crashes en Expo Go
 // ============================================================================
 interface ExerciseCardProps {
   exercise: Exercise;
@@ -113,27 +113,27 @@ interface ExerciseCardProps {
 }
 
 const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index: _index, onPress }) => {
-  // Si tiene video, crear player pausado para mostrar primer frame
-  const videoPlayer = useVideoPlayer(exercise.videoUrl || null, (player) => {
-    player.loop = false;
-    player.muted = true;
-    player.pause();
-  });
+  // Determinar si tenemos una imagen para mostrar
+  const hasImage = !!exercise.imageUrl;
+  const hasVideo = !!exercise.videoUrl;
 
   return (
     <Pressable onPress={onPress} className="mr-3 items-center active:scale-95">
       {/* Thumbnail */}
       <View className="w-20 h-20 bg-zinc-900 rounded-xl items-center justify-center border-2 border-red-500/30 overflow-hidden">
-        {exercise.imageUrl ? (
+        {hasImage ? (
           <Image source={{ uri: exercise.imageUrl }} className="w-full h-full" resizeMode="cover" />
-        ) : exercise.videoUrl ? (
-          <VideoView
-            player={videoPlayer}
-            style={{ width: 80, height: 80 }}
-            contentFit="cover"
-            nativeControls={false}
-            allowsFullscreen={false}
-          />
+        ) : hasVideo ? (
+          // Para videos sin imagen, mostrar placeholder con icono de play
+          // Esto evita cargar VideoPlayer solo para thumbnail
+          <View className="items-center justify-center w-full h-full bg-zinc-800">
+            <View className="absolute">
+              <Dumbbell size={24} color="#DC2626" />
+            </View>
+            <View className="absolute bottom-1 right-1 bg-black/60 rounded px-1">
+              <Text className="text-white text-[8px] font-mono">▶</Text>
+            </View>
+          </View>
         ) : (
           <View className="items-center justify-center">
             <Dumbbell size={28} color="#DC2626" />

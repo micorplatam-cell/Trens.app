@@ -4644,6 +4644,7 @@ ${clearExistingOnExecute ? '\n⚠️ Esto REEMPLAZARÁ tu plan actual.' : '\n�
 /**
  * Agrega una comida al Plan Builder (estado temporal)
  * No guarda en DB hasta que se ejecute el plan completo
+ * Incluye estimación de macros en tiempo real
  */
 export function planBuilderAddMeal(
   currentState: PlanBuilderState,
@@ -4678,9 +4679,30 @@ export function planBuilderAddMeal(
     meals: [...currentState.meals, newMeal],
   };
 
+  // Estimar macros de esta comida
+  let mealMacros = { calories: 0, protein: 0, carbs: 0, fat: 0 };
   const ingredientsList = ingredients
-    .map((i) => `${i.name}${i.quantity ? ` (${i.quantity})` : ''}`)
+    .map((i) => {
+      const estimate = estimateIngredientMacros(i.name, i.quantity);
+      mealMacros.calories += estimate.calories;
+      mealMacros.protein += estimate.protein;
+      mealMacros.carbs += estimate.carbs;
+      mealMacros.fat += estimate.fat;
+      return `${i.name}${i.quantity ? ` (${i.quantity})` : ''}`;
+    })
     .join(', ');
+
+  // Calcular totales acumulados del plan
+  let totalMacros = { ...mealMacros };
+  currentState.meals.forEach((m) => {
+    m.ingredients.forEach((ing) => {
+      const est = estimateIngredientMacros(ing.name, ing.quantity);
+      totalMacros.calories += est.calories;
+      totalMacros.protein += est.protein;
+      totalMacros.carbs += est.carbs;
+      totalMacros.fat += est.fat;
+    });
+  });
 
   return {
     newState,
@@ -4688,10 +4710,17 @@ export function planBuilderAddMeal(
       success: true,
       message: `✅ ${autoName} agregado al plan (${formatTime24to12(time)}):
 🥗 ${ingredientsList}
+📊 Esta comida: ~${Math.round(mealMacros.calories)} kcal | ${Math.round(mealMacros.protein)}g P | ${Math.round(mealMacros.carbs)}g C | ${Math.round(mealMacros.fat)}g G
 
 📋 Plan actual: ${newState.meals.length} comida(s), ${newState.supplements.length} suplemento(s)
+📈 Total acumulado: ~${Math.round(totalMacros.calories)} kcal | ${Math.round(totalMacros.protein)}g P
 💡 Sigue agregando o di "ejecuta el plan" cuando termines.`,
-      data: { meal: newMeal, totalMeals: newState.meals.length },
+      data: {
+        meal: newMeal,
+        totalMeals: newState.meals.length,
+        mealMacros,
+        totalMacros,
+      },
     },
   };
 }
@@ -4941,7 +4970,7 @@ export function planBuilderRemoveSupplement(
 }
 
 /**
- * Muestra el estado actual del Plan Builder
+ * Muestra el estado actual del Plan Builder con VALIDACIÓN DE MACROS EN TIEMPO REAL
  */
 export function planBuilderShow(currentState: PlanBuilderState): HankToolResult {
   if (!currentState.isActive) {
@@ -4970,31 +4999,48 @@ Ejemplo: "Desayuno a las 7 con huevos y avena, creatina 5g, quiero ganar múscul
     };
   }
 
-  // Construir resumen de comidas
+  // Estimar macros de cada comida usando base de datos local
+  let totalEstimatedMacros = { calories: 0, protein: 0, carbs: 0, fat: 0 };
+
+  // Construir resumen de comidas CON MACROS ESTIMADOS
   let mealsSection = '';
   if (currentState.meals.length > 0) {
-    mealsSection =
-      '🍽️ COMIDAS:\n' +
-      currentState.meals
-        .map((m, i) => {
-          const ings = m.ingredients
-            .map((ing) => `${ing.name}${ing.quantity ? ` (${ing.quantity})` : ''}`)
-            .join(', ');
-          return `${i + 1}. ${m.name} (${formatTime24to12(m.time)}): ${ings}`;
-        })
-        .join('\n');
+    mealsSection = '🍽️ COMIDAS:\n';
+
+    currentState.meals.forEach((m, i) => {
+      let mealMacros = { calories: 0, protein: 0, carbs: 0, fat: 0 };
+
+      const ingsWithEstimates = m.ingredients.map((ing) => {
+        const estimate = estimateIngredientMacros(ing.name, ing.quantity);
+        mealMacros.calories += estimate.calories;
+        mealMacros.protein += estimate.protein;
+        mealMacros.carbs += estimate.carbs;
+        mealMacros.fat += estimate.fat;
+
+        return `${ing.name}${ing.quantity ? ` (${ing.quantity})` : ''}`;
+      });
+
+      totalEstimatedMacros.calories += mealMacros.calories;
+      totalEstimatedMacros.protein += mealMacros.protein;
+      totalEstimatedMacros.carbs += mealMacros.carbs;
+      totalEstimatedMacros.fat += mealMacros.fat;
+
+      mealsSection += `${i + 1}. ${m.name || 'Comida'} (${formatTime24to12(m.time)})\n`;
+      mealsSection += `   🥗 ${ingsWithEstimates.join(', ')}\n`;
+      mealsSection += `   📊 ~${Math.round(mealMacros.calories)} kcal | ${Math.round(mealMacros.protein)}g P | ${Math.round(mealMacros.carbs)}g C | ${Math.round(mealMacros.fat)}g G\n`;
+    });
   }
 
   // Construir resumen de suplementos
   let suppsSection = '';
   if (currentState.supplements.length > 0) {
     suppsSection =
-      '\n\n💊 STACK:\n' +
+      '\n💊 STACK:\n' +
       currentState.supplements
         .map((s, i) => {
           let timing = '';
-          if (s.isPreWorkout) timing = ' (Pre)';
-          else if (s.isPostWorkout) timing = ' (Post)';
+          if (s.isPreWorkout) timing = ' (Pre-entreno)';
+          else if (s.isPostWorkout) timing = ' (Post-entreno)';
           else if (s.time) timing = ` (${formatTime24to12(s.time)})`;
           return `${i + 1}. ${s.name} - ${s.dose}${timing}`;
         })
@@ -5010,16 +5056,146 @@ Ejemplo: "Desayuno a las 7 con huevos y avena, creatina 5g, quiero ganar múscul
 • Frecuencia: ${currentState.training.frequency} días/semana`;
   }
 
+  // Sección de TOTALES ESTIMADOS
+  let totalsSection = '';
+  if (currentState.meals.length > 0) {
+    totalsSection = `
+
+═══════════════════════════════════════════
+📊 ESTIMACIÓN DE MACROS DIARIOS:
+═══════════════════════════════════════════
+🔥 Calorías: ~${Math.round(totalEstimatedMacros.calories)} kcal
+💪 Proteína: ~${Math.round(totalEstimatedMacros.protein)}g
+🍞 Carbohidratos: ~${Math.round(totalEstimatedMacros.carbs)}g
+🥑 Grasas: ~${Math.round(totalEstimatedMacros.fat)}g
+═══════════════════════════════════════════
+⚠️ Valores aproximados. Al ejecutar se calcularán con IA.`;
+  }
+
   return {
     success: true,
     message: `📋 TU PLAN EN CONSTRUCCIÓN:
-${mealsSection}${suppsSection}${trainingSection}
+
+${mealsSection}${suppsSection}${trainingSection}${totalsSection}
 
 ${currentState.clearExistingOnExecute ? '⚠️ REEMPLAZARÁ tu plan actual.' : '📝 Se AGREGARÁ a tu plan existente.'}
 
 ✅ Di "ejecuta el plan" para guardarlo todo.
 ✏️ Di "edita la comida X" o "quita la comida X" para modificar.`,
-    data: currentState,
+    data: {
+      ...currentState,
+      estimatedMacros: totalEstimatedMacros,
+    },
+  };
+}
+
+/**
+ * Estima macros de un ingrediente basado en la base de datos local
+ * @param ingredientName Nombre del ingrediente
+ * @param quantity Cantidad en formato string (ej: "200g", "3 huevos")
+ * @returns Macros estimados
+ */
+function estimateIngredientMacros(
+  ingredientName: string,
+  quantity?: string
+): { calories: number; protein: number; carbs: number; fat: number } {
+  // Base de datos simplificada de macros por 100g
+  const nutritionDB: Record<
+    string,
+    { calories: number; protein: number; carbs: number; fat: number }
+  > = {
+    // Proteínas
+    pollo: { calories: 165, protein: 31, carbs: 0, fat: 3.6 },
+    pechuga: { calories: 165, protein: 31, carbs: 0, fat: 3.6 },
+    res: { calories: 250, protein: 26, carbs: 0, fat: 15 },
+    carne: { calories: 250, protein: 26, carbs: 0, fat: 15 },
+    cerdo: { calories: 242, protein: 27, carbs: 0, fat: 14 },
+    pescado: { calories: 120, protein: 22, carbs: 0, fat: 3 },
+    atún: { calories: 130, protein: 29, carbs: 0, fat: 1 },
+    salmón: { calories: 208, protein: 20, carbs: 0, fat: 13 },
+    huevo: { calories: 155, protein: 13, carbs: 1, fat: 11 },
+    huevos: { calories: 155, protein: 13, carbs: 1, fat: 11 },
+    claras: { calories: 52, protein: 11, carbs: 1, fat: 0 },
+    whey: { calories: 120, protein: 24, carbs: 3, fat: 1 },
+    proteína: { calories: 120, protein: 24, carbs: 3, fat: 1 },
+
+    // Carbohidratos
+    arroz: { calories: 130, protein: 2.7, carbs: 28, fat: 0.3 },
+    papa: { calories: 77, protein: 2, carbs: 17, fat: 0.1 },
+    camote: { calories: 86, protein: 1.6, carbs: 20, fat: 0.1 },
+    avena: { calories: 389, protein: 13, carbs: 66, fat: 7 },
+    quinua: { calories: 120, protein: 4.4, carbs: 21, fat: 1.9 },
+    pasta: { calories: 131, protein: 5, carbs: 25, fat: 1 },
+    pan: { calories: 265, protein: 9, carbs: 49, fat: 3 },
+    plátano: { calories: 89, protein: 1.3, carbs: 23, fat: 0.4 },
+
+    // Grasas
+    palta: { calories: 160, protein: 2, carbs: 9, fat: 15 },
+    aguacate: { calories: 160, protein: 2, carbs: 9, fat: 15 },
+    aceite: { calories: 884, protein: 0, carbs: 0, fat: 100 },
+    maní: { calories: 567, protein: 26, carbs: 16, fat: 49 },
+    almendras: { calories: 579, protein: 21, carbs: 22, fat: 49 },
+    nueces: { calories: 654, protein: 15, carbs: 14, fat: 65 },
+
+    // Vegetales
+    brócoli: { calories: 34, protein: 2.8, carbs: 7, fat: 0.4 },
+    espinaca: { calories: 23, protein: 2.9, carbs: 3.6, fat: 0.4 },
+    tomate: { calories: 18, protein: 0.9, carbs: 3.9, fat: 0.2 },
+    lechuga: { calories: 15, protein: 1.4, carbs: 2.9, fat: 0.2 },
+    zanahoria: { calories: 41, protein: 0.9, carbs: 10, fat: 0.2 },
+    pepino: { calories: 16, protein: 0.7, carbs: 3.6, fat: 0.1 },
+
+    // Lácteos
+    yogurt: { calories: 100, protein: 17, carbs: 6, fat: 0.7 },
+    leche: { calories: 42, protein: 3.4, carbs: 5, fat: 1 },
+    queso: { calories: 402, protein: 25, carbs: 1.3, fat: 33 },
+  };
+
+  // Normalizar nombre del ingrediente
+  const normalizedName = ingredientName
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // Quitar acentos
+    .replace(/\s+/g, '');
+
+  // Buscar en la base de datos
+  let macros = { calories: 100, protein: 5, carbs: 10, fat: 3 }; // Default
+
+  for (const [key, value] of Object.entries(nutritionDB)) {
+    if (normalizedName.includes(key) || key.includes(normalizedName)) {
+      macros = value;
+      break;
+    }
+  }
+
+  // Extraer cantidad en gramos
+  let grams = 100; // Default 100g
+  if (quantity) {
+    const match = quantity.match(/(\d+(?:\.\d+)?)\s*g/i);
+    if (match) {
+      grams = parseFloat(match[1]);
+    } else {
+      // Intentar extraer número de unidades para huevos, etc.
+      const unitMatch = quantity.match(/(\d+)/);
+      if (unitMatch) {
+        const units = parseInt(unitMatch[1]);
+        // Huevos ~50g cada uno
+        if (normalizedName.includes('huevo')) {
+          grams = units * 50;
+        } else {
+          grams = units * 100; // Default
+        }
+      }
+    }
+  }
+
+  // Calcular macros proporcionales
+  const factor = grams / 100;
+  return {
+    calories: Math.round(macros.calories * factor),
+    protein: Math.round(macros.protein * factor * 10) / 10,
+    carbs: Math.round(macros.carbs * factor * 10) / 10,
+    fat: Math.round(macros.fat * factor * 10) / 10,
   };
 }
 
@@ -5192,10 +5368,7 @@ export async function planBuilderExecute(
     }
 
     // 3. Asignar entrenamiento si está configurado
-    let trainingResult: { assigned: boolean; exercises: number; planName?: string } = {
-      assigned: false,
-      exercises: 0,
-    };
+    let trainingPlanName = '';
 
     if (planState.training) {
       console.warn('🏋️ Plan Builder: Asignando entrenamiento...', planState.training);
@@ -5207,9 +5380,15 @@ export async function planBuilderExecute(
         });
 
         if (designResult.success && designResult.data) {
-          const data = designResult.data as { exercises?: number; templateId?: string };
+          const data = designResult.data as {
+            exercises?: number;
+            templateId?: string;
+            planName?: string;
+          };
           result.trainingAssigned = true;
           result.trainingExercises = data.exercises || 0;
+          trainingPlanName =
+            data.planName || `${planState.training.goal} ${planState.training.frequency}d`;
         } else {
           result.errors.push(`Error asignando entrenamiento: ${designResult.message}`);
         }
@@ -5227,8 +5406,8 @@ export async function planBuilderExecute(
 ✅ ${result.mealsCreated} comida(s) creada(s)
 ✅ ${result.supplementsCreated} suplemento(s) agregado(s)`;
 
-    if (trainingResult.assigned) {
-      message += `\n✅ Entrenamiento asignado: ${trainingResult.planName} (${trainingResult.exercises} ejercicios)`;
+    if (result.trainingAssigned) {
+      message += `\n✅ Entrenamiento asignado: ${trainingPlanName} (${result.trainingExercises} ejercicios)`;
     }
 
     if (hasErrors) {
@@ -5236,7 +5415,7 @@ export async function planBuilderExecute(
     }
 
     message += `\n\n🏃 Ve al módulo PLAN para ver tu nutrición y suplementos.`;
-    if (trainingResult.assigned) {
+    if (result.trainingAssigned) {
       message += `\n🏋️ Ve al módulo GYM para ver tu rutina de entrenamiento.`;
     }
 
@@ -5245,12 +5424,10 @@ export async function planBuilderExecute(
         !hasErrors ||
         result.mealsCreated > 0 ||
         result.supplementsCreated > 0 ||
-        trainingResult.assigned,
+        result.trainingAssigned,
       message,
       data: {
         ...result,
-        trainingAssigned: trainingResult.assigned,
-        trainingExercises: trainingResult.exercises,
         clearPlanBuilder: true, // Flag para que HankContext limpie el estado
       },
     };

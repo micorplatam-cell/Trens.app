@@ -6,7 +6,7 @@
 
 import React, { useState, useRef, useEffect, useCallback, RefObject } from 'react';
 import { Platform, ScrollView, Dimensions } from 'react-native';
-import { Gesture } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -191,7 +191,7 @@ const WebDraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
       // hacia la zona de scroll (no si empezó el drag ahí)
       const fingerMovement = Math.abs(pointerY - dragStartPointerY.current);
       const MIN_MOVEMENT_FOR_AUTOSCROLL = 30; // Mínimo 30px de movimiento
-      
+
       if (fingerMovement < MIN_MOVEMENT_FOR_AUTOSCROLL) {
         return; // No hacer auto-scroll hasta que el usuario mueva el dedo
       }
@@ -208,8 +208,9 @@ const WebDraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
 
       if (scrollDelta !== 0) {
         const oldScrollTop = scrollableParent.current.scrollTop;
-        const maxScroll = scrollableParent.current.scrollHeight - scrollableParent.current.clientHeight;
-        
+        const maxScroll =
+          scrollableParent.current.scrollHeight - scrollableParent.current.clientHeight;
+
         // Limitar el scroll para no ir más allá del contenido
         const newScrollTop = Math.max(0, Math.min(maxScroll, oldScrollTop + scrollDelta));
         scrollableParent.current.scrollTop = newScrollTop;
@@ -316,25 +317,25 @@ const WebDraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
             // porque las tarjetas anteriores se encogieron.
             // Necesitamos calcular el offset inicial para que el bloque
             // aparezca EXACTAMENTE donde está el dedo.
-            
+
             if (!containerRef.current) return;
-            
+
             // Obtener la posición REAL del elemento después de la compresión
             const elementRect = containerRef.current.getBoundingClientRect();
             const elementCenterY = elementRect.top + elementRect.height / 2;
-            
+
             // El dedo está en currentPointerY.current
             // El elemento está en elementCenterY
             // El offset inicial es la diferencia (para que el centro del elemento
             // esté donde está el dedo)
             const initialOffset = currentPointerY.current - elementCenterY;
-            
+
             // Guardar el offset inicial de compresión para usarlo en updateTranslateY
             initialCompressionOffset.current = initialOffset;
-            
+
             // Establecer dragStartY
             dragStartY.current = currentPointerY.current;
-            
+
             // Guardar posición inicial para control de auto-scroll
             dragStartPointerY.current = currentPointerY.current;
 
@@ -480,7 +481,12 @@ const WebDraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
 
 // ============================================================================
 // NATIVE DRAGGABLE COMPONENT
+// Implementación con manualActivation para activar solo desde header
 // ============================================================================
+
+// Altura del header donde se puede iniciar el drag
+const HEADER_HEIGHT = 56;
+
 const NativeDraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
   data,
   currentIndex,
@@ -504,6 +510,16 @@ const NativeDraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
   const autoScrollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const currentAbsoluteYRef = useRef(0);
   const scrollOffsetRef = useRef(0);
+  const isDraggingRef = useRef(false);
+
+  // Ref para el contenedor y medir posición
+  const containerRef = useRef<Animated.View>(null);
+  const containerTopY = useSharedValue(0);
+
+  // Shared values para el gesto manual
+  const touchStartY = useSharedValue(0);
+  const isInHeader = useSharedValue(false);
+  const longPressTimer = useSharedValue<number | null>(null);
 
   useEffect(() => {
     return () => {
@@ -513,11 +529,18 @@ const NativeDraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
     };
   }, []);
 
-  const startAutoScroll = () => {
-    if (autoScrollIntervalRef.current || !scrollRef?.current) return;
+  // Auto-scroll mejorado
+  const startAutoScroll = useCallback(() => {
+    if (autoScrollIntervalRef.current) return;
+
+    // Obtener scroll offset inicial
+    if (scrollRef?.current) {
+      // @ts-ignore - scrollTo exists
+      scrollOffsetRef.current = 0;
+    }
 
     autoScrollIntervalRef.current = setInterval(() => {
-      if (!isDraggingState || !scrollRef?.current) {
+      if (!isDraggingRef.current || !scrollRef?.current) {
         if (autoScrollIntervalRef.current) {
           clearInterval(autoScrollIntervalRef.current);
           autoScrollIntervalRef.current = null;
@@ -526,8 +549,10 @@ const NativeDraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
       }
 
       const absoluteY = currentAbsoluteYRef.current;
+      if (absoluteY === 0) return; // No hay posición válida aún
+
       const headerHeight = 140;
-      const bottomPadding = 100;
+      const bottomPadding = 120;
 
       const topZone = headerHeight + AUTO_SCROLL_THRESHOLD;
       const bottomZone = SCREEN_HEIGHT - bottomPadding - AUTO_SCROLL_THRESHOLD;
@@ -535,82 +560,198 @@ const NativeDraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
       let scrollDelta = 0;
 
       if (absoluteY < topZone && absoluteY > headerHeight) {
+        // Scroll hacia arriba
         const intensity = 1 - (absoluteY - headerHeight) / AUTO_SCROLL_THRESHOLD;
-        scrollDelta = -AUTO_SCROLL_SPEED * Math.max(0.3, intensity);
+        scrollDelta = -AUTO_SCROLL_SPEED * 2 * Math.max(0.3, intensity);
       } else if (absoluteY > bottomZone) {
+        // Scroll hacia abajo
         const intensity = (absoluteY - bottomZone) / AUTO_SCROLL_THRESHOLD;
-        scrollDelta = AUTO_SCROLL_SPEED * Math.max(0.3, intensity);
+        scrollDelta = AUTO_SCROLL_SPEED * 2 * Math.max(0.3, intensity);
       }
 
-      if (scrollDelta !== 0) {
-        scrollOffsetRef.current += scrollDelta;
-        scrollRef.current.scrollTo({
-          y: scrollOffsetRef.current,
-          animated: false,
-        });
+      if (scrollDelta !== 0 && scrollRef.current) {
+        try {
+          // Usar scrollTo con offset relativo
+          scrollRef.current.scrollTo({
+            y: Math.max(0, scrollOffsetRef.current + scrollDelta),
+            animated: false,
+          });
+          scrollOffsetRef.current += scrollDelta;
+        } catch {
+          // Ignorar errores
+        }
       }
     }, 16);
-  };
+  }, [scrollRef]);
 
-  const stopAutoScroll = () => {
+  const stopAutoScroll = useCallback(() => {
     if (autoScrollIntervalRef.current) {
       clearInterval(autoScrollIntervalRef.current);
       autoScrollIntervalRef.current = null;
     }
-  };
+  }, []);
 
-  const triggerHaptic = (style: 'heavy' | 'light') => {
-    Haptics.impactAsync(
-      style === 'heavy' ? Haptics.ImpactFeedbackStyle.Heavy : Haptics.ImpactFeedbackStyle.Light
-    );
-  };
+  const handleDragStart = useCallback(() => {
+    isDraggingRef.current = true;
+    setIsDraggingState(true);
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    } catch {
+      // Ignorar
+    }
+    if (onDragStart) onDragStart();
+    startAutoScroll();
+  }, [onDragStart, startAutoScroll]);
 
+  const handleDragEnd = useCallback(
+    (newIndex: number) => {
+      stopAutoScroll();
+      isDraggingRef.current = false;
+      setIsDraggingState(false);
+
+      if (newIndex !== currentIndex) {
+        onDragEnd(newIndex);
+      } else if (onDragCancel) {
+        onDragCancel();
+      }
+    },
+    [currentIndex, onDragEnd, onDragCancel, stopAutoScroll]
+  );
+
+  const handlePositionChange = useCallback(
+    (newIndex: number) => {
+      try {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      } catch {
+        // Ignorar
+      }
+      if (onPositionChange) onPositionChange(newIndex);
+    },
+    [onPositionChange]
+  );
+
+  const updateAbsoluteY = useCallback((y: number) => {
+    currentAbsoluteYRef.current = y;
+  }, []);
+
+  // Gesture con manualActivation para activar solo desde el header
   const gesture = Gesture.Pan()
-    .activateAfterLongPress(LONG_PRESS_DELAY)
-    .onStart(() => {
+    .manualActivation(true)
+    .onTouchesDown((event, stateManager) => {
+      'worklet';
+      if (event.numberOfTouches !== 1) return;
+
+      const touch = event.allTouches[0];
+      touchStartY.value = touch.y;
+
+      // Verificar si el touch está en el header (primeros ~56px del componente)
+      // El header incluye la barra con "MANTÉN PARA MOVER"
+      if (touch.y <= HEADER_HEIGHT) {
+        isInHeader.value = true;
+        // Iniciar timer de long press
+        longPressTimer.value = Date.now();
+      } else {
+        isInHeader.value = false;
+        longPressTimer.value = null;
+      }
+    })
+    .onTouchesMove((event, stateManager) => {
+      'worklet';
+      if (event.numberOfTouches !== 1) {
+        stateManager.fail();
+        return;
+      }
+
+      const touch = event.allTouches[0];
+      const moveDistance = Math.abs(touch.y - touchStartY.value);
+
+      // Si ya está activo (dragging), continuar
+      if (isDraggingShared.value) {
+        stateManager.activate();
+        return;
+      }
+
+      // Si el touch no empezó en el header, fallar
+      if (!isInHeader.value) {
+        stateManager.fail();
+        return;
+      }
+
+      // Si se movió mucho antes del long press, fallar
+      if (moveDistance > 10 && longPressTimer.value !== null) {
+        const elapsed = Date.now() - longPressTimer.value;
+        if (elapsed < LONG_PRESS_DELAY) {
+          stateManager.fail();
+          return;
+        }
+      }
+
+      // Verificar si pasó el tiempo de long press
+      if (longPressTimer.value !== null) {
+        const elapsed = Date.now() - longPressTimer.value;
+        if (elapsed >= LONG_PRESS_DELAY) {
+          stateManager.activate();
+        }
+      }
+    })
+    .onTouchesUp((_, stateManager) => {
+      'worklet';
+      if (!isDraggingShared.value) {
+        stateManager.fail();
+      }
+      longPressTimer.value = null;
+      isInHeader.value = false;
+    })
+    .onTouchesCancelled((_, stateManager) => {
+      'worklet';
+      stateManager.fail();
+      longPressTimer.value = null;
+      isInHeader.value = false;
+    })
+    .onStart((event) => {
       'worklet';
       isDraggingShared.value = true;
-      scale.value = withSpring(0.98);
+      scale.value = withSpring(0.98, { damping: 15, stiffness: 150 });
       zIndex.value = 1000;
       lastReportedIndex.value = currentIndex;
-      runOnJS(triggerHaptic)('heavy');
-      runOnJS(setIsDraggingState)(true);
-      if (onDragStart) runOnJS(onDragStart)();
-      runOnJS(startAutoScroll)();
+      runOnJS(handleDragStart)();
     })
     .onUpdate((event) => {
       'worklet';
       translateY.value = event.translationY;
-      runOnJS((y: number) => {
-        currentAbsoluteYRef.current = y;
-      })(event.absoluteY);
+      runOnJS(updateAbsoluteY)(event.absoluteY);
 
       const positions = Math.round(event.translationY / itemHeight);
       const newIndex = Math.max(0, Math.min(totalItems - 1, currentIndex + positions));
 
       if (newIndex !== lastReportedIndex.value) {
         lastReportedIndex.value = newIndex;
-        runOnJS(triggerHaptic)('light');
-        if (onPositionChange) runOnJS(onPositionChange)(newIndex);
+        runOnJS(handlePositionChange)(newIndex);
       }
     })
     .onEnd((event) => {
       'worklet';
-      runOnJS(stopAutoScroll)();
-
       const positions = Math.round(event.translationY / itemHeight);
       const newIndex = Math.max(0, Math.min(totalItems - 1, currentIndex + positions));
 
-      translateY.value = withSpring(0);
-      scale.value = withSpring(1);
+      translateY.value = withSpring(0, { damping: 15, stiffness: 150 });
+      scale.value = withSpring(1, { damping: 15, stiffness: 150 });
       zIndex.value = 1;
       isDraggingShared.value = false;
-      runOnJS(setIsDraggingState)(false);
 
-      if (newIndex !== currentIndex) {
-        runOnJS(onDragEnd)(newIndex);
-      } else if (onDragCancel) {
-        runOnJS(onDragCancel)();
+      runOnJS(handleDragEnd)(newIndex);
+    })
+    .onFinalize(() => {
+      'worklet';
+      longPressTimer.value = null;
+      isInHeader.value = false;
+
+      if (isDraggingShared.value) {
+        translateY.value = withSpring(0);
+        scale.value = withSpring(1);
+        zIndex.value = 1;
+        isDraggingShared.value = false;
+        runOnJS(handleDragEnd)(currentIndex);
       }
     });
 
@@ -621,29 +762,31 @@ const NativeDraggableWorkoutBlock: React.FC<DraggableWorkoutBlockProps> = ({
   }));
 
   return (
-    <Animated.View
-      style={[
-        {
-          shadowColor: '#DC2626',
-          shadowOffset: { width: 0, height: 4 },
-          shadowOpacity: isDraggingState ? 0.4 : 0,
-          shadowRadius: 15,
-          elevation: isDraggingState ? 10 : 0,
-        },
-        animatedStyle,
-      ]}
-    >
-      <WorkoutBlock
-        data={data}
-        onMoveUp={onMoveUp}
-        onMoveDown={onMoveDown}
-        isFirst={currentIndex === 0}
-        isLast={currentIndex >= totalItems - 1}
-        onPressRoutine={onPressRoutine}
-        isCompressed={isDraggingState}
-        nativeGesture={gesture}
-      />
-    </Animated.View>
+    <GestureDetector gesture={gesture}>
+      <Animated.View
+        ref={containerRef}
+        style={[
+          {
+            shadowColor: '#DC2626',
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: isDraggingState ? 0.4 : 0,
+            shadowRadius: 15,
+            elevation: isDraggingState ? 10 : 0,
+          },
+          animatedStyle,
+        ]}
+      >
+        <WorkoutBlock
+          data={data}
+          onMoveUp={onMoveUp}
+          onMoveDown={onMoveDown}
+          isFirst={currentIndex === 0}
+          isLast={currentIndex >= totalItems - 1}
+          onPressRoutine={onPressRoutine}
+          isCompressed={isDraggingState}
+        />
+      </Animated.View>
+    </GestureDetector>
   );
 };
 
