@@ -45,7 +45,6 @@ import {
 import { usePathname } from 'expo-router';
 import { useHank } from '../../context/HankContext';
 import { useVoiceInput } from '../../hooks/useVoiceInput';
-import { callGemini } from '../../services/hank/gemini';
 import { supabase } from '../../lib/supabase';
 import { useSaveGuard } from '../../context/SaveGuardContext';
 import { calculateFabPositions } from '../../constants/floatingTools';
@@ -1613,34 +1612,29 @@ export const HankOverlay: React.FC = () => {
       // Guardar mensaje de voz en Supabase
       await saveMessageToSupabase('user', transcription);
 
-      // Construir contexto para Gemini
-      const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || '';
-
-      const geminiContext = {
-        screenModule: screenContext.module,
-        sportMode: sportMode || 'BODYBUILDING',
-        userLevel: userProfile?.level || 'INTERMEDIATE',
-        currentTrainingDay: userProfile?.currentTrainingDay || 0,
-        activeAsset: activeAsset
-          ? {
-              name: activeAsset.name,
-              type: activeAsset.type,
-              liquidData: activeAsset.liquidData,
-              isAlternative: activeAsset.isAlternative,
-              parentExerciseName: activeAsset.parentExerciseName,
-            }
-          : null,
-        customAliases: [],
-        availableExercises: availableExercises || [],
-      };
-
       try {
-        console.log('🤖 Analizando comando para confirmación...');
+        console.log('🤖 Analizando comando con executeCommand (analyzeOnly)...');
 
-        // Llamar a Gemini para obtener tool calls sin ejecutar
-        const result = await callGemini(transcription, geminiContext, GEMINI_API_KEY, []);
+        // 🔧 USAR FLUJO UNIFICADO: executeCommand con analyzeOnly para obtener tool calls sin ejecutar
+        // Esto incluye todos los fallbacks y manejo de errores del chat
+        const analyzeResults = await executeCommand(transcription, {
+          saveToHistory: false, // Ya guardamos arriba
+          analyzeOnly: true,
+        });
 
-        if (result.toolCalls && result.toolCalls.length > 0) {
+        // Extraer datos del análisis
+        const analyzeData = analyzeResults[0]?.data as
+          | {
+              analyzeOnly?: boolean;
+              toolCalls?: HankToolCall[];
+              geminiMessage?: string;
+            }
+          | undefined;
+
+        const toolCalls = analyzeData?.toolCalls || [];
+        const geminiMessage = analyzeData?.geminiMessage || analyzeResults[0]?.message || '';
+
+        if (toolCalls.length > 0) {
           // Separar herramientas de lectura (ejecutar directo) de escritura (pedir confirmación)
           const readOnlyTools = [
             'GYM_GET_TODAY_ROUTINE',
@@ -1659,10 +1653,19 @@ export const HankOverlay: React.FC = () => {
             'GET_USER_CONTEXT',
             'GET_FULL_USER_CONTEXT',
             'HANK_CLEAR_HISTORY',
+            'HANK_GET_CAPABILITIES',
+            'TRAINING_GET_STATUS',
+            'TRAINING_GET_CURRENT_PLAN',
+            'TRAINING_LIST_TEMPLATES',
+            'PROGRESS_GET_PHOTOS',
+            'PROGRESS_GET_PHOTO_DETAIL',
+            'PROGRESS_COMPARE_PHOTOS',
+            'PRO_GET_EXERCISE_NOTES',
+            'GET_USER_GOALS',
           ];
 
-          const writeToolCalls = result.toolCalls.filter((tc) => !readOnlyTools.includes(tc.tool));
-          const readToolCalls = result.toolCalls.filter((tc) => readOnlyTools.includes(tc.tool));
+          const writeToolCalls = toolCalls.filter((tc) => !readOnlyTools.includes(tc.tool));
+          const readToolCalls = toolCalls.filter((tc) => readOnlyTools.includes(tc.tool));
 
           // Ejecutar herramientas de lectura directamente
           let readResults: HankToolResult[] = [];
@@ -1782,16 +1785,16 @@ export const HankOverlay: React.FC = () => {
             const hankMessage: ChatMessage = {
               id: `hank-${Date.now()}`,
               role: 'hank',
-              content: result.message || 'Información obtenida.',
+              content: geminiMessage || 'Información obtenida.',
               timestamp: new Date(),
             };
             setMessages((prev) => [...prev, hankMessage]);
-            await saveMessageToSupabase('model', result.message || 'Información obtenida.');
+            await saveMessageToSupabase('model', geminiMessage || 'Información obtenida.');
 
             setVoiceToast({
               visible: true,
               type: 'success',
-              message: result.message?.substring(0, 50) || 'Listo',
+              message: geminiMessage?.substring(0, 50) || 'Listo',
             });
             setTimeout(() => {
               setVoiceToast({ visible: false, type: 'confirm', message: '' });
@@ -1803,17 +1806,17 @@ export const HankOverlay: React.FC = () => {
           const hankMessage: ChatMessage = {
             id: `hank-${Date.now()}`,
             role: 'hank',
-            content: result.message || 'No entendí tu comando.',
+            content: geminiMessage || 'No entendí tu comando.',
             timestamp: new Date(),
           };
           setMessages((prev) => [...prev, hankMessage]);
-          await saveMessageToSupabase('model', result.message || 'No entendí tu comando.');
+          await saveMessageToSupabase('model', geminiMessage || 'No entendí tu comando.');
 
           // Mostrar toast con respuesta breve y abrir chat después
           setVoiceToast({
             visible: true,
             type: 'success',
-            message: result.message?.substring(0, 60) || 'Respuesta recibida',
+            message: geminiMessage?.substring(0, 60) || 'Respuesta recibida',
           });
           setTimeout(() => {
             setVoiceToast({ visible: false, type: 'confirm', message: '' });
@@ -1826,7 +1829,7 @@ export const HankOverlay: React.FC = () => {
         const errorMessage: ChatMessage = {
           id: `error-${Date.now()}`,
           role: 'hank',
-          content: '❌ Error al procesar tu comando.',
+          content: '❌ Error al procesar tu comando. Intenta de nuevo.',
           timestamp: new Date(),
         };
         setMessages((prev) => [...prev, errorMessage]);
@@ -1843,17 +1846,7 @@ export const HankOverlay: React.FC = () => {
         setIsLongPressProcessing(false);
       }
     }
-  }, [
-    stopRecording,
-    screenContext,
-    sportMode,
-    activeAsset,
-    userProfile,
-    availableExercises,
-    checkAndClearUIChat,
-    executeTool,
-    saveMessageToSupabase,
-  ]);
+  }, [stopRecording, executeCommand, checkAndClearUIChat, executeTool, saveMessageToSupabase]);
 
   // Handler para confirmar desde el toast de voz
   const handleVoiceConfirm = useCallback(async () => {

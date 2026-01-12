@@ -271,7 +271,10 @@ export interface HankContextState {
   // Actions
   executeCommand: (
     command: string,
-    options?: { saveToHistory?: boolean }
+    options?: {
+      saveToHistory?: boolean;
+      analyzeOnly?: boolean; // Si true, retorna toolCalls sin ejecutar
+    }
   ) => Promise<HankToolResult[]>;
   executeTool: (toolCall: HankToolCall) => Promise<HankToolResult>;
   executeToolChain: (toolCalls: HankToolCall[]) => Promise<HankToolResult[]>;
@@ -280,7 +283,11 @@ export interface HankContextState {
   setScreenContext: (ctx: ScreenContext) => void;
   setActiveAsset: (
     assetId: string | null,
-    alternativeInfo?: { isAlternative: boolean; parentExerciseName: string }
+    alternativeInfo?: {
+      isAlternative: boolean;
+      parentExerciseName: string;
+      parentConfigId?: string;
+    }
   ) => Promise<void>;
   setSportMode: (mode: SportMode) => void;
 

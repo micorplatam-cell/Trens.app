@@ -1299,7 +1299,8 @@ function GymScreen() {
       notesModalVisible ||
       videoNotesModalVisible ||
       historialModalVisible ||
-      structureModalVisible ||
+      structureModalOpen || // Modal de estructura principal (días)
+      structureModalVisible || // Modal de focus series (ejercicio individual)
       seriesConfigModalVisible ||
       dayNameModalVisible ||
       addDayModalVisible ||
@@ -1312,6 +1313,7 @@ function GymScreen() {
     notesModalVisible,
     videoNotesModalVisible,
     historialModalVisible,
+    structureModalOpen,
     structureModalVisible,
     seriesConfigModalVisible,
     dayNameModalVisible,
@@ -1559,12 +1561,15 @@ function GymScreen() {
     }
   }, [isFocused, viewMode, activeExerciseIndex, selectedDayIndex, setScreenContext]);
 
+  // Extraer el índice de alternativa actual como valor primitivo para dependencia estable
+  const currentAltIndexForSync = activeAlternatives[activeExerciseIndex] || 0;
+
   useEffect(() => {
     // Sincronizar ejercicio activo con HANK (considerando alternativas)
     // Y actualizar ProContext para Smart Trigger
     const currentExercise = exercises[activeExerciseIndex];
     if (currentExercise && isFocused) {
-      const altIndex = activeAlternatives[activeExerciseIndex] || 0;
+      const altIndex = currentAltIndexForSync;
 
       // Determinar nombre del ejercicio actual (principal o alternativa)
       let exerciseName = currentExercise.name;
@@ -1608,11 +1613,13 @@ function GymScreen() {
             exerciseId,
             exerciseName,
             parentExerciseName: currentExercise.name,
+            parentConfigId: currentExercise.id, // user_exercise_config.id del ejercicio principal
             altIndex,
           });
           setActiveAsset(exerciseId, {
             isAlternative: true,
             parentExerciseName: currentExercise.name,
+            parentConfigId: currentExercise.id, // Pasar configId directamente para evitar búsqueda
           });
         } else {
           console.warn('🔄 GYM: Sincronizando EJERCICIO PRINCIPAL con HANK:', {
@@ -1628,7 +1635,7 @@ function GymScreen() {
     activeExerciseIndex,
     exercises,
     isFocused,
-    activeAlternatives,
+    currentAltIndexForSync, // Valor primitivo que React detecta correctamente
     viewMode,
     setTacticalContext,
     setActiveAsset,
@@ -1727,6 +1734,11 @@ function GymScreen() {
     // BUGFIX: Capturar el día actual desde la ref para evitar closure stale
     const targetDay = selectedDayIndexRef.current;
     console.log('🎯 closeStructureWithAnimation - targetDay capturado:', targetDay);
+
+    // 🧹 BUGFIX: Limpiar estados de dragging para evitar pantalla opaca
+    setIsDraggingExercise(false);
+    setDragTargetIndex(null);
+    setDraggingFromIndex(null);
 
     // Guardar la configuración del día (igual que el botón ENTRENAR)
     if (user) {
@@ -1985,14 +1997,7 @@ function GymScreen() {
     }
   }, [historialModalVisible]);
 
-  useEffect(() => {
-    if (structureModalVisible) {
-      // Empezar fuera de pantalla y animar hacia arriba
-      translateYStructure.value = 800;
-      translateYStructure.value = withTiming(0, { duration: 300, easing: Easing.out(Easing.ease) });
-      setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium), 100);
-    }
-  }, [structureModalVisible]);
+  // NOTA: El effect para structureModalVisible ya está arriba usando translateYFocusSeries
 
   useEffect(() => {
     if (notesModalVisible) {

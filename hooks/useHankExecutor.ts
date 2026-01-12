@@ -891,12 +891,33 @@ Cuando termines, di **"ejecuta el plan"** y lo guardaré todo.`,
             });
             break;
 
-          case 'TRAINING_SET_EXTERNAL_SCHEDULE':
-            result = await trainingSetExternalSchedule(
-              userId,
-              p.schedule as Record<string, string>
-            );
+          case 'TRAINING_SET_EXTERNAL_SCHEDULE': {
+            // Parsear scheduleJson (string JSON) a objeto
+            let schedule: Record<string, string>;
+            if (typeof p.scheduleJson === 'string') {
+              try {
+                schedule = JSON.parse(p.scheduleJson);
+              } catch (e) {
+                console.warn('⚠️ Error parseando scheduleJson:', e);
+                result = {
+                  success: false,
+                  message: '❌ Error: El formato del horario no es válido.',
+                };
+                break;
+              }
+            } else if (typeof p.schedule === 'object' && p.schedule) {
+              // Fallback: soporte para el formato antiguo (objeto directo)
+              schedule = p.schedule as Record<string, string>;
+            } else {
+              result = {
+                success: false,
+                message: '❌ Error: No se proporcionó un horario válido.',
+              };
+              break;
+            }
+            result = await trainingSetExternalSchedule(userId, schedule);
             break;
+          }
 
           case 'TRAINING_REMOVE_EXTERNAL_DAY':
             result = await trainingRemoveExternalDay(userId, p.dayName as string);

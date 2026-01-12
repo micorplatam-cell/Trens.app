@@ -798,34 +798,43 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
           console.warn('⚠️ Error cargando suplementos:', stackError);
         }
 
-        // 3. Cargar datos COMPLETOS del perfil (biométricos + entrenamiento)
-        const { data: profile, error: profileError } = await supabase
+        // 3. Cargar datos de entrenamiento desde profiles
+        const { data: trainingProfile, error: trainingProfileError } = await supabase
           .from('profiles')
-          .select(
-            'training_frequency, training_current_day, training_routine_names, ' +
-              'weight_kg, height_cm, age, body_fat, goal, sex, activity_level, bmr, tdee'
-          )
+          .select('training_frequency, training_current_day, training_routine_names')
           .eq('id', userId)
           .single();
 
-        if (profileError) {
-          console.warn('⚠️ Error cargando perfil:', profileError);
+        if (trainingProfileError) {
+          console.warn('⚠️ Error cargando training profile:', trainingProfileError);
         }
 
-        // Casting seguro del perfil
-        const profileData = profile as {
+        // 4. Cargar datos biométricos desde user_profiles (donde ADN los guarda)
+        const { data: userProfile, error: userProfileError } = await supabase
+          .from('user_profiles')
+          .select('weight, height, goal, age, sex, body_fat_percentage, activity_level')
+          .eq('user_id', userId)
+          .single();
+
+        if (userProfileError && userProfileError.code !== 'PGRST116') {
+          console.warn('⚠️ Error cargando user_profiles:', userProfileError);
+        }
+
+        // Casting seguro de los perfiles
+        const trainingData = trainingProfile as {
           training_frequency?: number;
           training_current_day?: number;
           training_routine_names?: Record<string, string>;
-          weight_kg?: number;
-          height_cm?: number;
-          age?: number;
-          body_fat?: number;
+        } | null;
+
+        const biometricsData = userProfile as {
+          weight?: string;
+          height?: string;
           goal?: string;
+          age?: number;
           sex?: string;
+          body_fat_percentage?: number;
           activity_level?: string;
-          bmr?: number;
-          tdee?: number;
         } | null;
 
         // Formatear comidas
@@ -862,25 +871,26 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
           };
         });
 
-        // Formatear entrenamiento
+        // Formatear entrenamiento (desde profiles)
         const training = {
-          frequency: profileData?.training_frequency || 0,
-          currentDay: profileData?.training_current_day || 0,
-          routineNames: profileData?.training_routine_names || {},
+          frequency: trainingData?.training_frequency || 0,
+          currentDay: trainingData?.training_current_day || 0,
+          routineNames: trainingData?.training_routine_names || {},
         };
 
-        // Formatear biométricos
-        const biometrics = profileData
+        // Formatear biométricos (desde user_profiles)
+        // Nota: weight y height vienen como strings, convertir a números
+        const biometrics = biometricsData
           ? {
-              weight: profileData.weight_kg || undefined,
-              height: profileData.height_cm || undefined,
-              age: profileData.age || undefined,
-              bodyFat: profileData.body_fat || undefined,
-              goal: profileData.goal || undefined,
-              sex: profileData.sex || undefined,
-              activityLevel: profileData.activity_level || undefined,
-              bmr: profileData.bmr || undefined,
-              tdee: profileData.tdee || undefined,
+              weight: biometricsData.weight ? parseFloat(biometricsData.weight) : undefined,
+              height: biometricsData.height ? parseFloat(biometricsData.height) : undefined,
+              age: biometricsData.age || undefined,
+              bodyFat: biometricsData.body_fat_percentage || undefined,
+              goal: biometricsData.goal || undefined,
+              sex: biometricsData.sex || undefined,
+              activityLevel: biometricsData.activity_level || undefined,
+              bmr: undefined, // Calcular si es necesario
+              tdee: undefined, // Calcular si es necesario
             }
           : null;
 
@@ -914,7 +924,11 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
   const setActiveAsset = useCallback(
     async (
       assetId: string | null,
-      alternativeInfo?: { isAlternative: boolean; parentExerciseName: string }
+      alternativeInfo?: {
+        isAlternative: boolean;
+        parentExerciseName: string;
+        parentConfigId?: string;
+      }
     ) => {
       // Visitantes no tienen assets en DB
       if (!assetId || !isValidUser) {
@@ -1071,30 +1085,47 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
             return;
           }
 
-          // Buscar el configId del ejercicio principal (que contiene esta alternativa)
-          // 1. Primero buscar qué ejercicio tiene esta alternativa en su alternative_exercises
-          const { data: parentExercise } = await supabase
-            .from('exercises')
-            .select('id')
-            .contains('alternative_exercises', [assetId])
-            .limit(1)
-            .maybeSingle();
-
-          let configId = '';
+          // Usar parentConfigId si está disponible (PREFERIDO - viene directo de GYM)
+          let configId = alternativeInfo?.parentConfigId || '';
           let parentLiquidData: Record<string, unknown> = {};
 
-          if (parentExercise) {
-            // 2. Ahora buscar el user_exercise_config del ejercicio principal
+          if (configId) {
+            // Tenemos configId directo - cargar config del ejercicio principal
             const { data: parentConfig } = await supabase
               .from('user_exercise_config')
               .select('id, config')
+              .eq('id', configId)
               .eq('user_id', userId)
-              .eq('exercise_id', parentExercise.id)
+              .single();
+
+            if (parentConfig) {
+              parentLiquidData = (parentConfig.config as Record<string, unknown>) || {};
+              console.log(
+                '✅ setActiveAsset: Config principal cargada por parentConfigId:',
+                configId
+              );
+            }
+          } else {
+            // Fallback: buscar por contains (menos confiable)
+            const { data: parentExercise } = await supabase
+              .from('exercises')
+              .select('id')
+              .contains('alternative_exercises', [assetId])
               .limit(1)
               .maybeSingle();
 
-            configId = parentConfig?.id || '';
-            parentLiquidData = (parentConfig?.config as Record<string, unknown>) || {};
+            if (parentExercise) {
+              const { data: parentConfig } = await supabase
+                .from('user_exercise_config')
+                .select('id, config')
+                .eq('user_id', userId)
+                .eq('exercise_id', parentExercise.id)
+                .limit(1)
+                .maybeSingle();
+
+              configId = parentConfig?.id || '';
+              parentLiquidData = (parentConfig?.config as Record<string, unknown>) || {};
+            }
           }
 
           console.log(
@@ -1504,6 +1535,10 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
     console.warn(
       `📝 buildGeminiContext: día=${realTrainingDay}, ejercicio=${activeAsset?.name || 'NINGUNO'}, planBuilder=${planBuilderState.isActive ? 'ACTIVO' : 'INACTIVO'}`
     );
+    // Log de biométricos para debug
+    console.warn(
+      `📝 buildGeminiContext biometrics: peso=${userPlanContext?.biometrics?.weight || 'N/A'}kg, altura=${userPlanContext?.biometrics?.height || 'N/A'}cm`
+    );
 
     return {
       screenModule: screenContext.module,
@@ -1599,10 +1634,15 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
    * @param userText - El comando a procesar
    * @param options - Opciones adicionales
    * @param options.saveToHistory - Si es false, no guarda en historial ni Supabase (default: true)
+   * @param options.analyzeOnly - Si es true, retorna toolCalls sin ejecutar (para long press con confirmación)
    */
   const executeCommand = useCallback(
-    async (userText: string, options?: { saveToHistory?: boolean }): Promise<HankToolResult[]> => {
+    async (
+      userText: string,
+      options?: { saveToHistory?: boolean; analyzeOnly?: boolean }
+    ): Promise<HankToolResult[]> => {
       const saveToHistory = options?.saveToHistory !== false; // default true
+      const analyzeOnly = options?.analyzeOnly === true; // default false
       setIsProcessing(true);
       setLastAction(userText);
       console.warn('🧠 HANK recibió comando:', userText);
@@ -1666,6 +1706,24 @@ export const HankProvider = ({ children, userId }: HankProviderProps) => {
 
         // Variable para almacenar la respuesta final
         let finalResponseText = geminiResponse.message;
+
+        // 🔧 ANALYZE ONLY: Retornar tool calls sin ejecutar (para long press con confirmación)
+        if (analyzeOnly && geminiResponse.toolCalls.length > 0) {
+          console.warn('🔍 ANALYZE ONLY: Retornando tool calls sin ejecutar');
+          setIsProcessing(false);
+          // Retornar un resultado especial con los tool calls pendientes
+          return [
+            {
+              success: true,
+              message: geminiResponse.message || '🔧 Comando analizado',
+              data: {
+                analyzeOnly: true,
+                toolCalls: geminiResponse.toolCalls,
+                geminiMessage: geminiResponse.message,
+              },
+            },
+          ];
+        }
 
         // 4. Si Gemini devuelve tool calls, ejecutarlas
         if (geminiResponse.toolCalls.length > 0) {
@@ -1899,11 +1957,13 @@ INSTRUCCIONES:
           }
 
           // 5. Obtener respuesta final de Gemini después de ejecutar herramientas
+          // PASAR historial de conversación para que Hank tenga contexto de lo hablado
           const finalMessage = await continueAfterToolExecution(
             userText,
             toolResults,
             geminiContext,
-            GEMINI_API_KEY
+            GEMINI_API_KEY,
+            recentHistory // Historial de conversación para contexto
           );
 
           // Agregar el mensaje final como resultado
@@ -1912,15 +1972,27 @@ INSTRUCCIONES:
             finalResponseText = finalMessage;
           }
 
+          // Construir resumen de ejecuciones para el historial
+          // Esto ayuda a Hank a "recordar" qué acciones realizó
+          const executionSummary = toolResults
+            .filter((tr) => tr.result.success)
+            .map((tr) => `✓ ${tr.toolName}`)
+            .join(', ');
+
+          // Mensaje completo para el historial incluye las acciones ejecutadas
+          const historyMessage = executionSummary
+            ? `[Ejecutado: ${executionSummary}]\n${finalResponseText || 'Listo.'}`
+            : finalResponseText || 'Listo.';
+
           // Actualizar historial de conversación y guardar en DB solo si saveToHistory es true
           if (saveToHistory) {
             setConversationHistory((prev) => [
               ...prev,
               { role: 'user', parts: [{ text: userText }] },
-              { role: 'model', parts: [{ text: finalResponseText || 'Listo.' }] },
+              { role: 'model', parts: [{ text: historyMessage }] },
             ]);
             await saveMessageToSupabase('user', userText);
-            await saveMessageToSupabase('model', finalResponseText || 'Listo.');
+            await saveMessageToSupabase('model', historyMessage);
           }
 
           // Marcar que hubo tool calls y si hubo herramientas de ESCRITURA
@@ -1955,6 +2027,23 @@ INSTRUCCIONES:
         }
 
         // 6. Si no hay tool calls, devolver el mensaje de texto y actualizar historial
+        // En modo analyzeOnly, también retornar indicando que no hay herramientas
+        if (analyzeOnly) {
+          console.warn('🔍 ANALYZE ONLY: Solo respuesta conversacional, sin herramientas');
+          setIsProcessing(false);
+          return [
+            {
+              success: true,
+              message: geminiResponse.message,
+              data: {
+                analyzeOnly: true,
+                toolCalls: [],
+                geminiMessage: geminiResponse.message,
+              },
+            },
+          ];
+        }
+
         if (saveToHistory) {
           setConversationHistory((prev) => [
             ...prev,

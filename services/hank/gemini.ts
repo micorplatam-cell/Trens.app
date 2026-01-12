@@ -475,7 +475,13 @@ ${trainingSection}
 • "¿cuántas calorías tengo?" → Responde con TOTALES DIARIOS de arriba
 • "¿qué debo comer?" → Responde con la sección COMIDAS de arriba
 • NUNCA ejecutes herramientas de lectura si la info ya está aquí
-• SOLO usa GET_FULL_USER_CONTEXT si necesitas más detalles que no están arriba`;
+• SOLO usa GET_FULL_USER_CONTEXT si necesitas más detalles que no están arriba
+
+🚨 MANEJO DE DATOS FALTANTES:
+• Si el peso dice "❓ No configurado" → Pregunta al usuario cuánto pesa y USA ADN_UPDATE_PROFILE(field="weight", value=X)
+• Si la altura dice "❓ No configurado" → Pregunta al usuario y USA ADN_UPDATE_PROFILE(field="height", value=X)
+• NUNCA digas "No tengo esa información en mi contexto" - SÍ tienes el contexto, solo puede estar vacío
+• Si un dato está vacío, OFRECE ayudar a configurarlo con la herramienta apropiada`;
 }
 
 // ============================================================================
@@ -608,10 +614,17 @@ Eres HANK, coach de alto rendimiento de TRENS. 15 años entrenando atletas. Dire
 • NUNCA simules una acción con texto - O ejecutas la función O dices que no puedes
 • ⚡ IMPORTANTE: Puedes llamar MÚLTIPLES herramientas en una sola respuesta. Si tienes toda la info, llama TODAS las herramientas necesarias de una vez.
 
+🚨 PALABRAS CLAVE DE ACCIÓN → SIEMPRE USA HERRAMIENTAS:
+• "cambia", "modifica", "actualiza" → Ejecutar herramienta correspondiente
+• "quita", "elimina", "saca", "borra" → Ejecutar herramienta de eliminación
+• "agrega", "añade", "pon", "mete" → Ejecutar herramienta de agregar
+• "sube", "baja", "incrementa", "reduce" → Ejecutar ASSET_UPDATE_FIELD
+
 Ejemplos de cuándo DEBES usar herramientas:
 • "quita la última serie" → ASSET_REMOVE_SERIES
 • "agrega un ejercicio" → GYM_ADD_EXERCISE  
 • "cambia las reps a 10" → ASSET_UPDATE_FIELD
+• "cambia mi peso a 75kg" → ADN_UPDATE_PROFILE(field="weight", value=75)
 • "qué me toca hoy" → GYM_GET_TODAY_ROUTINE
 
 Ejemplos de cuándo NO usar herramientas (responde directamente):
@@ -1077,26 +1090,9 @@ export async function callGemini(
         )
       ));
 
-  // Comandos de acción que SÍ deben forzar herramientas (excepto si están hablando de plan de nutrición)
-  const isNutritionPlanContext =
-    /comida|nutrici[oó]n|dieta|suplemento|meal|stack/i.test(lowerMessage) ||
-    conversationHistory
-      .slice(-4)
-      .some((m) =>
-        m.parts.some(
-          (p) =>
-            'text' in p &&
-            typeof p.text === 'string' &&
-            /comida|nutrici[oó]n|dieta|suplemento|plan/.test(p.text)
-        )
-      );
-
-  const isActionCommand =
-    !isNutritionPlanContext &&
-    /quita|elimina|agrega|añade|cambia|sube|baja|modifica|actualiza/i.test(lowerMessage);
-
-  // Solo forzar ANY si es confirmación de plan O es comando de acción fuera de contexto de nutrición
-  const shouldForceTools = isPlanConfirmation || isActionCommand;
+  // 🔧 FIX: Ya NO forzamos mode 'ANY' porque causa error 400 con muchas herramientas
+  // El system prompt es suficientemente claro para que Gemini sepa cuándo usar herramientas
+  // Gemini con mode AUTO + buen system prompt = funciona perfecto
 
   // Request body
   const requestBody = {
@@ -1111,21 +1107,20 @@ export async function callGemini(
     ],
     toolConfig: {
       functionCallingConfig: {
-        // 🔧 FIX: Usar ANY solo para confirmaciones de plan o comandos de acción directos
-        mode: shouldForceTools ? 'ANY' : 'AUTO',
+        // 🔧 FIX: Siempre AUTO - Gemini es inteligente y el system prompt es claro
+        // Mode ANY con 96+ herramientas causa error 400 (schema muy complejo)
+        mode: 'AUTO',
       },
     },
     generationConfig: {
-      temperature: 0.3, // 🔧 FIX: Reducir temperatura para respuestas más deterministas
+      temperature: 0.2, // Más bajo = más determinista, mejor para function calling
       topK: 40,
       topP: 0.95,
       maxOutputTokens: 1024,
     },
   };
 
-  console.warn(
-    `🔧 Mode: ${shouldForceTools ? 'ANY (forzado)' : 'AUTO'}, isPlanConfirmation: ${isPlanConfirmation}, isNutritionContext: ${isNutritionPlanContext}`
-  );
+  console.warn('🔧 Mode: AUTO (siempre), herramientas:', geminiTools.length);
 
   try {
     // Timeout de 15 segundos para dar tiempo a Gemini 1.5 Flash
@@ -1270,10 +1265,14 @@ export async function continueAfterToolExecution(
   originalMessage: string,
   toolResults: Array<{ toolName: string; result: Record<string, unknown> }>,
   context: GeminiContext,
-  apiKey: string
+  apiKey: string,
+  conversationHistory?: GeminiMessage[]
 ): Promise<string> {
   // Construir historial con la respuesta de las herramientas
+  // INCLUIR historial de conversación previo para que Hank recuerde el contexto
   const messages: GeminiMessage[] = [
+    // Historial previo (limitado a últimos 6 mensajes para no exceder tokens)
+    ...(conversationHistory || []).slice(-6),
     {
       role: 'user',
       parts: [{ text: originalMessage }],
@@ -1399,7 +1398,7 @@ export async function continueWithMoreTools(
     ],
     toolConfig: {
       functionCallingConfig: {
-        mode: 'ANY', // Forzar uso de herramientas
+        mode: 'AUTO', // AUTO permite texto O herramientas, evita error 400
       },
     },
     generationConfig: {

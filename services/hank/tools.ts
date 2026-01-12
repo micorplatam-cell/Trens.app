@@ -9098,14 +9098,14 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     description:
       'Guarda el horario de entrenamiento simple para usuarios que no usan el módulo GYM. Usa cuando el usuario diga "lunes pecho, martes espalda", "entreno espalda los martes", "mi rutina es así: [días y músculos]".',
     parameters: {
-      schedule: {
-        type: 'object',
+      scheduleJson: {
+        type: 'string',
         description:
-          'Objeto con días y grupos musculares. Ej: {"Lunes": "Pecho y Tríceps", "Martes": "Espalda y Bíceps", "Jueves": "Piernas"}',
+          'JSON string con días y grupos musculares. Formato: {"Lunes": "Pecho y Tríceps", "Martes": "Espalda y Bíceps", "Jueves": "Piernas"}. DEBE ser un JSON válido.',
         required: true,
       },
     },
-    requiredParams: ['schedule'],
+    requiredParams: ['scheduleJson'],
   },
   {
     name: 'TRAINING_REMOVE_EXTERNAL_DAY',
