@@ -8,7 +8,7 @@ import { View, Text, ScrollView, Pressable, RefreshControl } from 'react-native'
 import { PWAGuard } from '../../../components/auth/PWAGuard';
 import { Alert } from '../../../lib/alert';
 import Animated, { useAnimatedStyle, withSpring } from 'react-native-reanimated';
-import { Plus, Pill, Sparkles } from 'lucide-react-native';
+import { Plus, Pill, Sparkles, ShoppingCart } from 'lucide-react-native';
 import * as Haptics from '../../../lib/haptics';
 import { useRouter, useFocusEffect } from 'expo-router';
 
@@ -20,6 +20,7 @@ import { EditMealModal } from '../../../components/plan/EditMealModal';
 import { TimePickerModal } from '../../../components/plan/TimePickerModal';
 import { StackManagerModal } from '../../../components/plan/StackManagerModal';
 import { AddOptionModal } from '../../../components/plan/AddOptionModal';
+import { ShoppingListModal } from '../../../components/plan/ShoppingListModal';
 import { supabase } from '../../../lib/supabase';
 import { useHank } from '../../../context/HankContext';
 import { useSaveGuard } from '../../_layout';
@@ -352,6 +353,7 @@ function PlanScreen() {
   const [timePickerMode, setTimePickerMode] = useState<'meal' | 'stack'>('meal');
   const [timePickerStackTime, setTimePickerStackTime] = useState<string | null>(null);
   const [showStackManager, setShowStackManager] = useState(false);
+  const [showShoppingList, setShowShoppingList] = useState(false);
   const [showAddOption, setShowAddOption] = useState(false);
   const [addOptionMealId, setAddOptionMealId] = useState<string | null>(null);
   const [addOptionMealName, setAddOptionMealName] = useState('');
@@ -461,6 +463,7 @@ function PlanScreen() {
           ingredients, 
           is_completed, 
           position,
+          selected_option,
           meal_options (
             id,
             name,
@@ -608,11 +611,17 @@ function PlanScreen() {
             });
           }
 
+          // Validar selected_option: si excede el número de opciones, usar 0
+          // Esto maneja el caso donde se eliminó una alternativa
+          const savedSelection = meal.selected_option ?? 0;
+          const validSelection =
+            options.length > 0 ? Math.min(Math.max(0, savedSelection), options.length - 1) : 0;
+
           return {
             id: meal.id,
             name: meal.name || 'Comida',
             time: meal.scheduled_time?.slice(0, 5) || '12:00',
-            selectedOption: 0,
+            selectedOption: validSelection,
             targetMacros: perMealMacros || undefined,
             options,
           };
@@ -2009,8 +2018,8 @@ function PlanScreen() {
           }}
         />
 
-        <View className="flex-row justify-between items-center">
-          <View>
+        <View className="flex-row justify-between items-start">
+          <View className="flex-1">
             <Text className="text-zinc-600 text-[10px] tracking-[4px] uppercase mb-1 font-bold">
               AGENDA METABÓLICA
             </Text>
@@ -2036,75 +2045,105 @@ function PlanScreen() {
                 {planName}
               </Text>
             </View>
-            {/* Daily Stats Badges */}
-            <View className="flex-row gap-3 mt-2">
-              <View className="flex-row items-center gap-1">
-                <View className="w-1.5 h-1.5 rounded-full bg-savage-red" />
-                <Text className="text-zinc-500 text-[10px] font-mono">{meals.length} COMIDAS</Text>
-              </View>
-              {mealMacros && (
-                <>
-                  <View className="flex-row items-center gap-1">
-                    <View className="w-1.5 h-1.5 rounded-full bg-orange-500" />
-                    <Text className="text-zinc-500 text-[10px] font-mono">
-                      {mealMacros.calories * meals.length} KCAL
-                    </Text>
-                  </View>
-                  <View className="flex-row items-center gap-1">
-                    <View className="w-1.5 h-1.5 rounded-full bg-purple-500" />
-                    <Text className="text-zinc-500 text-[10px] font-mono">
-                      {mealMacros.protein * meals.length}P
-                    </Text>
-                  </View>
-                  <View className="flex-row items-center gap-1">
-                    <View className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                    <Text className="text-zinc-500 text-[10px] font-mono">
-                      {mealMacros.carbs * meals.length}C
-                    </Text>
-                  </View>
-                  <View className="flex-row items-center gap-1">
-                    <View className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-                    <Text className="text-zinc-500 text-[10px] font-mono">
-                      {mealMacros.fat * meals.length}G
-                    </Text>
-                  </View>
-                </>
-              )}
-            </View>
           </View>
 
-          {/* Stack Button Premium */}
-          <Pressable
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              setShowStackManager(true);
-            }}
-            className="items-center px-4 py-2.5 rounded-xl active:scale-95"
-            style={{
-              backgroundColor: 'rgba(168, 85, 247, 0.08)',
-              borderWidth: 1.5,
-              borderColor: 'rgba(168, 85, 247, 0.4)',
-              shadowColor: '#A855F7',
-              shadowOffset: { width: 0, height: 0 },
-              shadowOpacity: 0.3,
-              shadowRadius: 12,
-            }}
-          >
-            <View className="flex-row items-center gap-2">
+          {/* Action Buttons */}
+          <View className="flex-row gap-2">
+            {/* Shopping List Button */}
+            <Pressable
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setShowShoppingList(true);
+              }}
+              className="items-center px-3 py-2.5 rounded-xl active:scale-95"
+              style={{
+                backgroundColor: 'rgba(34, 197, 94, 0.08)',
+                borderWidth: 1.5,
+                borderColor: 'rgba(34, 197, 94, 0.4)',
+                shadowColor: '#22C55E',
+                shadowOffset: { width: 0, height: 0 },
+                shadowOpacity: 0.3,
+                shadowRadius: 12,
+              }}
+            >
               <View
-                className="w-6 h-6 rounded-full items-center justify-center"
+                className="w-8 h-8 rounded-full items-center justify-center"
+                style={{ backgroundColor: 'rgba(34, 197, 94, 0.2)' }}
+              >
+                <ShoppingCart size={14} color="#22C55E" />
+              </View>
+              <Text className="text-green-400 text-[9px] font-bold tracking-widest mt-1">
+                COMPRAS
+              </Text>
+            </Pressable>
+
+            {/* Stack Button Premium */}
+            <Pressable
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setShowStackManager(true);
+              }}
+              className="items-center px-3 py-2.5 rounded-xl active:scale-95"
+              style={{
+                backgroundColor: 'rgba(168, 85, 247, 0.08)',
+                borderWidth: 1.5,
+                borderColor: 'rgba(168, 85, 247, 0.4)',
+                shadowColor: '#A855F7',
+                shadowOffset: { width: 0, height: 0 },
+                shadowOpacity: 0.3,
+                shadowRadius: 12,
+              }}
+            >
+              <View
+                className="w-8 h-8 rounded-full items-center justify-center"
                 style={{ backgroundColor: 'rgba(168, 85, 247, 0.2)' }}
               >
-                <Pill size={12} color="#A855F7" />
+                <Pill size={14} color="#A855F7" />
               </View>
-              <Text className="text-purple-400 text-xs font-bold tracking-widest">STACK</Text>
-            </View>
-            {stackItems.length > 0 && (
-              <Text className="text-purple-500/60 text-[9px] font-mono mt-0.5">
-                {stackItems.length} SUPLEMENTOS
+              <Text className="text-purple-400 text-[9px] font-bold tracking-widest mt-1">
+                STACK
               </Text>
-            )}
-          </Pressable>
+              {stackItems.length > 0 && (
+                <Text className="text-purple-500/60 text-[8px] font-mono">{stackItems.length}</Text>
+              )}
+            </Pressable>
+          </View>
+        </View>
+
+        {/* Daily Stats Badges */}
+        <View className="flex-row flex-wrap gap-3 mt-3">
+          <View className="flex-row items-center gap-1">
+            <View className="w-1.5 h-1.5 rounded-full bg-savage-red" />
+            <Text className="text-zinc-500 text-[10px] font-mono">{meals.length} COMIDAS</Text>
+          </View>
+          {mealMacros && (
+            <>
+              <View className="flex-row items-center gap-1">
+                <View className="w-1.5 h-1.5 rounded-full bg-orange-500" />
+                <Text className="text-zinc-500 text-[10px] font-mono">
+                  {mealMacros.calories * meals.length} KCAL
+                </Text>
+              </View>
+              <View className="flex-row items-center gap-1">
+                <View className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+                <Text className="text-zinc-500 text-[10px] font-mono">
+                  {mealMacros.protein * meals.length}P
+                </Text>
+              </View>
+              <View className="flex-row items-center gap-1">
+                <View className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                <Text className="text-zinc-500 text-[10px] font-mono">
+                  {mealMacros.carbs * meals.length}C
+                </Text>
+              </View>
+              <View className="flex-row items-center gap-1">
+                <View className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                <Text className="text-zinc-500 text-[10px] font-mono">
+                  {mealMacros.fat * meals.length}G
+                </Text>
+              </View>
+            </>
+          )}
         </View>
       </View>
 
@@ -2398,6 +2437,12 @@ function PlanScreen() {
         }}
         onSave={handleSaveOption}
         onCalculateMacros={handleCalculateMacros}
+      />
+
+      <ShoppingListModal
+        visible={showShoppingList}
+        onClose={() => setShowShoppingList(false)}
+        meals={meals}
       />
     </View>
   );

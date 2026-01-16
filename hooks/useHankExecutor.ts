@@ -34,6 +34,7 @@ import {
   planUpdateMealTime,
   planUpdateIngredients,
   planGetMeals,
+  planGetShoppingList,
   planGetNextMeal,
   spotifyGetCurrentTrack,
   planAddSupplement,
@@ -563,6 +564,13 @@ export const useHankExecutor = (
 
           case 'PLAN_GET_MEALS':
             result = await planGetMeals(userId);
+            break;
+
+          case 'PLAN_GET_SHOPPING_LIST':
+            result = await planGetShoppingList(
+              userId,
+              (p.period as 'today' | '3days' | 'week') || 'today'
+            );
             break;
 
           case 'PLAN_GET_NEXT_MEAL':

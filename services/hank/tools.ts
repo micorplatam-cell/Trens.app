@@ -3621,6 +3621,144 @@ export async function planGetMeals(userId: string): Promise<HankToolResult> {
 }
 
 /**
+ * Genera una lista de compras agregando todos los ingredientes del plan
+ */
+export async function planGetShoppingList(
+  userId: string,
+  period: 'today' | '3days' | 'week' = 'today'
+): Promise<HankToolResult> {
+  try {
+    // Obtener todas las comidas con sus opciones
+    const { data: meals, error } = await supabase
+      .from('meals')
+      .select(
+        `
+        id, 
+        name, 
+        ingredients,
+        meal_options (
+          id,
+          name,
+          ingredients,
+          is_selected
+        )
+      `
+      )
+      .eq('user_id', userId)
+      .order('scheduled_time', { ascending: true });
+
+    if (error) throw error;
+
+    if (!meals || meals.length === 0) {
+      return {
+        success: true,
+        message:
+          '🛒 No tienes comidas configuradas. Agrega comidas para generar tu lista de compras.',
+        data: { shoppingList: [], totalItems: 0 },
+      };
+    }
+
+    // Calcular multiplicador según periodo
+    const daysMultiplier = period === 'week' ? 7 : period === '3days' ? 3 : 1;
+    const periodLabel = period === 'week' ? 'la semana' : period === '3days' ? '3 días' : 'hoy';
+
+    // Mapa para agrupar ingredientes por nombre normalizado
+    const ingredientMap = new Map<string, { name: string; grams: number; meals: string[] }>();
+
+    // Helper para normalizar nombre
+    const normalize = (name: string) =>
+      name
+        .toLowerCase()
+        .trim()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/s$/, '');
+
+    // Helper para parsear cantidad a gramos
+    const parseGrams = (qty: string): number => {
+      if (!qty) return 100;
+      const num = parseFloat(qty.match(/[\d.]+/)?.[0] || '100');
+      const lower = qty.toLowerCase();
+      if (lower.includes('kg')) return num * 1000;
+      if (lower.includes('lb')) return num * 453.6;
+      if (lower.includes('oz')) return num * 28.35;
+      return num;
+    };
+
+    // Helper para formatear cantidad
+    const formatQty = (grams: number): string => {
+      if (grams >= 1000) return `${(grams / 1000).toFixed(1)}kg`;
+      return `${Math.round(grams)}g`;
+    };
+
+    // Procesar cada comida
+    for (const meal of meals) {
+      const mealName = meal.name || 'Comida';
+
+      // Ingredientes principales
+      const mainIngredients = (meal.ingredients as any[]) || [];
+
+      for (const ing of mainIngredients) {
+        if (!ing?.name || ing.name.trim().length < 2) continue;
+
+        const key = normalize(ing.name);
+        const grams = parseGrams(ing.quantity || '100g') * daysMultiplier;
+
+        if (ingredientMap.has(key)) {
+          const existing = ingredientMap.get(key)!;
+          existing.grams += grams;
+          if (!existing.meals.includes(mealName)) {
+            existing.meals.push(mealName);
+          }
+        } else {
+          ingredientMap.set(key, {
+            name: ing.name.charAt(0).toUpperCase() + ing.name.slice(1).toLowerCase(),
+            grams,
+            meals: [mealName],
+          });
+        }
+      }
+    }
+
+    // Convertir a array y ordenar por cantidad
+    const shoppingItems = Array.from(ingredientMap.values())
+      .sort((a, b) => b.grams - a.grams)
+      .map((item) => ({
+        name: item.name,
+        quantity: formatQty(item.grams),
+        usedIn: item.meals.join(', '),
+      }));
+
+    if (shoppingItems.length === 0) {
+      return {
+        success: true,
+        message: '🛒 Tus comidas no tienen ingredientes configurados aún.',
+        data: { shoppingList: [], totalItems: 0 },
+      };
+    }
+
+    // Formatear respuesta
+    const itemsText = shoppingItems
+      .map((item, i) => `${i + 1}. **${item.name}**: ${item.quantity}`)
+      .join('\n');
+
+    return {
+      success: true,
+      message: `🛒 **LISTA DE COMPRAS** (${periodLabel}):\n\n${itemsText}\n\n📊 **Total:** ${shoppingItems.length} ingredientes`,
+      data: {
+        shoppingList: shoppingItems,
+        totalItems: shoppingItems.length,
+        period,
+        periodLabel,
+      },
+    };
+  } catch (error) {
+    console.error('planGetShoppingList error:', error);
+    return { success: false, message: 'Error al generar la lista de compras.' };
+  }
+}
+
+/**
  * Helper: Genera nombre inteligente de comida basado en posición y total
  */
 function getSmartMealName(index: number, total: number): string {
@@ -8467,6 +8605,20 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     description:
       'Obtiene todas las comidas del día. Usa cuando pregunte "qué tengo de comer hoy", "muéstrame mis comidas", "cuál es mi plan de hoy".',
     parameters: {},
+    requiredParams: [],
+  },
+  {
+    name: 'PLAN_GET_SHOPPING_LIST',
+    description:
+      'Genera una lista de compras con todos los ingredientes necesarios. Usa cuando pregunte "qué necesito comprar", "dame mi lista de compras", "qué ingredientes necesito", "qué tengo que comprar para la semana".',
+    parameters: {
+      period: {
+        type: 'string',
+        description:
+          'Periodo para calcular: "today" (hoy), "3days" (3 días), "week" (semana). Default: "today"',
+        required: false,
+      },
+    },
     requiredParams: [],
   },
   // ============================================================================

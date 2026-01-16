@@ -256,6 +256,7 @@ CREATE TABLE IF NOT EXISTS public.meals (
   is_completed BOOLEAN DEFAULT false,
   completed_at TIMESTAMPTZ,
   position INTEGER DEFAULT 0,
+  selected_option INTEGER DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
