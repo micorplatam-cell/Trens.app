@@ -2160,13 +2160,13 @@ function PlanScreen() {
           {/* Timeline Line - Premium Savage Line - Solo dentro del contenedor de items */}
           {timeline.length > 0 && (
             <View
-              className="absolute left-[18px] top-0 bottom-0 w-[2px]"
+              className="absolute left-[18px] top-0 bottom-0 w-[2.5px] rounded-full"
               style={{
-                backgroundColor: 'rgba(220, 38, 38, 0.15)',
+                backgroundColor: 'rgba(220, 38, 38, 0.25)',
                 shadowColor: '#DC2626',
                 shadowOffset: { width: 0, height: 0 },
-                shadowOpacity: 0.3,
-                shadowRadius: 4,
+                shadowOpacity: 0.4,
+                shadowRadius: 6,
               }}
             />
           )}
@@ -2177,15 +2177,15 @@ function PlanScreen() {
               <View
                 className="w-20 h-20 rounded-2xl items-center justify-center mb-4"
                 style={{
-                  backgroundColor: 'rgba(220, 38, 38, 0.08)',
+                  backgroundColor: 'rgba(220, 38, 38, 0.12)',
                   borderWidth: 1,
-                  borderColor: 'rgba(220, 38, 38, 0.15)',
+                  borderColor: 'rgba(220, 38, 38, 0.25)',
                 }}
               >
                 <Plus size={32} color="#DC2626" />
               </View>
               <Text className="text-white font-bold text-lg mb-1">Sin comidas configuradas</Text>
-              <Text className="text-zinc-600 text-sm text-center font-mono max-w-[240px]">
+              <Text className="text-zinc-400 text-sm text-center font-mono max-w-[240px]">
                 Agrega tu primera comida para comenzar tu plan metabólico
               </Text>
             </View>
@@ -2356,27 +2356,27 @@ function PlanScreen() {
           }}
           className="w-full py-5 mt-6 mb-28 rounded-2xl active:scale-[0.98]"
           style={{
-            backgroundColor: 'rgba(220, 38, 38, 0.05)',
+            backgroundColor: 'rgba(39, 39, 42, 0.4)',
             borderWidth: 1.5,
             borderStyle: 'dashed',
-            borderColor: 'rgba(220, 38, 38, 0.3)',
+            borderColor: 'rgba(220, 38, 38, 0.4)',
             shadowColor: '#DC2626',
             shadowOffset: { width: 0, height: 0 },
-            shadowOpacity: 0.1,
-            shadowRadius: 20,
+            shadowOpacity: 0.15,
+            shadowRadius: 24,
           }}
         >
           <View className="items-center">
             <View
               className="w-12 h-12 rounded-xl items-center justify-center mb-2"
-              style={{ backgroundColor: 'rgba(220, 38, 38, 0.1)' }}
+              style={{ backgroundColor: 'rgba(220, 38, 38, 0.15)' }}
             >
               <Plus size={24} color="#DC2626" />
             </View>
             <Text className="text-savage-red font-bold tracking-widest text-sm">
               AGREGAR COMIDA
             </Text>
-            <Text className="text-zinc-700 text-[10px] font-mono mt-1">
+            <Text className="text-zinc-500 text-[10px] font-mono mt-1">
               Nueva comida en tu plan
             </Text>
           </View>

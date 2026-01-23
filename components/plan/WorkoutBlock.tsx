@@ -120,13 +120,13 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index: _index, on
   return (
     <Pressable onPress={onPress} className="mr-3 items-center active:scale-95">
       {/* Thumbnail */}
-      <View className="w-20 h-20 bg-zinc-900 rounded-xl items-center justify-center border-2 border-red-500/30 overflow-hidden">
+      <View className="w-20 h-20 bg-zinc-800 rounded-xl items-center justify-center border-2 border-red-500/40 overflow-hidden">
         {hasImage ? (
           <Image source={{ uri: exercise.imageUrl }} className="w-full h-full" resizeMode="cover" />
         ) : hasVideo ? (
           // Para videos sin imagen, mostrar placeholder con icono de play
           // Esto evita cargar VideoPlayer solo para thumbnail
-          <View className="items-center justify-center w-full h-full bg-zinc-800">
+          <View className="items-center justify-center w-full h-full bg-zinc-700">
             <View className="absolute">
               <Dumbbell size={24} color="#DC2626" />
             </View>
@@ -142,7 +142,7 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index: _index, on
       </View>
       {/* Exercise Name */}
       <Text
-        className="text-zinc-400 text-[10px] text-center mt-1.5 font-medium w-20"
+        className="text-zinc-300 text-[10px] text-center mt-1.5 font-medium w-20"
         numberOfLines={2}
       >
         {exercise.name}
@@ -213,32 +213,32 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
       <View className="mb-3 ml-6">
         {/* Timeline dot for workout */}
         <View
-          className="absolute -left-[14px] top-5 w-4 h-4 rounded-full border-2 border-black z-10"
+          className="absolute -left-[14px] top-5 w-4 h-4 rounded-full border-2 border-zinc-900 z-10"
           style={{
             backgroundColor: '#DC2626',
             shadowColor: '#DC2626',
             shadowOffset: { width: 0, height: 0 },
             shadowOpacity: 1,
-            shadowRadius: 8,
+            shadowRadius: 10,
           }}
         />
         <View
           className="rounded-2xl px-4 py-4 flex-row items-center justify-between"
           style={{
-            backgroundColor: '#0A0505',
+            backgroundColor: 'rgba(39, 39, 42, 0.7)',
             borderWidth: 1.5,
-            borderColor: 'rgba(220, 38, 38, 0.3)',
+            borderColor: 'rgba(220, 38, 38, 0.4)',
             shadowColor: '#DC2626',
             shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.2,
-            shadowRadius: 16,
-            elevation: 8,
+            shadowOpacity: 0.25,
+            shadowRadius: 20,
+            elevation: 10,
           }}
         >
           <View className="flex-row items-center gap-3">
             <View
               className="w-10 h-10 rounded-xl items-center justify-center"
-              style={{ backgroundColor: 'rgba(220, 38, 38, 0.15)' }}
+              style={{ backgroundColor: 'rgba(220, 38, 38, 0.2)' }}
             >
               <Dumbbell size={18} color="#DC2626" />
             </View>
@@ -253,7 +253,7 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
           </View>
           <View
             className="px-3 py-2 rounded-xl"
-            style={{ backgroundColor: 'rgba(220, 38, 38, 0.1)' }}
+            style={{ backgroundColor: 'rgba(220, 38, 38, 0.15)' }}
           >
             <Text className="text-savage-red text-xs font-mono font-bold">
               {data.exercises?.length || 0} ejercicios
@@ -356,26 +356,26 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
 
       {/* Timeline dot - Premium workout marker */}
       <View
-        className="absolute -left-[14px] top-6 w-4 h-4 rounded-full border-2 border-black z-10"
+        className="absolute -left-[14px] top-6 w-4 h-4 rounded-full border-2 border-zinc-900 z-10"
         style={{
           backgroundColor: '#DC2626',
           shadowColor: '#DC2626',
           shadowOffset: { width: 0, height: 0 },
           shadowOpacity: 1,
-          shadowRadius: 8,
+          shadowRadius: 10,
         }}
       />
 
       <View
         className="rounded-2xl overflow-hidden"
         style={{
-          backgroundColor: '#0A0A0A',
+          backgroundColor: 'rgba(24, 24, 27, 0.95)',
           borderWidth: 1,
-          borderColor: 'rgba(220, 38, 38, 0.2)',
+          borderColor: 'rgba(220, 38, 38, 0.3)',
           shadowColor: '#DC2626',
           shadowOffset: { width: 0, height: 4 },
-          shadowOpacity: 0.15,
-          shadowRadius: 20,
+          shadowOpacity: 0.2,
+          shadowRadius: 24,
         }}
       >
         {/* Control Handle - Premium - ZONA ARRASTRABLE */}
@@ -392,9 +392,9 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
               alignItems: 'center',
               padding: '12px 16px',
               backgroundColor: dragHandleProps?.isDragging
-                ? 'rgba(220, 38, 38, 0.15)'
-                : 'rgba(220, 38, 38, 0.05)',
-              borderBottom: '1px solid rgba(220, 38, 38, 0.1)',
+                ? 'rgba(220, 38, 38, 0.2)'
+                : 'rgba(39, 39, 42, 0.6)',
+              borderBottom: '1px solid rgba(220, 38, 38, 0.2)',
               transition: 'background-color 0.2s ease',
             }}
           >
@@ -433,9 +433,9 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
             <View
               className="flex-row justify-between items-center px-4 py-3"
               style={{
-                backgroundColor: 'rgba(220, 38, 38, 0.05)',
+                backgroundColor: 'rgba(39, 39, 42, 0.6)',
                 borderBottomWidth: 1,
-                borderBottomColor: 'rgba(220, 38, 38, 0.1)',
+                borderBottomColor: 'rgba(220, 38, 38, 0.2)',
               }}
             >
               <View className="flex-row gap-2">
@@ -473,9 +473,9 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
           <View
             className="flex-row justify-between items-center px-4 py-3"
             style={{
-              backgroundColor: 'rgba(220, 38, 38, 0.05)',
+              backgroundColor: 'rgba(39, 39, 42, 0.6)',
               borderBottomWidth: 1,
-              borderBottomColor: 'rgba(220, 38, 38, 0.1)',
+              borderBottomColor: 'rgba(220, 38, 38, 0.2)',
             }}
           >
             <View className="flex-row gap-2">
@@ -518,17 +518,17 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
           <Pressable
             onPress={togglePre}
             className="flex-row items-center gap-3 p-3 rounded-xl active:scale-[0.99]"
-            style={{ backgroundColor: 'rgba(220, 38, 38, 0.06)' }}
+            style={{ backgroundColor: 'rgba(39, 39, 42, 0.5)' }}
           >
             <View
               className="w-10 h-10 rounded-xl items-center justify-center"
-              style={{ backgroundColor: 'rgba(220, 38, 38, 0.15)' }}
+              style={{ backgroundColor: 'rgba(220, 38, 38, 0.2)' }}
             >
               <Zap size={18} color="#DC2626" />
             </View>
             <View className="flex-1">
               <Text className="text-savage-red font-bold text-xs tracking-wide">PRE-WORKOUT</Text>
-              <Text className="text-zinc-500 text-[11px] mt-0.5" numberOfLines={1}>
+              <Text className="text-zinc-400 text-[11px] mt-0.5" numberOfLines={1}>
                 {data.preStack.length > 0
                   ? data.preStack.map((i) => i.name).join(', ')
                   : 'Sin suplementos configurados'}
@@ -542,25 +542,25 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
           {/* PRE Expanded Detail */}
           <Animated.View
             className="overflow-hidden rounded-xl mx-1 mt-2"
-            style={[preExpandedStyle, { backgroundColor: 'rgba(220, 38, 38, 0.03)' }]}
+            style={[preExpandedStyle, { backgroundColor: 'rgba(39, 39, 42, 0.3)' }]}
           >
             <View className="p-3">
               {data.preStack.map((item) => (
                 <View
                   key={item.id}
                   className="flex-row items-center gap-3 p-3 rounded-xl mb-2"
-                  style={{ backgroundColor: 'rgba(0, 0, 0, 0.3)' }}
+                  style={{ backgroundColor: 'rgba(24, 24, 27, 0.6)' }}
                 >
-                  <View className="bg-red-500/20 p-1.5 rounded">
+                  <View className="bg-red-500/25 p-1.5 rounded">
                     {getTypeIcon(item.type, '#DC2626')}
                   </View>
                   <View className="flex-1">
                     <Text className="text-white text-sm font-medium">{item.name}</Text>
-                    <Text className="text-savage-red/70 text-xs font-mono">{item.dose}</Text>
+                    <Text className="text-savage-red text-xs font-mono">{item.dose}</Text>
                   </View>
                   {item.notes && (
                     <Text
-                      className="text-zinc-600 text-[10px] italic max-w-[80px]"
+                      className="text-zinc-500 text-[10px] italic max-w-[80px]"
                       numberOfLines={1}
                     >
                       {item.notes}
@@ -569,7 +569,7 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
                 </View>
               ))}
               {data.preStack.length === 0 && (
-                <Text className="text-zinc-700 text-xs text-center py-3">
+                <Text className="text-zinc-500 text-xs text-center py-3">
                   Sin suplementos pre-entreno
                 </Text>
               )}
@@ -582,10 +582,10 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
           <View
             className="my-4 py-4 -mx-4 px-4"
             style={{
-              backgroundColor: '#050505',
+              backgroundColor: 'rgba(24, 24, 27, 0.6)',
               borderTopWidth: 1,
               borderBottomWidth: 1,
-              borderColor: 'rgba(220, 38, 38, 0.1)',
+              borderColor: 'rgba(220, 38, 38, 0.15)',
             }}
           >
             {/* Workout time estimation */}
@@ -704,17 +704,17 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
           <Pressable
             onPress={togglePost}
             className="flex-row items-center gap-3 p-3 rounded-xl active:scale-[0.99]"
-            style={{ backgroundColor: 'rgba(34, 197, 94, 0.06)' }}
+            style={{ backgroundColor: 'rgba(39, 39, 42, 0.5)' }}
           >
             <View
               className="w-10 h-10 rounded-xl items-center justify-center"
-              style={{ backgroundColor: 'rgba(34, 197, 94, 0.15)' }}
+              style={{ backgroundColor: 'rgba(34, 197, 94, 0.2)' }}
             >
               <Flame size={18} color="#22C55E" />
             </View>
             <View className="flex-1">
               <Text className="text-green-500 font-bold text-xs tracking-wide">POST-WORKOUT</Text>
-              <Text className="text-zinc-500 text-[11px] mt-0.5" numberOfLines={1}>
+              <Text className="text-zinc-400 text-[11px] mt-0.5" numberOfLines={1}>
                 {data.postStack.length > 0
                   ? data.postStack.map((i) => i.name).join(', ')
                   : 'Sin suplementos configurados'}
@@ -728,28 +728,28 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
           {/* POST Expanded Detail */}
           <Animated.View
             className="overflow-hidden rounded-xl mx-1 mt-2"
-            style={[postExpandedStyle, { backgroundColor: 'rgba(34, 197, 94, 0.03)' }]}
+            style={[postExpandedStyle, { backgroundColor: 'rgba(39, 39, 42, 0.3)' }]}
           >
             <View className="p-3">
               {data.postStack.map((item) => (
                 <View
                   key={item.id}
                   className="flex-row items-center gap-3 p-3 rounded-xl mb-2"
-                  style={{ backgroundColor: 'rgba(0, 0, 0, 0.3)' }}
+                  style={{ backgroundColor: 'rgba(24, 24, 27, 0.6)' }}
                 >
                   <View
                     className="w-8 h-8 rounded-lg items-center justify-center"
-                    style={{ backgroundColor: 'rgba(34, 197, 94, 0.2)' }}
+                    style={{ backgroundColor: 'rgba(34, 197, 94, 0.25)' }}
                   >
                     {getTypeIcon(item.type, '#22C55E')}
                   </View>
                   <View className="flex-1">
                     <Text className="text-white text-sm font-medium">{item.name}</Text>
-                    <Text className="text-green-500/70 text-xs font-mono">{item.dose}</Text>
+                    <Text className="text-green-500 text-xs font-mono">{item.dose}</Text>
                   </View>
                   {item.notes && (
                     <Text
-                      className="text-zinc-600 text-[10px] italic max-w-[80px]"
+                      className="text-zinc-500 text-[10px] italic max-w-[80px]"
                       numberOfLines={1}
                     >
                       {item.notes}
@@ -758,7 +758,7 @@ export const WorkoutBlock: React.FC<WorkoutBlockProps> = ({
                 </View>
               ))}
               {data.postStack.length === 0 && (
-                <Text className="text-zinc-700 text-xs text-center py-3">
+                <Text className="text-zinc-500 text-xs text-center py-3">
                   Sin suplementos post-entreno
                 </Text>
               )}

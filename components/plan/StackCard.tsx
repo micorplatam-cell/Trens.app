@@ -139,37 +139,37 @@ export const StackCard: React.FC<StackCardProps> = ({
       <View className="mb-3 ml-6 relative">
         {/* Timeline dot */}
         <View
-          className="absolute -left-[14px] top-4 w-3 h-3 rounded-full border-2 border-black"
+          className="absolute -left-[14px] top-4 w-3.5 h-3.5 rounded-full border-2 border-zinc-900"
           style={{
             backgroundColor: '#A855F7',
             shadowColor: '#A855F7',
             shadowOffset: { width: 0, height: 0 },
-            shadowOpacity: 0.6,
-            shadowRadius: 4,
+            shadowOpacity: 0.8,
+            shadowRadius: 6,
           }}
         />
         <View
           className="rounded-xl px-4 py-3 flex-row items-center justify-between"
           style={{
-            backgroundColor: 'rgba(168, 85, 247, 0.05)',
+            backgroundColor: 'rgba(39, 39, 42, 0.6)',
             borderWidth: 1,
-            borderColor: 'rgba(168, 85, 247, 0.2)',
+            borderColor: 'rgba(168, 85, 247, 0.35)',
           }}
         >
           <View className="flex-1 mr-3">
             <View className="flex-row items-center gap-2">
               <Pill size={12} color="#A855F7" />
-              <Text className="text-purple-400 text-xs font-bold tracking-wider">STACK</Text>
+              <Text className="text-purple-300 text-xs font-bold tracking-wider">STACK</Text>
             </View>
-            <Text className="text-zinc-500 text-xs mt-1" numberOfLines={1}>
+            <Text className="text-zinc-400 text-xs mt-1" numberOfLines={1}>
               {itemNames || 'Sin items'}
             </Text>
           </View>
           <View
             className="px-3 py-1.5 rounded-lg"
-            style={{ backgroundColor: 'rgba(168, 85, 247, 0.15)' }}
+            style={{ backgroundColor: 'rgba(168, 85, 247, 0.2)' }}
           >
-            <Text className="text-purple-400 text-xs font-bold font-mono">
+            <Text className="text-purple-300 text-xs font-bold font-mono">
               {formatTimeToAMPM(stack.time)}
             </Text>
           </View>
@@ -188,13 +188,13 @@ export const StackCard: React.FC<StackCardProps> = ({
 
       {/* Timeline marker - Premium glow */}
       <View
-        className="absolute -left-[14px] top-4 w-3 h-3 rounded-full border-2 border-black z-10"
+        className="absolute -left-[14px] top-4 w-3.5 h-3.5 rounded-full border-2 border-zinc-900 z-10"
         style={{
           backgroundColor: '#A855F7',
           shadowColor: '#A855F7',
           shadowOffset: { width: 0, height: 0 },
-          shadowOpacity: 0.8,
-          shadowRadius: 6,
+          shadowOpacity: 0.9,
+          shadowRadius: 8,
         }}
       />
 
@@ -202,22 +202,22 @@ export const StackCard: React.FC<StackCardProps> = ({
         <View
           className="rounded-2xl overflow-hidden"
           style={{
-            backgroundColor: '#0A0A0A',
+            backgroundColor: 'rgba(24, 24, 27, 0.95)',
             borderWidth: 1,
-            borderColor: 'rgba(168, 85, 247, 0.15)',
+            borderColor: 'rgba(168, 85, 247, 0.25)',
             shadowColor: '#A855F7',
             shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.08,
-            shadowRadius: 12,
+            shadowOpacity: 0.12,
+            shadowRadius: 16,
           }}
         >
           {/* Header */}
           <View
             className="p-4"
             style={{
-              backgroundColor: 'rgba(168, 85, 247, 0.03)',
+              backgroundColor: 'rgba(39, 39, 42, 0.6)',
               borderBottomWidth: expanded ? 1 : 0,
-              borderBottomColor: 'rgba(168, 85, 247, 0.1)',
+              borderBottomColor: 'rgba(168, 85, 247, 0.2)',
             }}
           >
             <View className="flex-row justify-between items-center">
@@ -225,13 +225,13 @@ export const StackCard: React.FC<StackCardProps> = ({
               <View className="flex-row items-center gap-3">
                 <View
                   className="w-10 h-10 rounded-xl items-center justify-center"
-                  style={{ backgroundColor: 'rgba(168, 85, 247, 0.1)' }}
+                  style={{ backgroundColor: 'rgba(168, 85, 247, 0.15)' }}
                 >
                   <Pill size={18} color="#A855F7" />
                 </View>
                 <View>
                   <Text className="text-white font-bold text-sm tracking-wide">STACK</Text>
-                  <Text className="text-zinc-600 text-[10px] font-mono">
+                  <Text className="text-zinc-400 text-[10px] font-mono">
                     {stack.items.length} SUPLEMENTO{stack.items.length !== 1 ? 'S' : ''}
                   </Text>
                 </View>
@@ -243,13 +243,13 @@ export const StackCard: React.FC<StackCardProps> = ({
                   onPress={handleTimePress}
                   className="flex-row items-center gap-1.5 px-3 py-2 rounded-xl active:scale-95"
                   style={{
-                    backgroundColor: 'rgba(168, 85, 247, 0.08)',
+                    backgroundColor: 'rgba(168, 85, 247, 0.15)',
                     borderWidth: 1,
-                    borderColor: 'rgba(168, 85, 247, 0.2)',
+                    borderColor: 'rgba(168, 85, 247, 0.35)',
                   }}
                 >
                   <Clock size={12} color="#A855F7" />
-                  <Text className="text-purple-400 text-xs font-mono font-bold">
+                  <Text className="text-purple-300 text-xs font-mono font-bold">
                     {formatTimeToAMPM(stack.time)}
                   </Text>
                 </Pressable>
@@ -266,18 +266,18 @@ export const StackCard: React.FC<StackCardProps> = ({
                   <View
                     key={item.id}
                     className="flex-row items-center gap-1.5 px-2 py-1 rounded-lg"
-                    style={{ backgroundColor: 'rgba(168, 85, 247, 0.08)' }}
+                    style={{ backgroundColor: 'rgba(168, 85, 247, 0.12)' }}
                   >
                     {getTypeIcon(item.type, 12)}
-                    <Text className="text-zinc-400 text-[11px]">{item.name}</Text>
+                    <Text className="text-zinc-300 text-[11px]">{item.name}</Text>
                   </View>
                 ))}
                 {stack.items.length > 4 && (
                   <View
                     className="px-2 py-1 rounded-lg"
-                    style={{ backgroundColor: 'rgba(168, 85, 247, 0.08)' }}
+                    style={{ backgroundColor: 'rgba(168, 85, 247, 0.12)' }}
                   >
-                    <Text className="text-purple-400 text-[11px]">+{stack.items.length - 4}</Text>
+                    <Text className="text-purple-300 text-[11px]">+{stack.items.length - 4}</Text>
                   </View>
                 )}
               </View>
@@ -293,29 +293,29 @@ export const StackCard: React.FC<StackCardProps> = ({
                   className="flex-row justify-between items-center py-3"
                   style={{
                     borderBottomWidth: idx < stack.items.length - 1 ? 1 : 0,
-                    borderBottomColor: 'rgba(255, 255, 255, 0.03)',
+                    borderBottomColor: 'rgba(168, 85, 247, 0.1)',
                   }}
                 >
                   <View className="flex-row items-center gap-3 flex-1">
                     <View
                       className="w-8 h-8 rounded-lg items-center justify-center"
-                      style={{ backgroundColor: 'rgba(168, 85, 247, 0.1)' }}
+                      style={{ backgroundColor: 'rgba(168, 85, 247, 0.15)' }}
                     >
                       {getTypeIcon(item.type, 16)}
                     </View>
                     <View className="flex-1">
-                      <Text className="text-zinc-200 text-sm font-medium">{item.name}</Text>
+                      <Text className="text-white text-sm font-medium">{item.name}</Text>
                       {item.notes && (
-                        <Text className="text-purple-400/60 text-[10px] mt-0.5">{item.notes}</Text>
+                        <Text className="text-purple-300/70 text-[10px] mt-0.5">{item.notes}</Text>
                       )}
                     </View>
                   </View>
                   <View className="flex-row items-center gap-3">
                     <View
                       className="px-2.5 py-1 rounded-lg"
-                      style={{ backgroundColor: 'rgba(168, 85, 247, 0.1)' }}
+                      style={{ backgroundColor: 'rgba(168, 85, 247, 0.15)' }}
                     >
-                      <Text className="text-purple-300 font-mono text-xs font-bold">
+                      <Text className="text-purple-200 font-mono text-xs font-bold">
                         {item.dose}
                       </Text>
                     </View>
@@ -323,7 +323,7 @@ export const StackCard: React.FC<StackCardProps> = ({
                       <Pressable
                         onPress={() => handleItemDelete(item.id)}
                         className="p-2 rounded-lg active:scale-95"
-                        style={{ backgroundColor: 'rgba(239, 68, 68, 0.08)' }}
+                        style={{ backgroundColor: 'rgba(239, 68, 68, 0.12)' }}
                       >
                         <Trash2 size={14} color="#EF4444" />
                       </Pressable>
